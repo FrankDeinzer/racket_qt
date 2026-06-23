@@ -1,0 +1,6 @@
+[submodule "third_party/gui"]
+	path = third_party/gui
+	url = https://github.com/FrankDeinzer/racket_gui.git
+[submodule "third_party/draw"]
+	path = third_party/draw
+	url = https://github.com/FrankDeinzer/racket_draw.git
