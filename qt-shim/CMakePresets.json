@@ -9,7 +9,7 @@
         "lhs": "${hostSystemName}",
         "rhs": "Windows"
       },
-      "generator": "Visual Studio 17 2022",
+      "generator": "Visual Studio 18 2026",
       "binaryDir": "${sourceDir}/build/windows-x64",
       "cacheVariables": {
         "CMAKE_PREFIX_PATH": "C:/Qt/6.11.0/msvc2022_64"

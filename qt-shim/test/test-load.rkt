@@ -1,9 +1,12 @@
 #lang racket/base
-(require ffi/unsafe)
+(require ffi/unsafe
+         racket/path)
+
+(define here (path-only (path->complete-path (find-system-path 'run-file))))
 
 (define shim-path
   (path->string
-   (build-path (current-directory) "build" "windows-x64" "Debug" "racketqtshim.dll")))
+   (simplify-path (build-path here ".." "build" "windows-x64" "Debug" "racketqtshim.dll"))))
 
 (printf "Loading: ~a\n" shim-path)
 
