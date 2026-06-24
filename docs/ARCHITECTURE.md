@@ -245,25 +245,59 @@ third_party/gui/gui-lib/mred/private/wx/qt/
 
 ---
 
-## 8. Offene Fragen
+## 8. Glue-Layer-Regeln (gelernt in Checkpoint C)
+
+Siehe auch `docs/HACKING.md` für vollständige Diagnose-Anleitung.
+
+### `public*` vs. `override*`
+
+Rackets Glue-Layer fügen Methoden via `public*` oder `override*` hinzu:
+
+- **`public*`** → Methode wird von dieser Schicht neu definiert.
+  Platform-Klasse darf sie **nicht** enthalten (→ `method already defined`).
+- **`override*`** → Methode wird in einer tieferen Schicht erwartet.
+  Platform-Klasse **muss** sie enthalten (→ `no method to override`).
+
+### Frame-Registrierung
+
+`frame%.direct-show` muss `(register-frame-shown this on?)` aufrufen.
+Ohne das sieht der Eventspace keine offenen Fenster und beendet das Programm sofort.
+
+### backing-dc%-Kontrakt
+
+`qt-dc%.queue-backing-flush` muss explizit `(void)` zurückgeben.
+`on-backing-flush` gibt `#t` zurück; dieser Wert würde `resume-flush`s Kontrakt `(->m void?)` brechen.
+
+---
+
+## 9. Checkpoint-Status
+
+| Checkpoint | Status | Commit |
+|-----------|--------|--------|
+| A – Stub-Shim lädt via FFI | ✅ | `e7b3f43` |
+| B – Architektur dokumentiert | ✅ | `0d69f07` |
+| C – frame% + canvas% + button% laufend | ✅ 2026-06-24 | gui `04cf9305`, umbrella `b846cf5` |
+
+---
+
+## 10. Offene Fragen / Folgeaufgaben
 
 1. **Wakeup-Mechanismus (plattformspezifisch):** Für richtiges Wakeup aus Qt's
    Event-Dispatcher braucht Win32 `QAbstractEventDispatcher::wakeUp()` →
    `PostMessage(HWND_BROADCAST, WM_NULL, …)` und Linux/macOS einen Pipe-FD.
    Für den Spike: 50ms-Poll-Loop reicht, echter Wakeup ist Folgeaufgabe.
 
-2. **`shim_canvas_create` Layout:** Wie ordnet das Shim Canvas und Button im
-   QMainWindow an? Einfachste Lösung: `QVBoxLayout` mit fester Größe.
+2. **`shim_canvas_create` Layout:** Canvas und Button im QMainWindow via
+   `QVBoxLayout` angeordnet — fixe Aufteilung. Echtes Layout (Gewichte, Stretching)
+   ist Folgeaufgabe.
 
 3. **Mehrere Eventspaces:** Spike nutzt nur einen. Mehrere Eventspaces haben je
    eigene Threads – Qt ist nicht thread-safe; alle Qt-Aufrufe müssen auf dem
    Racket-Hauptthread bleiben (garantiert durch die pump-basierte Architektur).
 
-4. **`as-entry` vs. `atomically`:** win32 nutzt `as-entry` (aus `lock.rkt`) für
-   `dispatch-all-ready`. Für Qt soll `atomically` (aus `ffi/unsafe/atomic`) genutzt
-   werden, analog zu Cocoa. Muss verifiziert werden, dass `as-entry` keinen
-   Vorteil bietet.
+4. **HiDPI:** Aktuell auf `QT_SCALE_FACTOR=1` gepinnt. Echtes HiDPI erfordert
+   `get-backing-size` mit DPR-Skalierung und entsprechend skalierten Cairo-Surface.
 
-5. **Stub-Implementierungen:** Die 40+ anderen platform-values (`choice%`, `list-box%`,
-   etc.) müssen als Error-Stubs vorhanden sein, damit platform.rkt die Exports
-   vollständig liefert.
+5. **Weitere Widget-Klassen:** `choice%`, `list-box%`, `check-box%`, `message%`,
+   `dialog%` usw. sind als Error-Stubs vorhanden. Anleitung zur Implementierung
+   in `docs/HACKING.md §5`.
