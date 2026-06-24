@@ -189,7 +189,20 @@ resume-flush: broke its own contract
 
 ---
 
-## 7. Shim-Konventionen
+## 7. `refresh` vs. `shim_canvas_request_repaint`
+
+Diese beiden Operationen sind nicht dasselbe:
+
+| | `queue-paint` / `refresh` | `shim_canvas_request_repaint` |
+|---|---|---|
+| Was | Führt Rackets paint-callback neu aus, updated Backing-Bitmap, blittet dann | Sagt Qt: „male dein Widget neu" (blittet nur die vorhandene Backing-Bitmap) |
+| Wann | Wenn sich der Inhalt geändert hat (z. B. Klick-Zähler) | Nur nach einem abgeschlossenen Blit in `queue-backing-flush` |
+
+**Regel:** `base-canvas%::refresh` muss `(send this queue-paint)` aufrufen, nicht direkt `shim_canvas_request_repaint`. Sonst sieht der Nutzer immer das alte Bild, egal wie oft er `(send canvas refresh)` aufruft.
+
+---
+
+## 8. Shim-Konventionen
 
 - Alle Shim-Funktionen sind in `utils.rkt` via FFI gebunden.
 - Der Shim-Handle (`void*`) wird im `handle`-Feld von `window%` gespeichert.
