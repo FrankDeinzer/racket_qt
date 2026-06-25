@@ -11,7 +11,9 @@ Qt Widgets backend ("wx/qt/") für `racket/gui`. Additiver Spike: aktiviert via 
 5. **`frame%.direct-show` ruft `register-frame-shown`** auf — sonst beendet sich das Programm sofort, weil der Eventspace keine offenen Fenster sieht.
 6. **Zwei-Repo-Commits:** Änderungen an `wx/qt/` landen im gui-Submodul (`third_party/gui`, Branch `qt-backend`), dann Submodul-Zeiger im Umbrella (`main`) nachziehen.
 
-## Umgebung (Windows-Entwicklungsmaschine)
+## Umgebung
+
+### Windows (primäre Entwicklungsmaschine)
 
 | | |
 |---|---|
@@ -20,19 +22,43 @@ Qt Widgets backend ("wx/qt/") für `racket/gui`. Additiver Spike: aktiviert via 
 | CMake | 4.2.3, Generator "Visual Studio 17 2022" |
 | Preset | `windows-x64` → `qt-shim/build/windows-x64` |
 
+### macOS arm64
+
+| | |
+|---|---|
+| Racket | v9.2 [cs], arm64 (Homebrew) |
+| Qt | 6.11.0, `~/Qt/6.11.0/macos` |
+| CMake | Ninja, Generator "Ninja" |
+| Preset | `macos-arm64` → `qt-shim/build/macos-arm64` |
+
 ## Build
 
+**Windows:**
 ```powershell
 cmake --preset windows-x64 -S qt-shim
 cmake --build qt-shim/build/windows-x64 --config Debug
 ```
 
+**macOS:**
+```bash
+cmake --preset macos-arm64 -S qt-shim
+cmake --build qt-shim/build/macos-arm64
+```
+
 ## Run / Smoke-Test
 
+**Windows:**
 ```powershell
 $env:PLT_QT = "1"
 $env:PATH   = "C:\Qt\6.11.0\msvc2022_64\bin;" + $env:PATH
 racket examples/hello.rkt
+```
+
+**macOS:**
+```bash
+PLT_QT=1 racket -S third_party/gui/gui-lib -S third_party/draw/draw-lib examples/hello.rkt
+# Smoke tests:
+PLT_QT=1 racket -S third_party/gui/gui-lib -S third_party/draw/draw-lib -l raco -- test tests/smoke.rkt
 ```
 
 ## Aktueller Checkpoint-Status
@@ -43,12 +69,20 @@ racket examples/hello.rkt
 | B – Architektur dokumentiert | ✅ |
 | C – frame% + canvas% + button% laufend | ✅ 2026-06-24 |
 | **D – Eingabe-Rückgrat + Editor-Smoke** | **✅ 2026-06-25** |
+| **macOS Smoke** | **✅ 2026-06-25** |
 | E – Widget-Breite (dialog%, message%, …) | ⬜ |
 
 **Checkpoint D — erledigt:**
 - **D-0:** Layout-Refactor — `QVBoxLayout` raus, `shim_widget_set_geometry()` rein, `panel%` real
 - **D-1:** Maus/Tastatur/Fokus-Callbacks + `key-map.rkt` + Timer-Smoke + `examples/input.rkt`
 - **D-2:** `editor-canvas%` + `text%` tippen/selektieren/Caret blinkt ✅
+
+**macOS Smoke — erledigt:**
+- CMake `macos-arm64` Preset + Ninja Build funktioniert
+- Shim lädt via FFI (full absolute path inkl. `lib`-Prefix nötig)
+- `designate-root-frame` Stub für Racket 9.2 Kompatibilität
+- CPU-Spin-Fix: `shim_pump(0)` statt `shim_pump(10)` — verhindert CFRunLoopRunInMode-Konflikt mit Racket CS mach-port sleep
+- 3/3 Smoke-Tests pass; hello/input/editor laufen bei <5% Idle-CPU
 
 **Nächster Schritt: Checkpoint E** — Widget-Breite nach konkretem App-Bedarf.
 

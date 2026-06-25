@@ -6,7 +6,14 @@
 
 (define shim-path
   (path->string
-   (simplify-path (build-path here ".." "build" "windows-x64" "Debug" "racketqtshim.dll"))))
+   (simplify-path
+    (case (system-type 'os)
+      [(windows)
+       (build-path here ".." "build" "windows-x64" "Debug" "racketqtshim.dll")]
+      [(macosx)
+       (build-path here ".." "build" "macos-arm64" "libracketqtshim.dylib")]
+      [else
+       (build-path here ".." "build" "linux-x64" "libracketqtshim.so")]))))
 
 (printf "Loading: ~a\n" shim-path)
 

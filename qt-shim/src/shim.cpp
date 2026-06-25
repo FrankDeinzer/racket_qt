@@ -14,6 +14,7 @@
 #include <QEnterEvent>
 #include <cstdint>
 #include <cstring>
+#include <chrono>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -206,12 +207,25 @@ void shim_pump(int max_ms)
         s_app->processEvents(QEventLoop::AllEvents, max_ms);
 }
 
+// Returns elapsed microseconds for a single processEvents call.
+// Used for diagnostics only.
+long long shim_pump_us(int max_ms)
+{
+    if (!s_app) return 0;
+    auto t0 = std::chrono::steady_clock::now();
+    s_app->processEvents(QEventLoop::AllEvents, max_ms);
+    auto t1 = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+}
+
 int shim_events_pending(void)
 {
 #ifdef _WIN32
     return (GetQueueStatus(QS_ALLINPUT) != 0) ? 1 : 0;
 #else
-    return 1;
+    // On macOS/Linux, report no pending events so Racket's scheduler can
+    // sleep between pump-thread wakeups instead of spinning.
+    return 0;
 #endif
 }
 

@@ -27,9 +27,9 @@
       "binaryDir": "${sourceDir}/build/macos-arm64",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_PREFIX_PATH": "/usr/local/Qt/6.11.0/macos",
+        "CMAKE_PREFIX_PATH": "/Users/deinzer/Qt/6.11.0/macos",
         "CMAKE_OSX_ARCHITECTURES": "arm64",
-        "CMAKE_BUILD_RPATH": "/usr/local/Qt/6.11.0/macos/lib"
+        "CMAKE_BUILD_RPATH": "/Users/deinzer/Qt/6.11.0/macos/lib"
       }
     },
     {
@@ -44,9 +44,9 @@
       "binaryDir": "${sourceDir}/build/macos-x64",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_PREFIX_PATH": "/usr/local/Qt/6.11.0/macos",
+        "CMAKE_PREFIX_PATH": "/Users/deinzer/Qt/6.11.0/macos",
         "CMAKE_OSX_ARCHITECTURES": "x86_64",
-        "CMAKE_BUILD_RPATH": "/usr/local/Qt/6.11.0/macos/lib"
+        "CMAKE_BUILD_RPATH": "/Users/deinzer/Qt/6.11.0/macos/lib"
       }
     },
     {
