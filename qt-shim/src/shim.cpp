@@ -2,13 +2,16 @@
 #include <QMainWindow>
 #include <QWidget>
 #include <QPushButton>
-#include <QVBoxLayout>
 #include <QImage>
 #include <QPainter>
 #include <QResizeEvent>
 #include <QPaintEvent>
 #include <QShowEvent>
 #include <QCloseEvent>
+#include <QMouseEvent>
+#include <QKeyEvent>
+#include <QFocusEvent>
+#include <QEnterEvent>
 #include <cstdint>
 #include <cstring>
 
@@ -20,10 +23,16 @@ extern "C" {
 
 const char* shim_version(void)
 {
-    return "racketqtshim 0.1.0-spike";
+    return "racketqtshim 0.2.0";
 }
 
 typedef void (*shim_callback_t)(void* userdata);
+// Mouse: type(0=press,1=release,2=move,3=enter,4=leave), x, y, buttons(L=1,M=2,R=4), mods(Sh=1,Ct=2,Al=4,Me=8)
+typedef void (*shim_mouse_cb_t)(void* ud, int type, int x, int y, int buttons, int mods);
+// Key: type(0=press,1=release), Qt::Key, text char (unicode, 0 if none), mods
+typedef void (*shim_key_cb_t)(void* ud, int type, int key, int text_char, int mods);
+// Focus: gained(1=in, 0=out)
+typedef void (*shim_focus_cb_t)(void* ud, int gained);
 
 static int    s_argc = 0;
 static char** s_argv = nullptr;
@@ -36,11 +45,19 @@ public:
     QImage          backing;
     shim_callback_t expose_cb;
     void*           expose_ud;
+    shim_mouse_cb_t mouse_cb  = nullptr;
+    void*           mouse_ud  = nullptr;
+    shim_key_cb_t   key_cb    = nullptr;
+    void*           key_ud    = nullptr;
+    shim_focus_cb_t focus_cb  = nullptr;
+    void*           focus_ud  = nullptr;
 
     RacketCanvas(QWidget* parent, shim_callback_t cb, void* ud)
         : QWidget(parent), expose_cb(cb), expose_ud(ud)
     {
-        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        setMinimumSize(1, 1);
+        setFocusPolicy(Qt::StrongFocus);
+        setMouseTracking(true);
         backing = QImage(1, 1, QImage::Format_ARGB32_Premultiplied);
         backing.fill(Qt::white);
     }
@@ -61,6 +78,77 @@ protected:
         QWidget::showEvent(e);
         if (expose_cb) expose_cb(expose_ud);
     }
+
+    // ---- mouse ----------------------------------------------------------
+
+    static int encodeButtons(Qt::MouseButtons b) {
+        int r = 0;
+        if (b & Qt::LeftButton)   r |= 1;
+        if (b & Qt::MiddleButton) r |= 2;
+        if (b & Qt::RightButton)  r |= 4;
+        return r;
+    }
+    static int encodeMods(Qt::KeyboardModifiers m) {
+        int r = 0;
+        if (m & Qt::ShiftModifier)   r |= 1;
+        if (m & Qt::ControlModifier) r |= 2;
+        if (m & Qt::AltModifier)     r |= 4;
+        if (m & Qt::MetaModifier)    r |= 8;
+        return r;
+    }
+
+    void mousePressEvent(QMouseEvent* e) override {
+        if (mouse_cb)
+            mouse_cb(mouse_ud, 0, (int)e->position().x(), (int)e->position().y(),
+                     encodeButtons(e->buttons()), encodeMods(e->modifiers()));
+    }
+    void mouseReleaseEvent(QMouseEvent* e) override {
+        if (mouse_cb)
+            mouse_cb(mouse_ud, 1, (int)e->position().x(), (int)e->position().y(),
+                     encodeButtons(e->buttons()), encodeMods(e->modifiers()));
+    }
+    void mouseMoveEvent(QMouseEvent* e) override {
+        if (mouse_cb)
+            mouse_cb(mouse_ud, 2, (int)e->position().x(), (int)e->position().y(),
+                     encodeButtons(e->buttons()), encodeMods(e->modifiers()));
+    }
+    void enterEvent(QEnterEvent* e) override {
+        QWidget::enterEvent(e);
+        if (mouse_cb)
+            mouse_cb(mouse_ud, 3, (int)e->position().x(), (int)e->position().y(),
+                     0, 0);
+    }
+    void leaveEvent(QEvent* e) override {
+        QWidget::leaveEvent(e);
+        if (mouse_cb)
+            mouse_cb(mouse_ud, 4, 0, 0, 0, 0);
+    }
+
+    // ---- keyboard -------------------------------------------------------
+
+    void keyPressEvent(QKeyEvent* e) override {
+        if (key_cb) {
+            int tc = e->text().isEmpty() ? 0 : (int)e->text().at(0).unicode();
+            key_cb(key_ud, 0, e->key(), tc, encodeMods(e->modifiers()));
+        }
+    }
+    void keyReleaseEvent(QKeyEvent* e) override {
+        if (key_cb) {
+            int tc = e->text().isEmpty() ? 0 : (int)e->text().at(0).unicode();
+            key_cb(key_ud, 1, e->key(), tc, encodeMods(e->modifiers()));
+        }
+    }
+
+    // ---- focus ----------------------------------------------------------
+
+    void focusInEvent(QFocusEvent* e) override {
+        QWidget::focusInEvent(e);
+        if (focus_cb) focus_cb(focus_ud, 1);
+    }
+    void focusOutEvent(QFocusEvent* e) override {
+        QWidget::focusOutEvent(e);
+        if (focus_cb) focus_cb(focus_ud, 0);
+    }
 };
 
 // ---- RacketWindow -------------------------------------------------------
@@ -74,15 +162,9 @@ public:
         : QMainWindow(nullptr), close_cb(cb), close_ud(ud)
     {
         setAttribute(Qt::WA_DeleteOnClose, false);
-        QWidget* central = new QWidget(this);
-        QVBoxLayout* layout = new QVBoxLayout(central);
-        layout->setContentsMargins(4, 4, 4, 4);
-        layout->setSpacing(4);
-        setCentralWidget(central);
-    }
-
-    QLayout* contentLayout() {
-        return centralWidget()->layout();
+        // Plain content widget — Racket drives all child geometry via
+        // shim_widget_set_geometry; no Qt layout manager involved.
+        setCentralWidget(new QWidget(this));
     }
 
 protected:
@@ -157,17 +239,51 @@ void shim_window_destroy(void* win)
     delete static_cast<RacketWindow*>(win);
 }
 
+// Returns the central QWidget* that child widgets (canvas, button, panel)
+// should use as their Qt parent.
+void* shim_window_get_content_widget(void* win)
+{
+    return static_cast<RacketWindow*>(win)->centralWidget();
+}
+
+// ---- geometry -----------------------------------------------------------
+
+// Sets absolute position and size of any child QWidget.
+// Called by Racket's layout engine after it computes positions.
+void shim_widget_set_geometry(void* widget, int x, int y, int w, int h)
+{
+    static_cast<QWidget*>(widget)->setGeometry(x, y, w, h);
+}
+
 // ---- canvas -------------------------------------------------------------
 
-void* shim_canvas_create(void*           parent_win,
+void* shim_canvas_create(void*           parent_widget,
                          shim_callback_t expose_cb,
                          void*           ud)
 {
-    auto* rw     = static_cast<RacketWindow*>(parent_win);
-    auto* canvas = new RacketCanvas(nullptr, expose_cb, ud);
-    canvas->setMinimumSize(1, 1);
-    rw->contentLayout()->addWidget(canvas);
-    return canvas;
+    auto* parent = static_cast<QWidget*>(parent_widget);
+    return new RacketCanvas(parent, expose_cb, ud);
+}
+
+void shim_canvas_set_mouse_cb(void* canvas_ptr, shim_mouse_cb_t cb, void* ud)
+{
+    auto* c = static_cast<RacketCanvas*>(canvas_ptr);
+    c->mouse_cb = cb;
+    c->mouse_ud = ud;
+}
+
+void shim_canvas_set_key_cb(void* canvas_ptr, shim_key_cb_t cb, void* ud)
+{
+    auto* c = static_cast<RacketCanvas*>(canvas_ptr);
+    c->key_cb = cb;
+    c->key_ud = ud;
+}
+
+void shim_canvas_set_focus_cb(void* canvas_ptr, shim_focus_cb_t cb, void* ud)
+{
+    auto* c = static_cast<RacketCanvas*>(canvas_ptr);
+    c->focus_cb = cb;
+    c->focus_ud = ud;
 }
 
 void shim_canvas_blit_argb(void*          canvas_ptr,
@@ -213,16 +329,24 @@ void shim_canvas_destroy(void* canvas_ptr)
     delete static_cast<RacketCanvas*>(canvas_ptr);
 }
 
+// ---- panel --------------------------------------------------------------
+
+// Creates a plain container QWidget. Racket positions it via
+// shim_widget_set_geometry; children of the panel parent themselves here.
+void* shim_panel_create(void* parent_widget)
+{
+    return new QWidget(static_cast<QWidget*>(parent_widget));
+}
+
 // ---- button -------------------------------------------------------------
 
-void* shim_button_create(void*           parent_win,
+void* shim_button_create(void*           parent_widget,
                          const char*     label,
                          shim_callback_t click_cb,
                          void*           ud)
 {
-    auto* rw  = static_cast<RacketWindow*>(parent_win);
-    auto* btn = new QPushButton(QString::fromUtf8(label));
-    rw->contentLayout()->addWidget(btn);
+    auto* parent = static_cast<QWidget*>(parent_widget);
+    auto* btn = new QPushButton(QString::fromUtf8(label), parent);
     if (click_cb) {
         QObject::connect(btn, &QPushButton::clicked,
                          [click_cb, ud]() { click_cb(ud); });
