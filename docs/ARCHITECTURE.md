@@ -277,6 +277,9 @@ Ohne das sieht der Eventspace keine offenen Fenster und beendet das Programm sof
 | A – Stub-Shim lädt via FFI | ✅ | `e7b3f43` |
 | B – Architektur dokumentiert | ✅ | `0d69f07` |
 | C – frame% + canvas% + button% laufend | ✅ 2026-06-24 | gui `04cf9305`, umbrella `b846cf5` |
+| D-0 – Layout-Refactor (Racket-driven geometry, panel%) | ✅ 2026-06-25 | gui `878b3153`, umbrella `441a28c` |
+| D-1 – Eingabe-Rückgrat (mouse/key/focus, timer, raco test) | ✅ 2026-06-25 | gui `1c550006`, umbrella `d311d3d` |
+| D-2 – Editor-Smoke (editor-canvas% + text%) | ✅ 2026-06-25 | siehe D-2-Commit |
 
 ---
 

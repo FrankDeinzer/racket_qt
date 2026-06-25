@@ -260,6 +260,12 @@ void shim_widget_set_geometry(void* widget, int x, int y, int w, int h)
     static_cast<QWidget*>(widget)->setGeometry(x, y, w, h);
 }
 
+// Gives keyboard focus to a widget (called by editor-canvas% grab-caret).
+void shim_widget_set_focus(void* widget)
+{
+    static_cast<QWidget*>(widget)->setFocus();
+}
+
 // ---- canvas -------------------------------------------------------------
 
 void* shim_canvas_create(void*           parent_widget,

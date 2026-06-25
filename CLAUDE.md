@@ -42,13 +42,15 @@ racket examples/hello.rkt
 | A – Stub-Shim lädt via FFI | ✅ |
 | B – Architektur dokumentiert | ✅ |
 | C – frame% + canvas% + button% laufend | ✅ 2026-06-24 |
-| **D – Eingabe-Rückgrat + Editor-Smoke** | **⬜ nächster Schritt** |
+| **D – Eingabe-Rückgrat + Editor-Smoke** | **✅ 2026-06-25** |
 | E – Widget-Breite (dialog%, message%, …) | ⬜ |
 
-**Checkpoint D besteht aus:**
+**Checkpoint D — erledigt:**
 - **D-0:** Layout-Refactor — `QVBoxLayout` raus, `shim_widget_set_geometry()` rein, `panel%` real
-- **D-1:** Maus/Tastatur/Fokus-Callbacks mit Nutzlast + Timer + `raco test`-Smoke + `examples/input.rkt`
-- **D-2:** `editor-canvas%` + `text%` tippen/selektieren/Caret blinkt → Editor läuft auf Qt bewiesen
+- **D-1:** Maus/Tastatur/Fokus-Callbacks + `key-map.rkt` + Timer-Smoke + `examples/input.rkt`
+- **D-2:** `editor-canvas%` + `text%` tippen/selektieren/Caret blinkt ✅
+
+**Nächster Schritt: Checkpoint E** — Widget-Breite nach konkretem App-Bedarf.
 
 ## Dokumentation
 
