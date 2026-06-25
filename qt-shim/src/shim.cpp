@@ -98,16 +98,21 @@ protected:
     }
 
     void mousePressEvent(QMouseEvent* e) override {
+        // For press/release, pass e->button() (single triggering button) so
+        // Racket always knows which button caused the event.
         if (mouse_cb)
             mouse_cb(mouse_ud, 0, (int)e->position().x(), (int)e->position().y(),
-                     encodeButtons(e->buttons()), encodeMods(e->modifiers()));
+                     encodeButtons(Qt::MouseButtons(e->button())),
+                     encodeMods(e->modifiers()));
     }
     void mouseReleaseEvent(QMouseEvent* e) override {
         if (mouse_cb)
             mouse_cb(mouse_ud, 1, (int)e->position().x(), (int)e->position().y(),
-                     encodeButtons(e->buttons()), encodeMods(e->modifiers()));
+                     encodeButtons(Qt::MouseButtons(e->button())),
+                     encodeMods(e->modifiers()));
     }
     void mouseMoveEvent(QMouseEvent* e) override {
+        // For move, pass all currently held buttons.
         if (mouse_cb)
             mouse_cb(mouse_ud, 2, (int)e->position().x(), (int)e->position().y(),
                      encodeButtons(e->buttons()), encodeMods(e->modifiers()));
