@@ -61,8 +61,8 @@
       "binaryDir": "${sourceDir}/build/linux-x64",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_PREFIX_PATH": "/opt/Qt/6.11.0/gcc_64",
-        "CMAKE_BUILD_RPATH": "/opt/Qt/6.11.0/gcc_64/lib"
+        "CMAKE_PREFIX_PATH": "/home/deinzer/Qt/6.11.1/gcc_64",
+        "CMAKE_BUILD_RPATH": "/home/deinzer/Qt/6.11.1/gcc_64/lib"
       }
     }
   ],

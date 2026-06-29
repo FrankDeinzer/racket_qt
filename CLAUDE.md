@@ -45,6 +45,12 @@ cmake --preset macos-arm64 -S qt-shim
 cmake --build qt-shim/build/macos-arm64
 ```
 
+**Linux:**
+```bash
+cmake --preset linux-x64 -S qt-shim
+cmake --build qt-shim/build/linux-x64
+```
+
 ## Run / Smoke-Test
 
 **Windows:**
@@ -54,12 +60,15 @@ $env:PATH   = "C:\Qt\6.11.0\msvc2022_64\bin;" + $env:PATH
 racket examples/hello.rkt
 ```
 
-**macOS:**
+**macOS / Linux:**
 ```bash
-PLT_QT=1 racket -S third_party/gui/gui-lib -S third_party/draw/draw-lib examples/hello.rkt
+PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
+  racket -S third_party/gui/gui-lib -S third_party/draw/draw-lib examples/hello.rkt
 # Smoke tests:
-PLT_QT=1 racket -S third_party/gui/gui-lib -S third_party/draw/draw-lib -l raco -- test tests/smoke.rkt
+PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
+  racket -S third_party/gui/gui-lib -S third_party/draw/draw-lib -l raco -- test tests/smoke.rkt
 ```
+(macOS: QT_PLUGIN_PATH nicht nötig; Linux: xcb-Plugin über `QT_PLUGIN_PATH` setzen)
 
 ## Aktueller Checkpoint-Status
 
@@ -70,6 +79,7 @@ PLT_QT=1 racket -S third_party/gui/gui-lib -S third_party/draw/draw-lib -l raco 
 | C – frame% + canvas% + button% laufend | ✅ 2026-06-24 |
 | **D – Eingabe-Rückgrat + Editor-Smoke** | **✅ 2026-06-25** |
 | **macOS Smoke** | **✅ 2026-06-25** |
+| **Linux Smoke** | **✅ 2026-06-29** |
 | E – Widget-Breite (dialog%, message%, …) | ⬜ |
 
 **Checkpoint D — erledigt:**
@@ -83,6 +93,14 @@ PLT_QT=1 racket -S third_party/gui/gui-lib -S third_party/draw/draw-lib -l raco 
 - `designate-root-frame` Stub für Racket 9.2 Kompatibilität
 - CPU-Spin-Fix: `shim_pump(0)` statt `shim_pump(10)` — verhindert CFRunLoopRunInMode-Konflikt mit Racket CS mach-port sleep
 - 3/3 Smoke-Tests pass; hello/input/editor laufen bei <5% Idle-CPU
+
+**Linux Smoke — erledigt:**
+- CMake `linux-x64` Preset: Qt-Pfad auf `~/Qt/6.11.1/gcc_64` korrigiert (war `/opt/Qt/6.11.0/gcc_64`)
+- QPA-Plugin: xcb (`libqxcb.so`) lädt sauber via `QT_PLUGIN_PATH`; kein libxcb-cursor-Problem
+- Loop-Dritter-Datenpunkt: `shim_pump(0)` funktioniert auf Linux (glib/epoll) — <2% Idle-CPU nach Startup
+- Startup-CPU-Spike ist Bytecode-Kompilation (fallend: 85% → 1% über 12s); kein Loop-Spin
+- Kein neuer Racket-Code nötig: macOS-Fixes (`.so`-Pfad, shim_pump(0), events_pending→0) direkt geerbt
+- 3/3 Smoke-Tests pass; hello/input/editor starten fehlerfrei
 
 **Nächster Schritt: Checkpoint E** — Widget-Breite nach konkretem App-Bedarf.
 

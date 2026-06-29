@@ -210,3 +210,39 @@ Diese beiden Operationen sind nicht dasselbe:
   sie dürfen **nur** Events in den Eventspace posten, keine Racket-Funktionen direkt aufrufen.
 - `shim_canvas_request_repaint` gibt `#t` zurück (in Racket `1` / truthy) — dieser Wert
   muss in `queue-backing-flush` verworfen werden (→ §4).
+
+---
+
+## 9. Linux-spezifische Hinweise
+
+### QPA-Plugin-Pfad
+
+Qt lädt auf Linux das `xcb`-Plugin aus `<prefix>/plugins/platforms/`. Da die Shim-`.so` in den
+Racket-Prozess geladen wird (nicht über einen Qt-eigenen Launcher), kennt Qt den Plugin-Pfad
+nicht automatisch. Starten immer mit:
+
+```bash
+QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
+  PLT_QT=1 racket -S third_party/gui/gui-lib ...
+```
+
+Oder in `~/.profile` / Shell-Konfiguration dauerhaft setzen. Ohne diesen Pfad scheitert
+Qt mit „Could not load the Qt platform plugin 'xcb'".
+
+### libxcb-cursor0
+
+Das xcb-Plugin braucht `libxcb-cursor0`. Fehlt es, schlägt xcb mit einem Laufzeitfehler
+fehl, obwohl die `.so` geladen wurde. Prüfen mit `dpkg -l libxcb-cursor0`; falls nötig:
+`sudo apt install libxcb-cursor0`.
+
+### Startup-CPU-Spike
+
+Die ersten Sekunden (`ps %cpu`) zeigen 50–90 % — das ist Bytecode-Kompilation, kein Loop-Spin.
+Instantane CPU nach ~12s: ~1 %. Vor CPU-Messungen Bytecodes vorkompilieren:
+`PLT_QT=1 raco make -v third_party/gui/gui-lib/mred/mred.rkt`.
+
+### Event-Loop (dritter Datenpunkt)
+
+`shim_pump(0)` (kein Blockieren) funktioniert auf Linux mit Qt's glib/epoll-Backend genauso
+sauber wie auf macOS — bestätigt „nie blockieren" als plattformübergreifende Invariante.
+`shim_events_pending()` gibt auf Linux 0 zurück, damit Racket CS schlafen kann.
