@@ -2,6 +2,9 @@
 #include <QMainWindow>
 #include <QWidget>
 #include <QPushButton>
+#include <QMenuBar>
+#include <QMenu>
+#include <QAction>
 #include <QImage>
 #include <QPainter>
 #include <QResizeEvent>
@@ -382,6 +385,110 @@ void* shim_button_create(void*           parent_widget,
 void shim_button_destroy(void* btn_ptr)
 {
     delete static_cast<QPushButton*>(btn_ptr);
+}
+
+// ---- menu-bar ---------------------------------------------------------------
+
+void* shim_menubar_create(void)
+{
+    return new QMenuBar(nullptr);
+}
+
+// Attaches an existing QMenuBar to a QMainWindow.
+// QMainWindow takes ownership; do NOT delete the QMenuBar separately after this.
+void shim_window_set_menubar(void* win, void* menubar)
+{
+    static_cast<RacketWindow*>(win)->setMenuBar(
+        static_cast<QMenuBar*>(menubar));
+}
+
+// Returns the QAction* for the menu at position pos in the bar, or nullptr.
+void shim_menubar_enable_at(void* menubar, int pos, int on)
+{
+    QMenuBar* mb = static_cast<QMenuBar*>(menubar);
+    QList<QAction*> acts = mb->actions();
+    if (pos >= 0 && pos < acts.size())
+        acts[pos]->setEnabled(on != 0);
+}
+
+void shim_menubar_remove_at(void* menubar, int pos)
+{
+    QMenuBar* mb = static_cast<QMenuBar*>(menubar);
+    QList<QAction*> acts = mb->actions();
+    if (pos >= 0 && pos < acts.size())
+        mb->removeAction(acts[pos]);
+}
+
+// ---- menu -------------------------------------------------------------------
+
+void* shim_menu_create(const char* title)
+{
+    return new QMenu(QString::fromUtf8(title));
+}
+
+void shim_menubar_add_menu(void* menubar, void* menu)
+{
+    static_cast<QMenuBar*>(menubar)->addMenu(
+        static_cast<QMenu*>(menu));
+}
+
+// Add a submenu at the end; returns the QAction* that represents it.
+void* shim_menu_add_submenu(void* menu, const char* title, void* submenu)
+{
+    QMenu* m = static_cast<QMenu*>(menu);
+    QMenu* sub = static_cast<QMenu*>(submenu);
+    sub->setTitle(QString::fromUtf8(title));
+    return m->addMenu(sub);
+}
+
+void* shim_menu_add_separator(void* menu)
+{
+    return static_cast<QMenu*>(menu)->addSeparator();
+}
+
+void shim_menu_remove_action(void* menu, void* action)
+{
+    static_cast<QMenu*>(menu)->removeAction(
+        static_cast<QAction*>(action));
+}
+
+void shim_menu_popup(void* menu, int x, int y)
+{
+    static_cast<QMenu*>(menu)->popup(QPoint(x, y));
+}
+
+// ---- action -----------------------------------------------------------------
+
+void* shim_action_create(const char* label, int checkable,
+                         shim_callback_t cb, void* ud)
+{
+    auto* a = new QAction(QString::fromUtf8(label));
+    a->setCheckable(checkable != 0);
+    if (cb) {
+        QObject::connect(a, &QAction::triggered,
+                         [cb, ud](bool) { cb(ud); });
+    }
+    return a;
+}
+
+void shim_action_set_enabled(void* action, int on)
+{
+    static_cast<QAction*>(action)->setEnabled(on != 0);
+}
+
+void shim_action_set_label(void* action, const char* label)
+{
+    static_cast<QAction*>(action)->setText(QString::fromUtf8(label));
+}
+
+void shim_action_set_checked(void* action, int on)
+{
+    static_cast<QAction*>(action)->setChecked(on != 0);
+}
+
+int shim_action_is_checked(void* action)
+{
+    return static_cast<QAction*>(action)->isChecked() ? 1 : 0;
 }
 
 } // extern "C"
