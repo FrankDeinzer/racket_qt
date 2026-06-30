@@ -80,6 +80,7 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 | **D – Eingabe-Rückgrat + Editor-Smoke** | **✅ 2026-06-25** |
 | **macOS Smoke** | **✅ 2026-06-25** |
 | **Linux Smoke** | **✅ 2026-06-29** |
+| **E-0 – Widget-Stubs + text-field% fix** | **✅ 2026-06-30** |
 | E – Widget-Breite (dialog%, message%, …) | ⬜ |
 
 **Checkpoint D — erledigt:**
@@ -101,6 +102,15 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 - Startup-CPU-Spike ist Bytecode-Kompilation (fallend: 85% → 1% über 12s); kein Loop-Spin
 - Kein neuer Racket-Code nötig: macOS-Fixes (`.so`-Pfad, shim_pump(0), events_pending→0) direkt geerbt
 - 3/3 Smoke-Tests pass; hello/input/editor starten fehlerfrei
+
+**Checkpoint E-0 — erledigt (2026-06-30):**
+- `make-stub-class`: Parent aus `args` extrahiert, `(error ...)` entfernt, `on-combo-select(i)` + `set-callback` Stubs
+- `canvas.rkt`: `get-width`/`get-height` Override entfernt (Qt-Default 100×30 auf Windows fälschlich als "same" erkannt); Seed-Call in Konstruktor setzt `window%`'s `w/h` korrekt
+- `canvas.rkt`: Combo-Box-Interface (`on-combo-select`, `popup-combo`, `clear-combo-items`, `append-combo-item`, `set-combo-text`) für `text-field%`
+- `message.rkt`: Echte Implementierung (QLabel via `shim_label_create`)
+- `utils.rkt`: FFI-Bindings `shim_label_create`/`shim_label_set_text`
+- Widget-Probe 8/8 pass: `message%`, `check-box%`, `choice%`, `list-box%`, `slider%`, `radio-box%`, `tab-panel%`, `text-field%`
+- 3/3 Smoke-Tests weiterhin pass
 
 **Nächster Schritt: Checkpoint E** — Widget-Breite nach konkretem App-Bedarf.
 
