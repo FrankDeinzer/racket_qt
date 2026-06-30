@@ -5,6 +5,7 @@
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
+#include <QLabel>
 #include <QImage>
 #include <QPainter>
 #include <QResizeEvent>
@@ -489,6 +490,21 @@ void shim_action_set_checked(void* action, int on)
 int shim_action_is_checked(void* action)
 {
     return static_cast<QAction*>(action)->isChecked() ? 1 : 0;
+}
+
+// ---- label (message%) -------------------------------------------------------
+
+void* shim_label_create(void* parent_widget, const char* text)
+{
+    auto* lbl = new QLabel(QString::fromUtf8(text),
+                           static_cast<QWidget*>(parent_widget));
+    lbl->setWordWrap(false);
+    return lbl;
+}
+
+void shim_label_set_text(void* label_ptr, const char* text)
+{
+    static_cast<QLabel*>(label_ptr)->setText(QString::fromUtf8(text));
 }
 
 } // extern "C"
