@@ -246,3 +246,131 @@ Instantane CPU nach ~12s: ~1 %. Vor CPU-Messungen Bytecodes vorkompilieren:
 `shim_pump(0)` (kein Blockieren) funktioniert auf Linux mit Qt's glib/epoll-Backend genauso
 sauber wie auf macOS — bestätigt „nie blockieren" als plattformübergreifende Invariante.
 `shim_events_pending()` gibt auf Linux 0 zurück, damit Racket CS schlafen kann.
+
+---
+
+## 10. gui-lib-Merge-Angleich (1.78 → 1.80) — Lektionen
+
+**Ziel-Commit finden ohne Upstream-Remote:** Das installierte System-Paket kennt seinen
+exakten Quell-Commit — `raco pkg show` oder das `info.rkt` im installierten Paket
+(`.../share/pkgs/gui-lib/info.rkt`) enthält `package-original-source` mit dem vollen Git-Hash.
+Das ist ein hash-verifizierter Treffer, stärker als „neuester Tag" oder Branch-Tip-Raten.
+Prüfen, ob dieser Commit bereits lokal per `git cat-file -t <hash>` vorliegt (z. B. weil
+schon mal ein Remote gefetched wurde), bevor ein neuer Remote hinzugefügt wird.
+
+**Merge ist meist konfliktfrei, wenn additive `wx/qt/**`-Dateien nie von Upstream berührt
+werden** — bestätigt für den 1.78→1.80-Sprung (86 geänderte Dateien, 0 Konflikte, keine
+davon in `wx/qt/`). Konflikte wären in `wx/platform.rkt` (Backend-Auswahl) und
+`wx/win32|gtk|cocoa/*` zu erwarten, nicht in additiven Dateien.
+
+**Nach einem Merge: `define-values`-Arity in `wx/platform.rkt` zuerst prüfen.** Neue
+Upstream-Versionen fügen gelegentlich neue Werte an die `platform-values`-Tupel-Liste an
+(z. B. `tab-panel-available?` in 9.2). Symptom: `define-values: result arity mismatch`
+mit einer Liste aller bereits gebundenen Werte im Fehlertext — die fehlende letzte Zeile
+in `qt/platform.rkt`s eigener `(values ...)`-Liste zeigt sich am Diff zur `define-values`-
+Liste in `wx/platform.rkt`.
+
+**Kontrakt-Verifikation gegen Referenz-Backends, nicht raten.** Für jeden neuen/fehlenden
+Export lohnt sich `grep -rn "<name>"` über `wx/win32/` und `wx/gtk/` — die Fehlermeldung
+allein (z. B. „arity mismatch", „no such method") sagt nicht, WAS die richtige Signatur
+ist. Beispiele aus dieser Session:
+- `get-current-mouse-state`: 0 Args, 2 Rückgabewerte (`point%`, Modifier-Liste) — nicht
+  Box-Pointer wie zunächst angenommen.
+- `file-selector`: neuer `filters`-Parameter zwischen `ext` und `style`.
+- `gauge%`: Methodennamen sind `get-range`/`set-range`/`get-value`/`set-value`, NICHT
+  `get-gauge-value`/`set-gauge-value` (letzteres war ein Ratefehler in einer früheren Session).
+- `frame%`: `set-title` (dynamische Updates) ist eine andere Methode als `set-label`
+  (Init-Titel) — beide nötig.
+- `set-canvas-background`/`get-canvas-background`: Default ist `white`, nicht `#f`.
+  `#f` wird von `mrcanvas.rkt` als „Canvas ist transparent" interpretiert und wirft einen
+  Fehler, sobald irgendjemand versucht, eine Hintergrundfarbe zu setzen.
+
+---
+
+## 11. Key-Event-Kontrakt: Release braucht `'release`, nicht den echten Key
+
+`key-event%`s `key-code`-Feld hat bei Tastatur-**Loslassen** einen Sonderwert: das Symbol
+`'release`, NICHT den tatsächlich losgelassenen Key. Der echte Key gehört ausschließlich
+in `key-release-code` (via `set-key-release-code`). Verifiziert gegen `win32/key.rkt`:
+
+```racket
+[e (new key-event%
+        [key-code (if is-up? 'release key-id)]   ; ← Sonderwert bei Release!
+        ...)]
+(when is-up? (send e set-key-release-code key-id))
+```
+
+**Symptom bei falscher Implementierung:** Jedes getippte Zeichen erscheint doppelt — der
+Editor behandelt Press UND Release je als eigenständigen Zeichen-Insert, weil beide
+Events wie „normale" Presses aussehen. Betrifft NUR die Racket-Event-Konstruktion, nicht
+den Shim/Qt — ein Debug-Print direkt im Qt-Key-Callback zeigt bereits hier exakt 1×
+Press + 1× Release pro physischem Tastendruck.
+
+---
+
+## 12. `get-focus-window` muss echt sein — sonst frisst `handle-traverse-key` Sondertasten
+
+`wxtop.rkt`s generisches `handle-traverse-key` (zuständig u. a. für `#\return`, `#\space`,
+`escape`) fragt `(get-focus-window)` ab, um zu entscheiden, ob eine Taste an ein
+fokussiertes Control (z. B. einen `editor-canvas%`) durchgereicht werden soll, statt sie
+als Navigations-/Default-Button-Kommando zu behandeln. Ein Platform-Backend, das
+`get-focus-window` hart auf `#f` stubbt (z. B. weil es für frühere Checkpoints nicht
+gebraucht wurde), lässt DIESEN Fallback-Zweig **immer** greifen — mit dem Ergebnis, dass
+z. B. Enter im Editor nie ankommt, obwohl `on-char` grundsätzlich korrekt verdrahtet ist.
+
+**Fix-Pattern:** Fokus-Tracking generisch in der Basis-`window%`-Klasse verankern, nicht
+pro Widget-Typ:
+
+```racket
+(define/public (on-set-focus)
+  (let ([f (get-top-frame)])
+    (when (and f (not (eq? f this))) (send f record-focus-window this))))
+(define/public (on-kill-focus)
+  (let ([f (get-top-frame)])
+    (when (and f (not (eq? f this))) (send f clear-focus-window this))))
+```
+
+`get-top-frame` ist bereits für Layout-Zwecke vorhanden (läuft die Parent-Kette hoch) —
+dieselbe Funktion liefert hier den Ankerpunkt fürs Fokus-Tracking. Vereinfachung ggü.
+win32 (kein `focus-window-path`, kein OS-Aktiv-Fenster-Check): für Single-Frame-Szenarien
+ausreichend, ggf. bei Multi-Fenster-Fokus-Edgecases nachschärfen.
+
+**Diagnose-Technik, die zum Fund führte:** Temporärer `eprintf` direkt in
+`dispatch-on-char` (zeigt `key-code`, `other-modal?`, `call-pre-on-char`-Ergebnis,
+`enabled?`) — `pre=#t` bei einer Taste, die eigentlich durchgereicht werden sollte, ist
+das Signal, in `call-pre-on-char` → `on-subwindow-char` → `handle-menu-key`/
+`handle-traverse-key` (alle in `wxtop.rkt`) weiterzuverfolgen.
+
+---
+
+## 13. DrRacket-Invocation-Rezept (nach 9.2-Angleich)
+
+Fork ist als Installation-scope-Link aktiv (`raco pkg update --link <pfad-zu-gui-lib>`,
+braucht Admin-Rechte wegen `C:\Program Files\Racket\`). Danach reicht ein normaler Start:
+
+```powershell
+$env:PLT_QT = "1"
+$env:PATH   = "C:\Qt\6.11.0\msvc2022_64\bin;" + $env:PATH
+& "C:\Program Files\Racket\DrRacket.exe"
+```
+
+Kein `-S third_party/gui/gui-lib` mehr nötig (Fork ersetzt die System-Version direkt).
+Gate-Test: DrRacket **ohne** `PLT_QT` muss weiterhin nativ ohne Linklet-Mismatch starten —
+das beweist, dass der Fork sauber die System-Version ersetzt und nicht nur zufällig für
+den Qt-Fall funktioniert.
+
+**Single-Instance-Falle:** Ein zweiter `DrRacket.exe`-Aufruf, während bereits eine Instanz
+läuft, startet KEINE neue Instanz — er verbindet sich an die laufende und beendet sich
+sofort (Exit 0, kein Fenster, keine Log-Ausgabe). Sieht wie Erfolg aus, ist aber ein
+No-Op. Vor jedem Testlauf mit `tasklist | grep -i drracket` prüfen, dass wirklich keine
+alte Instanz mehr lebt.
+
+**Autosave-Recovery beim Debuggen mit `taskkill /F`:** Jeder harte Prozess-Kill lässt
+DrRacket beim nächsten Start einen Recovery-Dialog anbieten. Die tatsächlich gelesene
+Datei ist `%APPDATA%\Racket\PLT-autosave-toc.rktd` (**ohne** `-save`-Suffix) —
+`framework/private/autosave.rkt`s `restore-autosave-files/gui` liest exakt diese.
+`PLT-autosave-toc-save.rktd` ist nur eine Rotations-Sicherung der vorherigen TOC und NICHT
+die Recovery-Quelle (leicht zu verwechseln). Vor jedem Neustart in einer Debug-Session
+beide auf `()` setzen, plus verwaiste `mredauto.*`-Dateien in `Documents\` löschen. Der
+Recovery-Dialog selbst kann vom offenen Menüleisten-/Button-Rendering-Bug (siehe Ledger)
+betroffen sein — keine sichtbaren Buttons zum Wegklicken.

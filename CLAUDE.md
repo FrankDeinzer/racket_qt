@@ -60,6 +60,19 @@ $env:PATH   = "C:\Qt\6.11.0\msvc2022_64\bin;" + $env:PATH
 racket examples/hello.rkt
 ```
 
+**Windows — echtes DrRacket (seit Fork == gui-lib 1.80, verlinktes User-Paket):**
+```powershell
+$env:PLT_QT = "1"
+$env:PATH   = "C:\Qt\6.11.0\msvc2022_64\bin;" + $env:PATH
+& "C:\Program Files\Racket\DrRacket.exe"
+```
+Kein `-S`-Flag mehr nötig — der Fork ersetzt die System-`gui-lib` per Link
+(`raco pkg update --link third_party/gui/gui-lib`, einmalig, braucht Admin-Rechte).
+Gate-Test dafür: DrRacket **ohne** `PLT_QT` muss weiterhin nativ starten (kein
+Linklet-Mismatch). Single-Instance-Falle: ein zweiter Aufruf bei bereits laufender
+Instanz startet nichts Neues (Exit 0, kein Fenster) — vorher `tasklist | grep drracket`
+prüfen. Details/Fallstricke (Autosave-Recovery bei hartem Kill etc.): `docs/HACKING.md §13`.
+
 **macOS / Linux:**
 ```bash
 PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
@@ -81,6 +94,7 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 | **macOS Smoke** | **✅ 2026-06-25** |
 | **Linux Smoke** | **✅ 2026-06-29** |
 | **E-0 – Widget-Stubs + text-field% fix** | **✅ 2026-06-30** |
+| **E-0 – gui-lib-Angleich 1.78→1.80 + echtes DrRacket** | **🟡 2026-07-02 (Tippen/Enter/Ausführen funktioniert, Menüleiste visuell kaputt)** |
 | E – Widget-Breite (dialog%, message%, …) | ⬜ |
 
 **Checkpoint D — erledigt:**
@@ -111,6 +125,14 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 - `utils.rkt`: FFI-Bindings `shim_label_create`/`shim_label_set_text`
 - Widget-Probe 8/8 pass: `message%`, `check-box%`, `choice%`, `list-box%`, `slider%`, `radio-box%`, `tab-panel%`, `text-field%`
 - 3/3 Smoke-Tests weiterhin pass
+
+**Checkpoint E-0 / gui-lib-Angleich — erledigt (2026-07-02):**
+- Fork gemergt auf exakten Upstream-Commit von System-gui-lib 1.80 (`3f0037c0`), 0 Konflikte, `wx/qt/**` unberührt
+- `gui-lib` als Installation-scope-Link aktiv; Gate-Test bestanden (natives DrRacket ohne `PLT_QT` startet ohne Linklet-Mismatch)
+- `PLT_QT=1 drracket` läuft: 9 Crashes + 2 grundlegende Key/Focus-Bugs gefunden und gefixt (Details: `docs/CHECKPOINT-E0-ledger.md`) — u.a. doppelte Zeichen beim Tippen (Key-Release-Kontrakt) und Enter ohne Wirkung (`get-focus-window` nie getrackt)
+- Tippen, Enter/Zeilenumbruch und Code-Ausführung funktionieren in Definitions- und Interactions-Editor
+- **Offen (Flags für E-1):** Menüleiste visuell nicht sichtbar (Daten/Wiring nachweislich korrekt — 165 Menüpunkte gebaut); Popup-Positionierung falsch (`client-to-screen` No-op, fehlender `mapToGlobal`-Shim); teilweises Neuzeichnen im Editor-Bereich (nicht root-caused)
+- **Drei-Maschinen-Pflicht-Folgeschritt:** macOS/Linux müssen `qt-backend` (jetzt `381425d5`) + Umbrella `main` neu ziehen und **beide** `raco setup` laufen lassen (gui-lib hat sich strukturell verändert), dann re-smoken
 
 **Nächster Schritt: Checkpoint E** — Widget-Breite nach konkretem App-Bedarf.
 
