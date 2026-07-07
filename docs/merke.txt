@@ -1,0 +1,15 @@
+**** installierte gui-lib
+gui installieren (admin)
+"c:\Program Files\Racket\raco.exe" pkg update --link "C:\src\racket_qt\third_party\gui\gui-lib"
+
+Rückgängig:
+raco pkg remove gui-lib
+raco pkg install gui-lib
+raco setup
+
+Oder:
+1. Racket-Installation zu (falls offen) schließen
+2. C:\Program Files\Racket\share\pkgs\gui-lib löschen, Backup-Kopie zurückkopieren
+3. Backup von pkgs.rktd zurückkopieren
+4. raco setup   (Bytecode neu gegen Original kompilieren)
+
