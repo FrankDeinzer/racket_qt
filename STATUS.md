@@ -5,6 +5,29 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-07 (3) — Windows Menü/Redraw-Diagnose (kein Re-Sync)
+
+**Kontext:** `docs/prompt07072026.md`, Ergebnis: `docs/report07072026_win.md`.
+
+- **Kein Re-Sync nötig** — der 1.78→1.80-Merge ist auf Windows entstanden und gepusht.
+  Umbrella `main` sauber/aktuell, gui-Submodul `qt-backend` @ `381425d5`, `info.rkt` = **1.80**.
+  Konsum via **Installation-wide Link** (nicht `-S`-Override wie macOS/Linux). Keine neuen
+  Sync-Commits.
+- **Menü-Beobachtung:** `menu-frame.rkt` reproduziert den **fehlenden Balken** (Höhe 0) als
+  isolierten Minimal-Repro — deckt sich mit Linux. Echtes DrRacket zeigt zusätzlich
+  **überlappende Menütitel** (gleiche x-Origin) + weißes Rechteck-Artefakt → zwei Fehlermodi,
+  gemeinsame Ursache (Balken-Geometrie/Platzierung) wahrscheinlich, aber offen.
+- **Redraw-Beobachtung:** mit **echten Keystrokes** (SendKeys, nur auf Windows möglich)
+  reproduziert — nach Tippen mehrerer Zeilen rendert **nur die aktuelle Zeile** (mittig,
+  weißes Band nur um sie), frühere Zeilen verschwinden. Verschärft den macOS/Linux-Befund und
+  stützt einen Bug im gemeinsamen `editor-canvas%`/`text%`-Redraw-Pfad (fehlender
+  Backing-Store-Persist).
+- **Damit liegen alle drei Plattform-Beobachtungen vor** — Eingabe für den Rendering-Fix-Prompt.
+- **Commit:** nur `docs/report07072026_win.md` + dieser STATUS-Eintrag (Screenshots out-of-band,
+  nicht im Repo).
+
+---
+
 ## Session 2026-07-07 — macOS auf 1.80 re-synced + Menü/Redraw-Diagnose
 
 **Kontext:** `docs/prompt07072026.md`, Ergebnis: `docs/report07072026_macos.md`.
