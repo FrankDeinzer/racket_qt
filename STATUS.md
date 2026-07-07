@@ -25,6 +25,31 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-07 (2) — Linux auf 1.80 re-synced + Menü/Redraw-Diagnose
+
+**Kontext:** `docs/prompt07072026.md`, Ergebnis: `docs/report07072026_linux.md`.
+
+- **Linux auf 1.80 re-synced, Smoke 3/3.** gui-Submodul stand detached auf altem
+  `6169a245` ohne lokalen `qt-backend`-Branch → `checkout -b qt-backend --track
+  origin/qt-backend`, sauberer FF `6169a245`→**1.80** (`381425d5`). 10 stale
+  `compiled/`-Caches gelöscht, Shim (stale seit 29.6., Quelle vom 30.6.) neu gebaut,
+  Fork (`raco make`) neu gebaut. Reiner Sync, keine neuen Commits. gui-lib auch hier via
+  **`-S`-Source-Override** konsumiert.
+- **Menü-Beobachtung:** Menüleiste fehlt **komplett** — weder im Fenster noch (anders als
+  macOS) irgendwo global, da Plasma/KWin kein globales Menüband hat. `QT_QPA_PLATFORMTHEME=`-
+  Kontrolltest macht Global-Menu-Redirect unwahrscheinlich → widerspricht der macOS-These
+  „vermutlich plattformspezifisch"; spricht für **eine gemeinsame Ursache** (z. B. QMenuBar
+  bekommt nie Höhe im QMainWindow-Layout).
+- **Redraw-Beobachtung:** Vor-Interaktion per `insert` gesetzter Text verschwindet stabil +
+  vertikaler Versatz — **identisches Muster wie auf macOS** → eher Bug im gemeinsamen
+  `editor-canvas%`/`text%`-Pfad statt Plattform-Sonderfall. (Transientes Blank aus dem
+  macOS-Bericht mangels Keystroke-Simulationswerkzeug hier nicht gezielt geprüft.)
+- **Einschränkung:** kein `xdotool`/`ydotool`/`wtype`, kein passwortloses `sudo` → Klick-Test
+  (Punkt 2) nicht automatisierbar, Tipp-Test nur via programmatischer `insert`-Simulation.
+- **Damit sind alle drei Maschinen auf gui-lib 1.80 in Parität.**
+
+---
+
 ## Session 2026-07-02 — gui-lib-Angleich 1.78→1.80 + echtes DrRacket
 
 **Kontext:** `docs/prompt02072026.md`, Ergebnis: `docs/CHECKPOINT-E0-ledger.md`.
@@ -86,7 +111,9 @@ gui-lib-Quelle stehen — potentiell subtile Inkonsistenzen statt eines klaren F
 
 **Status (2026-07-07):** `381425d5` ist auf `origin/qt-backend` gepusht. **macOS ✅ erledigt**
 (re-synced auf 1.80, Smoke 3/3 — siehe Session-Eintrag oben; auf macOS läuft der Konsum
-über `-S`-Source-Override, daher `raco make` statt `raco setup`). **Linux ⬜ offen.**
+über `-S`-Source-Override, daher `raco make` statt `raco setup`). **Linux ✅ erledigt**
+(re-synced auf 1.80, Smoke 3/3 — siehe Session-Eintrag oben; ebenfalls `-S`-Source-Override).
+**Alle drei Maschinen jetzt in Parität auf gui-lib 1.80.**
 
 ---
 
