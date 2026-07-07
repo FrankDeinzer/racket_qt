@@ -5,6 +5,26 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-07 — macOS auf 1.80 re-synced + Menü/Redraw-Diagnose
+
+**Kontext:** `docs/prompt07072026.md`, Ergebnis: `docs/report07072026_macos.md`.
+
+- **macOS auf 1.80 re-synced, Smoke 3/3.** gui-Submodul FF-Pull 1.78→**1.80**
+  (`381425d5`), stale `compiled/`-Caches gelöscht, Shim + Fork (`raco make`) neu
+  gebaut. Reiner Pull, keine Sync-Commits. gui-lib wird hier via **`-S`-Source-Override**
+  konsumiert (nicht verlinkt) — daher `raco make` statt `raco setup`.
+- **Menü-Beobachtung:** globale macOS-Leiste zeigt nur `{Apple, racket}`, kein
+  `File`/`Edit`. Diskriminierender Test mit **Non-Role**-Items **widerlegt** Qt-
+  QuitRole-Merging als Ursache; Shim erstellt echten `QMenuBar` + `setMenuBar`, aber
+  die native **QMenuBar→NSMenu-Anbindung greift nicht** → Fix voraussichtlich
+  macOS-spezifisch (nicht Geometrie, nicht QuitRole).
+- **Redraw-Beobachtung:** Total-Blank nur **transient** (erholt sich nach Ruhe),
+  Live-Tippen rendert stabil; stabil verloren nur der vor-Interaktion per `insert`
+  gesetzte Text + vertikaler Versatz → milderes, eigenständiges Thema.
+- **Commit:** Umbrella `main` `25a13cb` (nur `docs/report07072026_macos.md`), gepusht.
+
+---
+
 ## Session 2026-07-02 — gui-lib-Angleich 1.78→1.80 + echtes DrRacket
 
 **Kontext:** `docs/prompt02072026.md`, Ergebnis: `docs/CHECKPOINT-E0-ledger.md`.
@@ -63,6 +83,10 @@ PLT_QT=1 QT_PLUGIN_PATH=<...>/plugins \
 
 Ohne `raco setup` auf beiden Maschinen bleiben sie auf altem Bytecode gegen die neue
 gui-lib-Quelle stehen — potentiell subtile Inkonsistenzen statt eines klaren Fehlers.
+
+**Status (2026-07-07):** `381425d5` ist auf `origin/qt-backend` gepusht. **macOS ✅ erledigt**
+(re-synced auf 1.80, Smoke 3/3 — siehe Session-Eintrag oben; auf macOS läuft der Konsum
+über `-S`-Source-Override, daher `raco make` statt `raco setup`). **Linux ⬜ offen.**
 
 ---
 
