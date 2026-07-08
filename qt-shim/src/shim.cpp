@@ -365,6 +365,19 @@ void shim_widget_set_focus(void* widget)
     static_cast<QWidget*>(widget)->setFocus();
 }
 
+// Translates a point in widget-local coordinates to global screen coordinates
+// (QWidget::mapToGlobal). Used by window%'s client-to-screen so popup-menu and
+// context menus land at the true screen position instead of the raw local
+// coordinates (previously a no-op — see CLAUDE.md flag). DPR is pinned to 1
+// (QT_SCALE_FACTOR=1 in shim_app_init), so device-independent px are used
+// consistently on both sides; no per-monitor scaling case here.
+void shim_widget_client_to_screen(void* widget, int x, int y, int* out_x, int* out_y)
+{
+    QPoint g = static_cast<QWidget*>(widget)->mapToGlobal(QPoint(x, y));
+    *out_x = g.x();
+    *out_y = g.y();
+}
+
 // ---- canvas -------------------------------------------------------------
 
 void* shim_canvas_create(void*           parent_widget,
