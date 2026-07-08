@@ -5,6 +5,44 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-08 (5, Linux) — Menü-Fixes cross-platform-validiert + set-icon-Crash gefixt (prompt08072026-4)
+
+**Kontext:** `docs/prompt08072026-4.md`. Voller Bericht: `docs/report08072026-4-linux.md`.
+
+- **Racket-Version (gemessen, Phase 0):** v9.2 [cs] x86_64. gui-Submodul stand vor Sync auf
+  `381425d5` (stale-Shim-Falle wie vorhergesagt) — auf `ba2dacc9` nachgezogen (enthält bereits
+  addAction-, mapToGlobal- **und** den macOS-`set-label`-Fix), Shim neu gebaut, Smoke 3/3 grün.
+- **Ladecheck:** Linux nutzt für `gui-lib` ebenfalls **keinen** Installation-Link — `-S`-Source-
+  Override zwingend, sonst stiller Fallback auf gtk. Verifiziert über `PLT_QT_DEBUG=1`.
+- **addAction-Fix: grün.** Probe (`mixed`/`dynamic`) exakt wie erwartet. Zusätzlich per
+  Scratch-Skript (`visual-probe.rkt`, nicht im Repo) visuell als Screenshot belegt: Blatt-Item +
+  Submenü + Separator + Blatt-Item alle korrekt sichtbar. Echtes DrRacket: synthetischer
+  Linksklick (via `libXtst`) auf „File" öffnet Dropdown mit 25 korrekt strukturierten Aktionen
+  (Debug-Dump + `xwininfo`-Geometrie bestätigt) — Screenshot selbst zeigte das Popup nicht
+  (Capture-Artefakt, siehe unten), Datennachweis ist aber eindeutig.
+- **mapToGlobal-Fix: grün.** Echter synthetischer Rechtsklick (via `libXtst`) im Definitions-
+  Editor öffnet Kontextmenü bei (1340,808) — 1px Differenz zum Klickpunkt (1339,807), statt am
+  Fensterursprung. Inhalt (Undo/Redo/Copy/Cut/Paste/Clear/Select All/Suchen) korrekt.
+- **Neuer, unabhängiger Crash gefunden + auf Nutzer-Anweisung gefixt:** `set-icon`-Methode fehlt
+  komplett in `wx/qt/frame.rkt` (win32/gtk/cocoa haben sie alle) — `framework/splash.rkt` ruft
+  sie bei jedem Start auf, Splash-Fenster blieb dadurch unmapped, Hauptfenster erschien nie.
+  Fix: variadic No-op-Stub, gespiegelt an `set-label`/`append` im selben Backend. Nutzer hat via
+  `AskUserQuestion` explizit „Ja, fixen" gewählt. Nach Fix: DrRacket startet vollständig, alle 9
+  Menüs sichtbar, Smoke 3/3 weiterhin grün. Commit: gui `6df80516` (lokaler `qt-backend`-Branch
+  fast-forwarded nach detached-HEAD-Checkout) — **noch nicht gepusht**, Nutzer-OK ausstehend.
+- **Nebenklärung (kein Bug):** Popups, die im Screenshot-Bereich des Session-Terminals liegen,
+  erschienen im `xwd`-Vollbild-Capture nicht sichtbar, obwohl per Debug-Dump/`xwininfo` korrekt
+  existent und positioniert — Capture-/Compositing-Artefakt dieser Session-Umgebung, **nicht**
+  der bekannte Redraw-Bug (der betrifft Editor-Repaint, nicht Popup-Sichtbarkeit im Tool). Ein
+  isoliertes Scratch-Popup außerhalb dieses Bereichs rendert im selben Verfahren sichtbar korrekt.
+- **Guardrail-Abweichung, vom Nutzer autorisiert:** wie bei macOS — Original-Prompt sah reine
+  Validierung ohne Fix-Commits vor; Crash gemeldet, Nutzer-Entscheidung eingeholt, dann gefixt.
+- **Beide Plattformen (macOS + Linux) jetzt grün — `CLAUDE.md`-Checkpoint E-0-Menü als
+  vollständig geschlossen markiert.** Offen: Push von `6df80516`/Umbrella-Commit; Windows sollte
+  vor Re-Sync über den vierten Fix informiert werden; Redraw-Bug weiterhin separat offen.
+
+---
+
 ## Session 2026-07-08 (4, macOS) — Menü-Fixes cross-platform-validiert + neuer DrRacket-Crash gefixt (prompt08072026-4)
 
 **Kontext:** `docs/prompt08072026-4.md`. Voller Bericht: `docs/report08072026-4-macos.md`.

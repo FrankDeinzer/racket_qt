@@ -94,7 +94,7 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 | **macOS Smoke** | **✅ 2026-06-25** |
 | **Linux Smoke** | **✅ 2026-06-29** |
 | **E-0 – Widget-Stubs + text-field% fix** | **✅ 2026-06-30** |
-| **E-0 – gui-lib-Angleich 1.78→1.80 + echtes DrRacket** | **🟡 2026-07-08 (Tippen/Enter/Ausführen funktioniert; Menüleiste sichtbar+horizontal [Titel-Fix] UND gefüllt [addAction-Fix] UND Popups korrekt platziert [mapToGlobal-Fix], alle drei Windows-bestätigt; OFFEN: macOS/Linux-Cross-Platform-Validierung + Nutzer-Visual-Bestätigung [Checkpoint B] noch ausstehend, dann E-0-Menü schließen; Redraw-Bug separat offen)** |
+| **E-0 – gui-lib-Angleich 1.78→1.80 + echtes DrRacket** | **✅ 2026-07-08 (E-0-Menü geschlossen: Tippen/Enter/Ausführen funktioniert; Menüleiste sichtbar+horizontal [Titel-Fix] UND gefüllt [addAction-Fix] UND Popups korrekt platziert [mapToGlobal-Fix], auf Windows+macOS+Linux bestätigt; je ein zusätzlicher Startup-Crash auf macOS [`tab-panel%` `set-label`-Arity] und Linux [`frame%` `set-icon` fehlte] gefunden+gefixt; Redraw-Bug separat offen, eigene Session)** |
 | E – Widget-Breite (dialog%, message%, …) | ⬜ |
 
 **Checkpoint D — erledigt:**
@@ -146,7 +146,13 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 - Smoke 3/3 weiterhin grün nach beiden Fixes, kein Ownership-Crash/-Warning.
 - **OFFEN:** macOS/Linux müssen `qt-backend` (jetzt `1641f888`) + Umbrella `main` (jetzt `8e0bfac`) neu ziehen, Shim **neu bauen** (beide Fixes ändern `shim.cpp` — stale-Shim-Falle 07-07) und re-smoken; Nutzer-Visual-Bestätigung (Checkpoint B) für beide Fixes steht noch aus. Redraw-Bug weiterhin separat offen (eigene Session).
 
-**Nächster Schritt: Checkpoint B (Nutzer-Bestätigung) → Phase 3/4 (macOS/Linux) → danach Checkpoint E** — Widget-Breite nach konkretem App-Bedarf.
+**Checkpoint E-0 / Spur 2 — Cross-Platform-Validierung abgeschlossen (2026-07-08, prompt08072026-4, macOS + Linux bestätigt, E-0-Menü geschlossen):**
+- **macOS** (`docs/report08072026-4-macos.md`): addAction-/mapToGlobal-Fix per Probe + echtem DrRacket bestätigt (grün). Dabei neuer, unabhängiger Startup-Crash gefunden: `tab-panel%`-Stub-`set-label` erwartete 1 Arg, DrRacket ruft mit 2 (Index+Label) — Fix macht `set-label` variadic (gui `ba2dacc9`), auf Nutzer-Anweisung.
+- **Linux** (`docs/report08072026-4-linux.md`): addAction-/mapToGlobal-Fix per Probe + echtem synthetischem Klick (`libXtst`) in echtem DrRacket bestätigt (grün, Debug-Dump + `xwininfo`-Geometrie als Nachweis). Dabei neuer, unabhängiger Startup-Crash gefunden: `wx/qt/frame.rkt` hatte **keine** `set-icon`-Methode (win32/gtk/cocoa haben sie alle), `framework/splash.rkt` ruft sie bei jedem Start — Fix fügt variadic No-op-Stub hinzu (gui `6df80516`), auf Nutzer-Anweisung (`AskUserQuestion`).
+- Beide Zusatz-Crashes betreffen ausschließlich `wx/qt/` und sind reine No-op-Stubs für Methoden, die dieses Backend bisher schlicht nicht kannte — kein Verhalten für bestehende Aufrufer geändert.
+- **E-0-Menü damit auf allen drei Plattformen (Windows/macOS/Linux) vollständig geschlossen.** Redraw-Bug bleibt separat offen (eigene Session). Windows sollte vor nächstem Re-Sync über die beiden neuen Fixes informiert werden.
+
+**Nächster Schritt: Redraw-Bug (eigene Session) → danach Checkpoint E** — Widget-Breite nach konkretem App-Bedarf.
 
 ## Dokumentation
 
