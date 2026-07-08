@@ -374,3 +374,54 @@ die Recovery-Quelle (leicht zu verwechseln). Vor jedem Neustart in einer Debug-S
 beide auf `()` setzen, plus verwaiste `mredauto.*`-Dateien in `Documents\` löschen. Der
 Recovery-Dialog selbst kann vom offenen Menüleisten-/Button-Rendering-Bug (siehe Ledger)
 betroffen sein — keine sichtbaren Buttons zum Wegklicken.
+
+---
+
+## 14. Menüleiste — Titel-Kollaps (gefixt) vs. fehlende Blatt-Einträge (offen)
+
+**Titel-Kollaps (behoben, `6083efc9`/`2c102e5`):** Ein leerer `QMenu`-Titel kollabiert
+den ganzen Balken. `menu-bar% append` bekam den Titel, reichte ihn aber nie an den QMenu.
+`QMenuBar::addMenu(QMenu*)` leitet den Item-Text aus dem Menütitel ab → leerer Titel =
+0×0-Action-Rect = Balkenhöhe 0 auf allen drei Plattformen (gemeinsamer Racket-Pfad,
+oberhalb der Plattform). Fix = Titel via `shim_menu_set_title` durchreichen; KEIN
+Layout-Trigger, KEIN `setNativeMenuBar`, KEINE Geometrie-Reservierung. Diskriminator ist
+die Action-TEXT-Länge (0×0-Rect), NICHT `QMenuBar::height()`.
+
+**Klick-Bug — korrigierte Diagnose (prompt08072026-2, offen, NICHT gefixt):** Die
+ursprüngliche Hypothese ("Klick auf Menütitel öffnet nie ein Dropdown, egal was im Menü
+steht") war eine Artefakt-Beobachtung aus einem Testfall mit nur Blatt-Einträgen
+(`examples/menu-frame.rkt`: File→Quit, sonst nichts). Der reale Befund an echtem DrRacket
+ist präziser: Dropdowns **erscheinen** für Menüs, die mindestens ein Submenü enthalten
+(z. B. File→„Open Recent"/„Save other", Edit→„Key Bindings"/„Modes") — aber NUR die
+Submenü-Einträge sind sichtbar, reine Blatt-Items (New, Open, Save, Quit, Copy, …) fehlen
+komplett. Menüs ganz ohne Submenü (nur Blatt-Items) zeigen gar keinen Dropdown, weil ihr
+`QMenu` schlicht leer ist.
+
+Root Cause (verifiziert, `wx/qt/menu.rkt` + `qt-shim/src/shim.cpp`): `menu%.append` ruft
+für Submenüs `shim_menu_add_submenu` auf, das intern `QMenu::addMenu(sub)` aufruft — das
+fügt die Action tatsächlich zum Menü hinzu. Für Blatt-Items ruft es dagegen
+`shim_action_create` auf, das nur eine freistehende `QAction` erzeugt und ihr
+`triggered`-Signal verbindet, sie aber **nie** per `QMenu::addAction()`/`insertAction()`
+zum `qt-menu` hinzufügt. `grep -n addAction qt-shim/src/shim.cpp` liefert 0 Treffer.
+Damit ist die Action zwar in Rackets `item-table` (für Enable/Check/Callback-Dispatch),
+aber für Qt unsichtbar.
+
+Verifiziert via `examples/menu-click-probe.rkt` (Modus `mixed`, gated hinter
+`PLT_QT_DEBUG`): direkter `popup()`-Aufruf auf ein Menü mit nur Blatt-Item(en) zeigt NIE
+ein `[PLT_QT_DEBUG] popup APPEARED`; derselbe Aufruf auf ein Menü mit Blatt-Item(en) UND
+einem Submenü zeigt `popup APPEARED ... frameGeom=(...)` mit exakt einer Zeile Höhe (=
+nur das Submenü). **Das ist der wahrscheinliche Root Cause für den Klick-Bug, aber
+NICHT hier gefixt** (Spur 2, Guardrail dieser Session). Der Fix wäre voraussichtlich ein
+fehlender `QMenu::addAction(action)`-Aufruf beim Erzeugen von Blatt-Items in
+`shim_action_create` oder direkt danach in `menu%.append` — aber das ist eine Vermutung
+aus Code-Lektüre + gezielter Verifikation, kein bestätigter Patch.
+
+Nebenbefund (separat, nicht Root Cause des obigen): `QApplication::activeWindow()` ist
+auf Windows bei einem per CLI gestarteten Racket-Prozess `NULL`, auch direkt nach
+`frame.show()`. Direkte `popup()`-Aufrufe auf ein NICHT-leeres Menü zeigten in den Tests
+kurz `popup APPEARED` und dann sofort `popup GONE` (ohne Nutzerinteraktion) — möglicherweise
+zusammenhängend mit fehlendem Fenster-Fokus, aber nicht isoliert bestätigt. F10/Alt+F via
+`SendKeys` an das Testfenster zeigte keine Wirkung — konfundiert mit demselben
+`activeWindow=NULL`-Befund (SendKeys/`AppActivate` könnten das Fenster gar nicht erreicht
+haben); Ergebnis daher **inkonklusiv**, nicht als "Tastatur-Aktivierung funktioniert nicht"
+zu werten.

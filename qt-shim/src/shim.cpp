@@ -299,6 +299,16 @@ void shim_window_show(void* win, int visible)
             "mb.visible=%d actions=%d central.geom=(%d,%d %dx%d)\n",
             mb->height(), mb->sizeHint().height(), (int)mb->isVisible(),
             (int)mb->actions().size(), cg.x(), cg.y(), cg.width(), cg.height());
+        // W3 measurement (prompt08072026-2), discriminator 2: QMenuBar popups
+        // often require an active window. One-shot print, not a loop change.
+        QWidget* aw = QApplication::activeWindow();
+        if (aw)
+            fprintf(stderr,
+                "[PLT_QT_DEBUG] (d) activeWindow=%s title='%s'\n",
+                aw->metaObject()->className(),
+                aw->windowTitle().toUtf8().constData());
+        else
+            fprintf(stderr, "[PLT_QT_DEBUG] (d) activeWindow=NULL\n");
         // The real discriminator: a bar item with empty text gets a 0x0 rect
         // (collapsing the whole bar to height 0), regardless of layout state.
         QList<QAction*> acts = mb->actions();

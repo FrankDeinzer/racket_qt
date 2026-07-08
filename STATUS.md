@@ -5,6 +5,72 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-08 (2) — Klick-Bug gemessen: korrigierte Diagnose (prompt08072026-2)
+
+**Kontext:** `docs/prompt08072026-2.md`.
+
+- **Racket-Version (gemessen, Phase 0):** v9.2 [cs] — `CLAUDE.md` hatte hier noch v8.18
+  stehen (Versionsdrift aus einer älteren Session), jetzt korrigiert.
+- **W1 — Push (Gewinn gesichert).** gui-Submodul `qt-backend`: `381425d5..6083efc9` (ff).
+  Umbrella `main`: `25eb6f2..17af2ad` (ff, enthält `2c102e5` + `17af2ad`). Beide waren zuvor
+  nur lokal committet.
+- **W2 — Phase 3 (DrRacket-Gegencheck).** `PLT_QT=1 DrRacket.exe` gestartet, Screenshot
+  bestätigt: Menüleiste horizontal (File/Edit/View/Language/Racket/Insert/Scripts/Tabs/Help),
+  nicht mehr gestapelt. Titel-Fix wirkt im vollen Widget-Baum, nicht nur im Minimal-Repro.
+- **W3 — Klick-Bug gemessen, NICHT gefixt (Guardrail).** Die Hypothese aus
+  `report08072026.md` („Klick öffnet nie ein Dropdown, Event-Loop-Familie mit Redraw-Bug")
+  wurde durch eine Nutzerbeobachtung an echtem DrRacket **korrigiert**: Dropdowns erscheinen
+  für Menüs mit Submenü-Kindern (z. B. File→„Open Recent", Edit→„Key Bindings"), aber nur die
+  Submenü-Einträge sind sichtbar — reine Blatt-Items fehlen. Komplett blattlose Menüs (wie
+  der ursprüngliche Minimal-Repro `menu-frame.rkt`: File→Quit) zeigen deshalb gar keinen
+  Dropdown — das erklärt rückwirkend das „kein einziges popup APPEARED" aus `report08072026.md`.
+  **Root-Cause-Kandidat verifiziert** (Code-Lektüre + gezielte Probe, kein Fix): `shim_action_create`
+  (`qt-shim/src/shim.cpp`) erzeugt eine `QAction`, hängt sie aber nie per `addAction`/
+  `insertAction` an ihr `QMenu` — nur `shim_menu_add_submenu`s `addMenu()` tut das
+  (`grep addAction qt-shim/src/shim.cpp` → 0 Treffer). Verifiziert mit neuem, gated
+  Probe-Skript `examples/menu-click-probe.rkt` (Modus `mixed`): direkter `popup()` auf ein
+  Blatt-only-Menü → kein `popup APPEARED`; auf ein Menü mit Blatt+Submenü → `popup APPEARED
+  ... frameGeom=(100,100 107x30)` (genau 1 Zeile Höhe = nur das Submenü). Details:
+  `docs/HACKING.md` §14.
+  - Nebenbefund: `QApplication::activeWindow()` ist `NULL` direkt nach `show()` bei einem
+    CLI-gestarteten Racket-Prozess. Direkte `popup()`-Aufrufe auf nicht-leere Menüs zeigten
+    kurz `popup APPEARED` gefolgt von sofortigem `popup GONE` ohne Nutzerinteraktion — evtl.
+    mit dem Fokus-Befund zusammenhängend, nicht isoliert bestätigt.
+  - F10/Alt+F via SendKeys zeigte keine Wirkung — **konfundiert** mit `activeWindow=NULL`
+    (SendKeys/`AppActivate` könnten das Fenster nie erreicht haben). Ergebnis **inkonklusiv**,
+    nicht als „Tastatur-Aktivierung funktioniert nicht" zu werten.
+- **W4 — Doku:** `docs/HACKING.md` §14 (korrigierte Menü-Lektion), `CLAUDE.md`-Checkpoint-
+  Tabelle aktualisiert, dieser Eintrag + Nachtrag der vorherigen 07-08(1)-Session unten.
+- **Neue Datei:** `examples/menu-click-probe.rkt`. Gated Mess-Hooks (alle hinter
+  `PLT_QT_DEBUG`, nirgends ungegated): `debug-get-appended-menu` in `wx/qt/menu-bar.rkt`
+  (liefert das wx-Level-`menu%`-Handle des in der Bar eingebetteten QMenu für Direkt-
+  `popup()`-Tests) + `activeWindow`-Print in `qt-shim/src/shim.cpp`.
+- **Klick-Bug-FIX bleibt out of scope** (Spur 2, nächste Session, braucht Cross-Platform-
+  Daten + Review — Guardrail dieser Session).
+
+---
+
+## Session 2026-07-08 (1) — Menüleiste sichtbar: Titel-Fix (prompt08072026)
+
+**Kontext:** `docs/prompt08072026.md`, Ergebnis: `docs/report08072026.md`. (Nachträglich in
+STATUS.md aufgenommen — dieser Eintrag fehlte bisher.)
+
+- **Root Cause gefunden:** `menu-bar% append` (`wx/qt/menu-bar.rkt`) bekam den Menütitel,
+  reichte ihn aber nie an den zugrundeliegenden `QMenu` durch. `QMenuBar::addMenu(QMenu*)`
+  leitet den Balken-Item-Text aus dem Menütitel ab → leerer Titel = 0×0-Action-Rect =
+  Balkenhöhe 0 auf allen drei Plattformen. Widerlegt die ursprüngliche deferred-Layout-
+  Hypothese vollständig (kein Layout-Trigger ändert je etwas an einem leeren Titel).
+- **Fix:** `shim_menu_set_title` (neu, `shim.cpp` + `utils.rkt`), aufgerufen in
+  `menu-bar%.append` vor `shim_menubar_add_menu`. Kein Layout-Eingriff.
+- **Nutzerbestätigt:** Menüleiste sichtbar, File/Edit/Help horizontal an korrekten
+  x-Positionen (0/52/107).
+- **Neues Problem entdeckt (Klick öffnet keinen Dropdown)** — gemessen in Session (2) oben,
+  Diagnose dort korrigiert.
+- **Commits:** gui-Submodul `6083efc9`, Umbrella `2c102e5` + `17af2ad`. War zum Zeitpunkt
+  dieses Berichts nur lokal — in Session (2) oben gepusht.
+
+---
+
 ## Session 2026-07-07 (3) — Windows Menü/Redraw-Diagnose (kein Re-Sync)
 
 **Kontext:** `docs/prompt07072026.md`, Ergebnis: `docs/report07072026_win.md`.

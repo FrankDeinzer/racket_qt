@@ -17,7 +17,7 @@ Qt Widgets backend ("wx/qt/") für `racket/gui`. Additiver Spike: aktiviert via 
 
 | | |
 |---|---|
-| Racket | v8.18 [cs], x86-64 |
+| Racket | v9.2 [cs], x86-64 |
 | Qt | 6.11.0, `C:\Qt\6.11.0\msvc2022_64` |
 | CMake | 4.2.3, Generator "Visual Studio 17 2022" |
 | Preset | `windows-x64` → `qt-shim/build/windows-x64` |
@@ -94,7 +94,7 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 | **macOS Smoke** | **✅ 2026-06-25** |
 | **Linux Smoke** | **✅ 2026-06-29** |
 | **E-0 – Widget-Stubs + text-field% fix** | **✅ 2026-06-30** |
-| **E-0 – gui-lib-Angleich 1.78→1.80 + echtes DrRacket** | **🟡 2026-07-02 (Tippen/Enter/Ausführen funktioniert, Menüleiste visuell kaputt)** |
+| **E-0 – gui-lib-Angleich 1.78→1.80 + echtes DrRacket** | **🟡 2026-07-08 (Tippen/Enter/Ausführen funktioniert; Menüleiste sichtbar + horizontal [Titel-Fix, Windows bestätigt]; OFFEN: Klick öffnet Dropdown nur für Submenü-Einträge, Blatt-Items fehlen)** |
 | E – Widget-Breite (dialog%, message%, …) | ⬜ |
 
 **Checkpoint D — erledigt:**
@@ -133,6 +133,12 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 - Tippen, Enter/Zeilenumbruch und Code-Ausführung funktionieren in Definitions- und Interactions-Editor
 - **Offen (Flags für E-1):** Menüleiste visuell nicht sichtbar (Daten/Wiring nachweislich korrekt — 165 Menüpunkte gebaut); Popup-Positionierung falsch (`client-to-screen` No-op, fehlender `mapToGlobal`-Shim); teilweises Neuzeichnen im Editor-Bereich (nicht root-caused)
 - **Drei-Maschinen-Pflicht-Folgeschritt:** macOS/Linux müssen `qt-backend` (jetzt `381425d5`) + Umbrella `main` neu ziehen und **beide** `raco setup` laufen lassen (gui-lib hat sich strukturell verändert), dann re-smoken
+
+**Checkpoint E-0 / Menüleiste — erledigt + neu diagnostiziert (2026-07-08):**
+- **Titel-Fix erledigt (Windows bestätigt, gepusht):** leerer `QMenu`-Titel kollabierte den Balken auf Höhe 0 (gemeinsamer Racket-Pfad); Fix = Titel via `shim_menu_set_title` durchreichen (`wx/qt/menu-bar.rkt` `append`). Balken jetzt horizontal sichtbar in `menu-frame.rkt` UND echtem DrRacket.
+- **Klick-Bug neu diagnostiziert (weiterhin offen, NICHT gefixt):** ursprüngliche Annahme „Klick öffnet nie ein Dropdown" war ein Artefakt eines Blatt-only-Testmenüs. Realer Befund: Dropdowns erscheinen für Menüs mit Submenü-Kindern, aber nur die Submenü-Einträge sind sichtbar — Blatt-Items fehlen komplett, weil `shim_action_create` (`qt-shim/src/shim.cpp`) seine `QAction` nie per `addAction`/`insertAction` zum `QMenu` hinzufügt (nur `shim_menu_add_submenu`s `addMenu()` tut das). Verifiziert per gated Probe (`examples/menu-click-probe.rkt`), Details: `docs/HACKING.md` §14.
+- **mapToGlobal/Redraw:** weiterhin offen, unverändert.
+- **Fix für den Klick-Bug ist Spur 2** (nächste Session, Cross-Platform-Daten + Review nötig — Guardrail dieser Session war „messen, nicht fixen").
 
 **Nächster Schritt: Checkpoint E** — Widget-Breite nach konkretem App-Bedarf.
 
