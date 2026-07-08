@@ -5,6 +5,48 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-08 (4, macOS) — Menü-Fixes cross-platform-validiert + neuer DrRacket-Crash gefixt (prompt08072026-4)
+
+**Kontext:** `docs/prompt08072026-4.md`. Voller Bericht: `docs/report08072026-4-macos.md`.
+
+- **Racket-Version (gemessen, Phase 0):** v9.2 [cs], arm64. gui-Submodul stand vor Sync 4
+  Commits hinter `origin/qt-backend` (stale-Shim-Falle wie vorhergesagt) — auf `1641f888`
+  nachgezogen, Shim neu gebaut, Smoke 3/3 grün.
+- **Ladecheck wichtig:** macOS nutzt für `gui-lib` **keinen** Installation-Link (Katalog-Paket
+  bleibt Upstream 1.80) — DrRacket/Racket-Aufrufe brauchen zwingend den `-S`-Source-Override,
+  sonst stiller Fallback auf cocoa (falsches Grün). Verifiziert über `PLT_QT_DEBUG=1`.
+- **addAction-Fix: grün.** Probe (`mixed`/`dynamic`) exakt wie erwartet; echtes DrRacket zeigt
+  File-Menü vollständig gefüllt (alle Blatt-Items + 2 Submenüs, Screenshot in der Session).
+- **mapToGlobal-Fix: grün.** Isolierter `client-to-screen`-Datentest (Advisor-Empfehlung, umgeht
+  Popup/Event-Delivery): Basispunkt ist am Fenster verankert (nicht `(0,0)` wie beim alten
+  No-op), Translation exakt 1:1. Echtes DrRacket: Rechtsklick-Kontextmenü öffnet am Klickpunkt.
+- **Neuer, unabhängiger Crash gefunden + auf Nutzer-Anweisung gefixt:** `set-label`-Arity-
+  Mismatch in der qt-`tab-panel%`-Stub (`wx/qt/platform.rkt:25`) — DrRacket ruft beim Start
+  `set-label` mit 2 Argumenten (Index+Label), Stub akzeptierte nur 1 (Button-Stil). Ursache:
+  qt-Backend meldet `tab-panel-available? => #t`, hat aber (anders als gtk/win32) keine
+  dedizierte `tab-panel.rkt` mit echtem 2-Arg-`set-label`. Fix: `set-label` variadic gemacht,
+  gespiegelt an `append`s bestehender Rest-Arg-Behandlung in derselben Stub-Factory — sicher,
+  da nur No-op-Stub-Klassen betroffen. Nach Fix: DrRacket startet vollständig, alle 9 Menüs
+  sichtbar, Smoke 3/3 weiterhin grün. Commits: gui `ba2dacc9`, Umbrella `ea92deb` — **noch
+  nicht gepusht**, Nutzer-OK ausstehend.
+- **Nebenklärung (kein Bug):** Der Nutzer beobachtete beim `menu-click-probe.rkt`-Lauf ein
+  Dropdown, das weit außerhalb des kleinen Probe-Fensters aufging — das ist beabsichtigt
+  (`shim_menu_popup` nutzt globale Bildschirmkoordinaten `(100,100)`, unabhängig von der
+  Fensterposition), kein mapToGlobal-Bug, keine Aktion nötig.
+- **Nebenklärung (kein Bug):** ein nacktes `text%`/`editor-canvas%` (ohne DrRacket-Editor-
+  Subklassen) zeigte bei Rechtsklick gar kein Kontextmenü — Symptom passt nicht zu einem
+  kaputten mapToGlobal (das würde falsch platzieren, nicht verschwinden lassen); vermutlich
+  fehlendes Default-Popup-Menü auf nacktem `text%`, nicht weiter diagnostiziert (out of scope).
+- **Guardrail-Abweichung, vom Nutzer autorisiert:** Original-Prompt sah reine Validierung ohne
+  Fix-Commits vor; der DrRacket-Crash wurde gemeldet, gestoppt, und auf explizite Anweisung
+  des Nutzers gefixt (Scope-Erweiterung, kein eigenmächtiges Abweichen).
+- **Offen:** Push von `ba2dacc9`/`ea92deb` ausstehend; **Linux-Validierung steht noch aus** —
+  `CLAUDE.md`-Checkpoint E-0-Menü erst nach grünem Linux schließen (inkl. des neuen
+  `set-label`-Fixes, den Linux mitzieht). Windows sollte vor Re-Sync über den dritten Fix
+  informiert werden. Redraw-Bug weiterhin separat offen, unverändert beobachtet.
+
+---
+
 ## Session 2026-07-08 (3) — Menüs voll funktional: addAction-Fix + mapToGlobal-Fix (prompt08072026-3)
 
 **Kontext:** `docs/prompt08072026-3.md`. Voller Bericht: `docs/report08072026-3.md`.
