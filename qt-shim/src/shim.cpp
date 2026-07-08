@@ -18,6 +18,8 @@
 #include <QEnterEvent>
 #include <cstdint>
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
 #include <chrono>
 
 #ifdef _WIN32
@@ -42,6 +44,18 @@ typedef void (*shim_focus_cb_t)(void* ud, int gained);
 static int    s_argc = 0;
 static char** s_argv = nullptr;
 static QApplication* s_app = nullptr;
+
+// Temporary diagnostics, gated by env PLT_QT_DEBUG (read once). Left in the
+// code intentionally — QMenuBar layout instrumentation for the menu-bar work.
+static bool plt_qt_debug()
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char* v = std::getenv("PLT_QT_DEBUG");
+        cached = (v && v[0] && v[0] != '0') ? 1 : 0;
+    }
+    return cached != 0;
+}
 
 // ---- RacketCanvas -------------------------------------------------------
 
@@ -209,6 +223,26 @@ void shim_pump(int max_ms)
 {
     if (s_app)
         s_app->processEvents(QEventLoop::AllEvents, max_ms);
+    // Popup diagnostic: report when a popup (e.g. a menu dropdown) appears or
+    // disappears, and its geometry, to distinguish never-shown vs shown-then-
+    // closed vs off-screen. Transition-logged to avoid flooding every pump.
+    if (plt_qt_debug()) {
+        static QWidget* last = nullptr;
+        QWidget* pop = QApplication::activePopupWidget();
+        if (pop != last) {
+            if (pop) {
+                QRect g = pop->frameGeometry();
+                fprintf(stderr,
+                    "[PLT_QT_DEBUG] popup APPEARED class=%s visible=%d "
+                    "frameGeom=(%d,%d %dx%d)\n",
+                    pop->metaObject()->className(), (int)pop->isVisible(),
+                    g.x(), g.y(), g.width(), g.height());
+            } else {
+                fprintf(stderr, "[PLT_QT_DEBUG] popup GONE\n");
+            }
+            last = pop;
+        }
+    }
 }
 
 // Returns elapsed microseconds for a single processEvents call.
@@ -255,6 +289,28 @@ void shim_window_show(void* win, int visible)
 {
     auto* rw = static_cast<RacketWindow*>(win);
     if (visible) rw->show(); else rw->hide();
+    if (visible && plt_qt_debug()) {
+        // menuBar() is safe here only because one was already set; it would
+        // auto-create an empty bar otherwise.
+        QMenuBar* mb = rw->menuBar();
+        QRect cg = rw->centralWidget() ? rw->centralWidget()->geometry() : QRect();
+        fprintf(stderr,
+            "[PLT_QT_DEBUG] (c) after show: mb.height=%d mb.sizeHint.h=%d "
+            "mb.visible=%d actions=%d central.geom=(%d,%d %dx%d)\n",
+            mb->height(), mb->sizeHint().height(), (int)mb->isVisible(),
+            (int)mb->actions().size(), cg.x(), cg.y(), cg.width(), cg.height());
+        // The real discriminator: a bar item with empty text gets a 0x0 rect
+        // (collapsing the whole bar to height 0), regardless of layout state.
+        QList<QAction*> acts = mb->actions();
+        for (int i = 0; i < acts.size(); ++i) {
+            QAction* a = acts[i];
+            fprintf(stderr,
+                "[PLT_QT_DEBUG] (c) action[%d] text='%s' rect=(%d,%d %dx%d)\n",
+                i, a->text().toUtf8().constData(),
+                mb->actionGeometry(a).x(), mb->actionGeometry(a).y(),
+                mb->actionGeometry(a).width(), mb->actionGeometry(a).height());
+        }
+    }
 }
 
 void shim_window_destroy(void* win)
@@ -392,15 +448,32 @@ void shim_button_destroy(void* btn_ptr)
 
 void* shim_menubar_create(void)
 {
-    return new QMenuBar(nullptr);
+    QMenuBar* mb = new QMenuBar(nullptr);
+    if (plt_qt_debug())
+        fprintf(stderr,
+            "[PLT_QT_DEBUG] (a) menubar_create: sizeHint.h=%d height=%d native=%d\n",
+            mb->sizeHint().height(), mb->height(), (int)mb->isNativeMenuBar());
+    return mb;
 }
 
 // Attaches an existing QMenuBar to a QMainWindow.
 // QMainWindow takes ownership; do NOT delete the QMenuBar separately after this.
 void shim_window_set_menubar(void* win, void* menubar)
 {
-    static_cast<RacketWindow*>(win)->setMenuBar(
-        static_cast<QMenuBar*>(menubar));
+    RacketWindow* rw = static_cast<RacketWindow*>(win);
+    QMenuBar*     mb = static_cast<QMenuBar*>(menubar);
+    rw->setMenuBar(mb);
+    if (plt_qt_debug()) {
+        QRect cg = rw->centralWidget() ? rw->centralWidget()->geometry() : QRect();
+        QRect cr = rw->contentsRect();
+        fprintf(stderr,
+            "[PLT_QT_DEBUG] (b) set_menubar: mb.height=%d mb.sizeHint.h=%d mb.visible=%d "
+            "actions=%d central.geom=(%d,%d %dx%d) contentsRect=(%d,%d %dx%d)\n",
+            mb->height(), mb->sizeHint().height(), (int)mb->isVisible(),
+            (int)mb->actions().size(),
+            cg.x(), cg.y(), cg.width(), cg.height(),
+            cr.x(), cr.y(), cr.width(), cr.height());
+    }
 }
 
 // Returns the QAction* for the menu at position pos in the bar, or nullptr.
@@ -431,6 +504,14 @@ void shim_menubar_add_menu(void* menubar, void* menu)
 {
     static_cast<QMenuBar*>(menubar)->addMenu(
         static_cast<QMenu*>(menu));
+}
+
+// Sets a menu's title. Needed for top-level bar menus: QMenuBar::addMenu(QMenu*)
+// derives the bar item's text from the menu's title, so an empty title yields a
+// zero-size (invisible) bar item. Submenus get their title via add_submenu.
+void shim_menu_set_title(void* menu, const char* title)
+{
+    static_cast<QMenu*>(menu)->setTitle(QString::fromUtf8(title));
 }
 
 // Add a submenu at the end; returns the QAction* that represents it.
