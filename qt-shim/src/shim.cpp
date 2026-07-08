@@ -237,6 +237,21 @@ void shim_pump(int max_ms)
                     "frameGeom=(%d,%d %dx%d)\n",
                     pop->metaObject()->className(), (int)pop->isVisible(),
                     g.x(), g.y(), g.width(), g.height());
+                if (QMenu* qm = qobject_cast<QMenu*>(pop)) {
+                    const auto acts = qm->actions();
+                    fprintf(stderr,
+                        "[PLT_QT_DEBUG] popup actions().size()=%d\n",
+                        (int)acts.size());
+                    for (int i = 0; i < acts.size(); ++i)
+                        fprintf(stderr,
+                            "[PLT_QT_DEBUG] popup action[%d] text='%s' sep=%d menu=%d "
+                            "enabled=%d checked=%d\n",
+                            i, qUtf8Printable(acts[i]->text()),
+                            (int)acts[i]->isSeparator(),
+                            (int)(acts[i]->menu() != nullptr),
+                            (int)acts[i]->isEnabled(),
+                            (int)acts[i]->isChecked());
+                }
             } else {
                 fprintf(stderr, "[PLT_QT_DEBUG] popup GONE\n");
             }
@@ -544,6 +559,27 @@ void shim_menu_remove_action(void* menu, void* action)
         static_cast<QAction*>(action));
 }
 
+// Gated, on-demand dump of a QMenu's actions().size() and per-action state.
+// Unlike the popup-transition diagnostic in shim_pump, this fires every call
+// regardless of popup visibility -- needed to observe enable/check/delete
+// dispatch on a menu that stays open across mutations (prompt08072026-3).
+void shim_menu_debug_dump(void* menu)
+{
+    if (!plt_qt_debug()) return;
+    QMenu* m = static_cast<QMenu*>(menu);
+    const auto acts = m->actions();
+    fprintf(stderr, "[PLT_QT_DEBUG] dump actions().size()=%d\n", (int)acts.size());
+    for (int i = 0; i < acts.size(); ++i)
+        fprintf(stderr,
+            "[PLT_QT_DEBUG] dump action[%d] text='%s' sep=%d menu=%d "
+            "enabled=%d checked=%d\n",
+            i, qUtf8Printable(acts[i]->text()),
+            (int)acts[i]->isSeparator(),
+            (int)(acts[i]->menu() != nullptr),
+            (int)acts[i]->isEnabled(),
+            (int)acts[i]->isChecked());
+}
+
 void shim_menu_popup(void* menu, int x, int y)
 {
     static_cast<QMenu*>(menu)->popup(QPoint(x, y));
@@ -551,15 +587,21 @@ void shim_menu_popup(void* menu, int x, int y)
 
 // ---- action -----------------------------------------------------------------
 
-void* shim_action_create(const char* label, int checkable,
+// Creates a leaf QAction and adds it to `menu`, mirroring shim_menu_add_submenu's
+// addMenu() call. The action is parented to `menu` for lifetime (QMenu::addAction
+// does NOT take ownership per Qt docs), so it is deleted when the menu is —
+// consistent with removeAction() only detaching, never deleting.
+void* shim_action_create(void* menu, const char* label, int checkable,
                          shim_callback_t cb, void* ud)
 {
-    auto* a = new QAction(QString::fromUtf8(label));
+    QMenu* m = static_cast<QMenu*>(menu);
+    auto* a = new QAction(QString::fromUtf8(label), m);
     a->setCheckable(checkable != 0);
     if (cb) {
         QObject::connect(a, &QAction::triggered,
                          [cb, ud](bool) { cb(ud); });
     }
+    m->addAction(a);
     return a;
 }
 

@@ -8,8 +8,11 @@
 ;   racket examples/menu-click-probe.rkt direct    ; discriminator 1
 ;   racket examples/menu-click-probe.rkt keyboard  ; discriminator 3 (external SendKeys)
 ;   racket examples/menu-click-probe.rkt click     ; discriminator 4 (user clicks)
+;   racket examples/menu-click-probe.rkt mixed     ; addAction-Fix: leaf+submenu (prompt08072026-3)
+;   racket examples/menu-click-probe.rkt dynamic   ; addAction-Fix: separators/checkable/enable/delete
 (require racket/cmdline
-         (only-in mred/private/wx/qt/menu-bar debug-get-appended-menu))
+         (only-in mred/private/wx/qt/menu-bar debug-get-appended-menu)
+         (only-in mred/private/wx/qt/utils shim_menu_debug_dump))
 
 (define mode (command-line #:args (m) m))
 
@@ -30,6 +33,16 @@
 (define m-recent (new menu% [label "Recent"] [parent m-mixed]))
 (new menu-item% [label "doc1.txt"] [parent m-recent] [callback (lambda (i e) (void))])
 (new menu-item% [label "Save"] [parent m-mixed] [callback (lambda (i e) (void))])
+
+; "dynamic" mode: separators + a checkable item + enable/check/delete dispatch
+; over the item-table -- verifies these still work now that leaf items really
+; hang in the QMenu (addAction-Fix, prompt08072026-3).
+(define m-dyn (new menu% [label "Dyn"] [parent mb]))
+(define item-a (new menu-item% [label "Alpha"] [parent m-dyn] [callback (lambda (i e) (void))]))
+(new separator-menu-item% [parent m-dyn])
+(define item-b (new checkable-menu-item% [label "Beta"] [parent m-dyn] [callback (lambda (i e) (void))]))
+(new separator-menu-item% [parent m-dyn])
+(define item-c (new menu-item% [label "Gamma"] [parent m-dyn] [callback (lambda (i e) (void))]))
 
 (send frame show #t)
 (printf "[PROBE] frame shown, mode=~a\n" mode)
@@ -66,6 +79,26 @@
       (send mixed-wx-menu popup 100 100 #f #f)
       (sleep/yield 6)
       (printf "[PROBE] mixed test done\n")]
+     [else
+      (printf "[PROBE] ERROR: debug-get-appended-menu returned #f -- was PLT_QT_DEBUG=1 set?\n")])]
+  [(equal? mode "dynamic")
+   ; verification: separators, a checkable item, and enable/check/delete
+   ; dispatch over the item-table now that items really hang in the QMenu.
+   (define dyn-wx-menu (debug-get-appended-menu "Dyn"))
+   (cond
+     [dyn-wx-menu
+      (printf "[PROBE] Dyn baseline dump:\n")
+      (shim_menu_debug_dump (send dyn-wx-menu get-qt-menu))
+      (printf "[PROBE] disabling Alpha, checking Beta, deleting Gamma\n")
+      (send item-a enable #f)
+      (send item-b check #t)
+      (send item-c delete)
+      (printf "[PROBE] Dyn after-mutation dump:\n")
+      (shim_menu_debug_dump (send dyn-wx-menu get-qt-menu))
+      (printf "[PROBE] Dyn after-mutation popup(100,100) (visual confirm)\n")
+      (send dyn-wx-menu popup 100 100 #f #f)
+      (sleep/yield 3)
+      (printf "[PROBE] dynamic test done\n")]
      [else
       (printf "[PROBE] ERROR: debug-get-appended-menu returned #f -- was PLT_QT_DEBUG=1 set?\n")])]
   [(equal? mode "click")
