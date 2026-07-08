@@ -425,3 +425,52 @@ zusammenhängend mit fehlendem Fenster-Fokus, aber nicht isoliert bestätigt. F1
 `activeWindow=NULL`-Befund (SendKeys/`AppActivate` könnten das Fenster gar nicht erreicht
 haben); Ergebnis daher **inkonklusiv**, nicht als "Tastatur-Aktivierung funktioniert nicht"
 zu werten.
+
+## 15. Menü-Blatt-Items (gefixt) + Popup-Positionierung (gefixt) — prompt08072026-3
+
+**addAction-Fix (`0be24d85`/`71b7347` gui/`main`):** Root Cause aus §14 bestätigt und
+behoben. `shim_action_create` erzeugte die `QAction` ohne sie per `QMenu::addAction()`
+zum Menü hinzuzufügen — Dropdown zeigte nur Submenü-Einträge, Blatt-Items (New, Open,
+Save, Quit, Copy, …) fehlten komplett. Fix, gespiegelt am funktionierenden Submenü-Pfad
+(`shim_menu_add_submenu`→`addMenu`): Signatur wird um den `menu`-Parameter erweitert
+(`shim_action_create(menu, label, checkable, cb, ud)`), die Action wird mit `new
+QAction(label, menu)` an ihr Menü **geparentet** (Lifetime — `QMenu::addAction`/
+`QWidget::addAction` übernehmen laut Qt-Doku **kein** Ownership; ohne Parent wäre die
+Action ein für immer freistehendes Leak, da `shim_menu_remove_action`→`removeAction()`
+nur entfernt, nie löscht) und explizit per `menu->addAction(a)` eingefügt.
+`menu.rkt`s `append` reicht `qt-menu` durch.
+
+Verifiziert (gated `PLT_QT_DEBUG`, `examples/menu-click-probe.rkt`):
+- `direct`: Blatt-only-Menü (File→Quit) → `popup actions().size()=1`, `action[0]
+  text='Quit'`.
+- `mixed`: New(Blatt) + Recent(Submenü) + Save(Blatt) → `actions().size()=3`, korrekte
+  Reihenfolge `New, Recent(menu=1), Save`.
+- `dynamic` (neu): Separatoren an richtiger Position, `checkable-menu-item%.check`
+  spiegelt sich in `checked=1`, `enable #f` in `enabled=0`, `delete` reduziert
+  `actions().size()` sichtbar (5→4) — alles am selben, weiterhin geöffneten `QMenu`
+  gemessen (nicht über die Popup-Transition-Heuristik, die nur bei Sichtbarkeits-
+  wechsel feuert — dafür gibt es jetzt `shim_menu_debug_dump(menu)`, gated,
+  On-Demand-Dump von `actions().size()` + Enabled/Checked/Separator/Submenu je Action).
+- Echtes DrRacket: File- und Edit-Menü zeigen alle Blatt-Items, Submenüs (Open Recent,
+  Save Other, Keybindings, Modes), korrekt ausgegraute Items (Close Tab, Redo, Cut,
+  Copy) und Checkmark (Wrap Text) — Screenshots in der Session, nicht im Repo abgelegt.
+- Smoke 3/3 weiterhin grün, kein Ownership-Crash/-Warning beim normalen Schließen.
+
+**mapToGlobal-Fix (`1641f888`/`8e0bfac` gui/`main`):** `client-to-screen` in
+`wx/qt/window.rkt` war No-op (§CLAUDE.md-Flag) — `popup-menu` öffnete Kontextmenüs an den
+rohen lokalen statt den Bildschirmkoordinaten. Neue Shim-Funktion
+`shim_widget_client_to_screen(widget, x, y, *out_x, *out_y)` ruft
+`QWidget::mapToGlobal(QPoint(x,y))`; FFI-Binding nutzt das `_ptr o`-Out-Parameter-Idiom
+(`(_fun _pointer _int _int (out-x : (_ptr o _int)) (out-y : (_ptr o _int)) -> _void ->
+(values out-x out-y))`). `window%`s `client-to-screen` ruft das auf `handle` auf (No-op
+bleibt nur, wenn `handle` `#f` ist, z. B. bei `menu%`/`menu-bar%`, die nie
+`client-to-screen` aufrufen). DPR ist auf 1 gepinnt (`QT_SCALE_FACTOR=1` in
+`shim_app_init`) — device-independent px konsistent auf beiden Seiten, kein
+Multi-Monitor-Skalierungs-Sonderfall hier. `screen-to-client` bleibt No-op — wird nur vom
+`wx/proxy<%>`-Sibling-Remapping-Pfad (`wxwindow.rkt`) genutzt, von keinem Widget dieses
+Backends bisher ausgelöst.
+
+Verifiziert: Rechtsklick im Definitions-Editor von echtem DrRacket öffnet das
+Kontextmenü jetzt direkt am Klickpunkt (window-relative (400,300) → Menü erscheint bei
+~(403,304)) statt am Fensterrand. `window.rkt` musste neu `"utils.rkt"` requiren (fehlte
+vorher — kein Zirkularproblem, `utils.rkt` requirt nichts aus `wx/qt/`).

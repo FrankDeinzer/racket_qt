@@ -5,6 +5,37 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-08 (3) — Menüs voll funktional: addAction-Fix + mapToGlobal-Fix (prompt08072026-3)
+
+**Kontext:** `docs/prompt08072026-3.md`. Voller Bericht: `docs/report08072026-3.md`.
+
+- **Racket-Version (gemessen, Phase 0):** v9.2 [cs].
+- **Phase 1 — addAction-Fix (gefixt, gemessen, gepusht).** Root-Cause-Kandidat aus
+  Session (2) bestätigt: `shim_action_create` fügte die `QAction` nie per `addAction()` zu
+  ihrem `QMenu` hinzu. Fix, gespiegelt am Submenü-Pfad: Signatur um `menu`-Parameter
+  erweitert, Action per Konstruktor an ihr Menü geparentet (Ownership — `addAction`
+  übernimmt laut Qt-Doku kein Ownership, ohne Parent wäre die Action ein Leak), explizit
+  `menu->addAction(a)`. Verifiziert per Probe (`direct`/`mixed`/neuem `dynamic`-Modus:
+  Separatoren, Checkable, Enable/Delete-Dispatch — alles korrekt) und echtem DrRacket
+  (File-/Edit-Menü vollständig gefüllt, Screenshots in der Session). Smoke 3/3 grün, kein
+  Ownership-Crash/-Warning. Commits: gui `0be24d85`, Umbrella `71b7347`.
+- **Checkpoint A — GO (autonom).** Alle Kriterien grün, keine Anomalie → Session lief laut
+  Prompt-Vorgabe selbständig zu Phase 2 weiter.
+- **Phase 2 — mapToGlobal-Fix (gefixt, gemessen, gepusht).** Neue Shim-Funktion
+  `shim_widget_client_to_screen` (`QWidget::mapToGlobal`), verdrahtet in `wx/qt/window.rkt`s
+  `client-to-screen` (war No-op). Verifiziert: Rechtsklick-Kontextmenü in echtem DrRacket
+  öffnet jetzt am Klickpunkt statt am Fensterrand. `screen-to-client` bleibt No-op
+  (ungenutzt in diesem Backend). Commits: gui `1641f888`, Umbrella `8e0bfac`.
+- **Qt-Skills konsultiert** vor dem Schreiben von Shim-Code: `QWidget::addAction`/
+  `QMenu::addMenu` Ownership-Semantik, `QWidget::mapToGlobal` für Multi-Screen/DPR.
+- **Checkpoint B (STOPP, hier erreicht):** Nutzer-Bestätigung beider Visuals ausstehend.
+  Danach Phase 3/4 (macOS/Linux: ff-Pull, Shim neu bauen — stale-Shim-Falle 07-07 —,
+  re-smoke, cross-platform validieren), erst dann `CLAUDE.md`-Checkpoint E-0-Menü
+  schließen. Redraw-Bug weiterhin separat offen.
+- Doku: `docs/HACKING.md` §15 (neue Lektion, beide Fixes).
+
+---
+
 ## Session 2026-07-08 (2) — Klick-Bug gemessen: korrigierte Diagnose (prompt08072026-2)
 
 **Kontext:** `docs/prompt08072026-2.md`.

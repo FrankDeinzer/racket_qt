@@ -94,7 +94,7 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 | **macOS Smoke** | **✅ 2026-06-25** |
 | **Linux Smoke** | **✅ 2026-06-29** |
 | **E-0 – Widget-Stubs + text-field% fix** | **✅ 2026-06-30** |
-| **E-0 – gui-lib-Angleich 1.78→1.80 + echtes DrRacket** | **🟡 2026-07-08 (Tippen/Enter/Ausführen funktioniert; Menüleiste sichtbar + horizontal [Titel-Fix, Windows bestätigt]; OFFEN: Klick öffnet Dropdown nur für Submenü-Einträge, Blatt-Items fehlen)** |
+| **E-0 – gui-lib-Angleich 1.78→1.80 + echtes DrRacket** | **🟡 2026-07-08 (Tippen/Enter/Ausführen funktioniert; Menüleiste sichtbar+horizontal [Titel-Fix] UND gefüllt [addAction-Fix] UND Popups korrekt platziert [mapToGlobal-Fix], alle drei Windows-bestätigt; OFFEN: macOS/Linux-Cross-Platform-Validierung + Nutzer-Visual-Bestätigung [Checkpoint B] noch ausstehend, dann E-0-Menü schließen; Redraw-Bug separat offen)** |
 | E – Widget-Breite (dialog%, message%, …) | ⬜ |
 
 **Checkpoint D — erledigt:**
@@ -140,7 +140,13 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 - **mapToGlobal/Redraw:** weiterhin offen, unverändert.
 - **Fix für den Klick-Bug ist Spur 2** (nächste Session, Cross-Platform-Daten + Review nötig — Guardrail dieser Session war „messen, nicht fixen").
 
-**Nächster Schritt: Checkpoint E** — Widget-Breite nach konkretem App-Bedarf.
+**Checkpoint E-0 / Spur 2 — addAction-Fix + mapToGlobal-Fix erledigt (2026-07-08, prompt08072026-3, Windows bestätigt):**
+- **addAction-Fix (gui `0be24d85`, Umbrella `71b7347`):** `shim_action_create` fügte die `QAction` nie per `addAction()` zum Menü hinzu (Root Cause aus `docs/HACKING.md` §14 bestätigt). Fix: Signatur bekommt `menu`-Parameter, Action wird ans Menü geparentet (Lifetime/Ownership — `addAction` übernimmt laut Qt-Doku kein Ownership) und per `menu->addAction(a)` eingefügt, gespiegelt am `shim_menu_add_submenu`-Pfad. Verifiziert per Probe (`direct`/`mixed`/neuem `dynamic`-Modus) und echtem DrRacket (File-/Edit-Menü vollständig gefüllt, Separatoren/Checkables/Enable-Disable korrekt) — Details `docs/HACKING.md` §15.
+- **mapToGlobal-Fix (gui `1641f888`, Umbrella `8e0bfac`):** neue Shim-Funktion `shim_widget_client_to_screen` (`QWidget::mapToGlobal`), verdrahtet in `wx/qt/window.rkt`s `client-to-screen`. Verifiziert: Rechtsklick-Kontextmenü in echtem DrRacket öffnet jetzt am Klickpunkt statt am Fensterrand. `screen-to-client` bleibt No-op (ungenutzt in diesem Backend). Details `docs/HACKING.md` §15.
+- Smoke 3/3 weiterhin grün nach beiden Fixes, kein Ownership-Crash/-Warning.
+- **OFFEN:** macOS/Linux müssen `qt-backend` (jetzt `1641f888`) + Umbrella `main` (jetzt `8e0bfac`) neu ziehen, Shim **neu bauen** (beide Fixes ändern `shim.cpp` — stale-Shim-Falle 07-07) und re-smoken; Nutzer-Visual-Bestätigung (Checkpoint B) für beide Fixes steht noch aus. Redraw-Bug weiterhin separat offen (eigene Session).
+
+**Nächster Schritt: Checkpoint B (Nutzer-Bestätigung) → Phase 3/4 (macOS/Linux) → danach Checkpoint E** — Widget-Breite nach konkretem App-Bedarf.
 
 ## Dokumentation
 
