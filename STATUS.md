@@ -7,7 +7,7 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ## Session 2026-07-09 (Windows) — Clean-Start-Check + Redraw-Bug gemessen (2026-07-09_prompt)
 
-**Kontext:** `docs/2026-07-09_prompt.md`. Voller Bericht: `docs/2026-07-09_report.md`.
+**Kontext:** `docs/2026-07-09_prompt.md`. Voller Bericht: `docs/2026-07-09_report-win.md`.
 
 - **Phase 0 — Stand verifiziert.** `racket --version` = v9.2 [cs] (gemessen). gui-Submodul war
   bereits auf `qt-backend` `b2369d48` (enthält alle vier Fixes: addAction, mapToGlobal,
@@ -32,7 +32,7 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 - **Commits:** gui-Submodul (`qt-backend`) — Kommentar-Update (Session-Label-Rename) bereits
   vor dieser Session gepusht; diese Session fügt die gated Diagnose-Hooks in `canvas.rkt`
   hinzu (eigener Commit). Umbrella (`main`) — `shim.cpp`-Diagnose-Hooks, `docs/HACKING.md` §16,
-  `CLAUDE.md`-Checkpoint-Tabelle, dieser STATUS-Eintrag, `docs/2026-07-09_report.md`.
+  `CLAUDE.md`-Checkpoint-Tabelle, dieser STATUS-Eintrag, `docs/2026-07-09_report-win.md`.
 - **Nächster Schritt:** Redraw-Bug-FIX (eigene Session) auf Basis des hier gemessenen
   Mechanismus — dann Checkpoint E.
 

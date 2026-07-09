@@ -139,4 +139,4 @@ dieser Session, mit escaped Klammern (`{(}`/`{)}`) und explizitem Fokus-Klick be
 - Umbrella (`main`): gated Diagnose-Hooks in `qt-shim/src/shim.cpp` (`paintEvent`,
   `shim_canvas_blit_argb`), `docs/HACKING.md` §16, `CLAUDE.md`-Checkpoint-Tabelle +
   narrativer Absatz, `STATUS.md`-Eintrag, Submodul-Zeiger-Bump, dieser Bericht
-  (`docs/2026-07-09_report.md`).
+  (`docs/2026-07-09_report-win.md`).

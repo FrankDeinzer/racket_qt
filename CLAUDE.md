@@ -96,7 +96,7 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 | **Linux Smoke** | **✅ 2026-06-29** |
 | **E-0 – Widget-Stubs + text-field% fix** | **✅ 2026-06-30** |
 | **E-0 – gui-lib-Angleich 1.78→1.80 + echtes DrRacket** | **✅ 2026-07-08 (E-0-Menü geschlossen: Tippen/Enter/Ausführen funktioniert; Menüleiste sichtbar+horizontal [Titel-Fix] UND gefüllt [addAction-Fix] UND Popups korrekt platziert [mapToGlobal-Fix], auf Windows+macOS+Linux bestätigt; je ein zusätzlicher Startup-Crash auf macOS [`tab-panel%` `set-label`-Arity] und Linux [`frame%` `set-icon` fehlte] gefunden+gefixt; Redraw-Bug separat offen, eigene Session)** |
-| **Redraw-Bug — Windows-Messung** | **✅ 2026-07-09 (gemessen, NICHT gefixt: Root-Cause-Kandidat identifiziert — `wx/qt/canvas.rkt`s `begin-refresh-sequence`/`end-refresh-sequence` sind No-ops und `start-backing-retained` wird nie aufgerufen, anders als bei win32/gtk/cocoa; dadurch verwirft jeder Flush-Zyklus die Backing-Bitmap statt sie über Teil-Invalidierungen hinweg zu behalten. Details `docs/HACKING.md` §16, `docs/2026-07-09_report.md`)** |
+| **Redraw-Bug — Windows-Messung** | **✅ 2026-07-09 (gemessen, NICHT gefixt: Root-Cause-Kandidat identifiziert — `wx/qt/canvas.rkt`s `begin-refresh-sequence`/`end-refresh-sequence` sind No-ops und `start-backing-retained` wird nie aufgerufen, anders als bei win32/gtk/cocoa; dadurch verwirft jeder Flush-Zyklus die Backing-Bitmap statt sie über Teil-Invalidierungen hinweg zu behalten. Details `docs/HACKING.md` §16, `docs/2026-07-09_report-win.md`)** |
 | E – Widget-Breite (dialog%, message%, …) | ⬜ |
 
 **Checkpoint D — erledigt:**
@@ -175,6 +175,12 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 | `docs/HACKING.md` | `public*/override*`-Tabellen, Klassen-Ketten, Debugging-Guide, Checkliste neue Widgets |
 | `docs/CHECKPOINT-D.md` | Detaillierter Plan für D-0 / D-1 / D-2 |
 | `docs/BRIEF.md` | Originalbrief mit allen fixen Entscheidungen |
+
+**Namenskonvention für datierte Prompt-/Report-Dateien:** `docs/JJJJ-MM-TT_prompt[-N].md` /
+`docs/JJJJ-MM-TT_report[-N][-plattform].md` (ISO-Datum zuerst, damit Name-Sortierung =
+Zeit-Sortierung). Reports bekommen **immer** ein Plattform-Suffix (`-win`, `-macos`,
+`-linux`), auch wenn die Session nur auf einer Maschine lief — z. B.
+`2026-07-09_report-win.md`. Zu jedem `*_prompt*.md` gehört ein passendes `*_report*.md`.
 
 ## Shim-Konventionen
 
