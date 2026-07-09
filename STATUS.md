@@ -5,6 +5,29 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-09 (Linux) — Clean-Start-Check (2026-07-09_prompt)
+
+**Kontext:** `docs/2026-07-09_prompt.md`. Voller Bericht: `docs/2026-07-09_report-linux.md`.
+
+- **Phase 0 — Stand nachgezogen.** `racket --version` = v9.2 [cs] (gemessen). gui-Submodul
+  stand auf `6df80516` (2 Commits hinter dem vom Umbrella schon referenzierten `87ebd078`) —
+  nach Rückfrage (`AskUserQuestion`, CLAUDE.md Regel 7) `git submodule update` +
+  `git pull --ff-only` auf `qt-backend` ausgeführt, jetzt deckungsgleich. Shim war gegenüber
+  `shim.cpp` (Windows-Diagnose-Hooks) veraltet → neu gebaut (Ninja). Bytecode neu über
+  `racket -S ... -l raco -- make -l mred` (kein Installation-Link auf dieser Maschine, `raco
+  make` selbst hat keinen `-S`-Schalter). Re-Smoke 3/3 grün.
+- **Phase 1 — Clean-Start-Check: sauber beim ersten Start.** Echtes `PLT_QT=1 racket -S ... -l
+  drracket`: 9 Menüs (File/Edit/View/Language/Racket/Insert/Scripts/Tabs/Help), Editor +
+  REPL-Prompt sichtbar, kein Crash — keine neue Landmine gezündet. Screenshot (`xwd` +
+  Eigenbau-XWD→PNG-Parser) bestätigt.
+- **Phase 2 (Redraw-Messung):** laut Prompt Windows-exklusiv, hier nicht wiederholt.
+- **Commits:** keine — reiner Sync/Rebuild/Verify-Schritt, keine Landmine gezündet, also kein
+  Stub-Fix nötig.
+- **Nächster Schritt:** macOS-Zweig dieses Prompts (Phase 0/1) steht noch aus. Redraw-Bug-FIX
+  bleibt eigene Session (Basis: `docs/2026-07-09_report-win.md`).
+
+---
+
 ## Session 2026-07-09 (Windows) — Clean-Start-Check + Redraw-Bug gemessen (2026-07-09_prompt)
 
 **Kontext:** `docs/2026-07-09_prompt.md`. Voller Bericht: `docs/2026-07-09_report-win.md`.
