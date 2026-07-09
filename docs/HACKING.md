@@ -543,3 +543,53 @@ sichtbare Lücken hinterlässt.
 `wx/qt/canvas.rkt`, plus `begin-refresh-sequence`/`end-refresh-sequence` auf
 `suspend-flush`/`resume-flush` verdrahten (Muster 1:1 aus `wx/win32/canvas.rkt:266-330`
 übernehmbar) — noch nicht verifiziert, da diese Session laut Guardrail nur messen durfte.
+
+## 17. Orphaned Submodule-Commit — `git pull` schlägt mit „not our ref" fehl
+
+**Symptom (Linux, 2026-07-09):** `git pull` (mit Submodule-Rekursion) bricht ab mit:
+
+```
+fatal: remote error: upload-pack: not our ref de933088a293a555854cd13b3423aec0731925e5
+```
+
+**Root Cause:** Reihenfolge-Verstoß gegen die (jetzt in `CLAUDE.md` Regel 8 festgehaltene)
+Submodul-Commit-Reihenfolge. Ablauf der Vorsession: ein Submodul-Commit (`de933088`) wurde
+erstellt, während der lokale `qt-backend`-Checkout 2 Commits hinter `origin/qt-backend`
+lag. **Bevor** das bemerkt wurde, entstand bereits ein Umbrella-Commit (`b2ae19b`, „docs:
+rename dated docs files..."), der den Submodul-Zeiger auf genau `de933088` einfror — und
+wurde gepusht. Direkt danach wurde der Submodul-Branch per `git rebase
+origin/qt-backend` synchronisiert, wodurch `de933088` lokal durch einen neuen Commit
+(`b2369d48`, der tatsächlich gepusht wurde) ersetzt wurde. Ein Folge-Commit im Umbrella
+(`5db1cca`) zog den Zeiger korrekt auf `b2369d48` nach — aber `b2ae19b` selbst, bereits
+Teil der gepushten `main`-Historie, referenziert weiterhin dauerhaft den nie gepushten,
+jetzt verworfenen `de933088`.
+
+`git pull --recurse-submodules` läuft über **jede** Gitlink-Änderung im geholten
+Commit-Bereich (nicht nur den aktuellen HEAD-Stand) und versucht, jeden referenzierten
+SHA zu holen — inklusive `de933088` aus `b2ae19b`. Da dieser SHA nie auf
+`origin/qt-backend` existierte (nur lokal auf der Windows-Maschine, bis zum Rebase),
+schlägt der Fetch mit „not our ref" fehl.
+
+**Verifiziert als isolierter Einzelfall:** `git log --format=%H -- third_party/gui` +
+`git ls-tree <commit> third_party/gui` für **jeden** Commit in `main`s Historie,
+gegen `git branch -r --contains <sha>` auf dem Submodul-Remote geprüft — `de933088` ist
+der **einzige** nicht erreichbare SHA in der gesamten Historie.
+
+**Fix (non-destruktiv, kein History-Rewrite/Force-Push):** `de933088` existierte noch als
+Commit-Objekt im lokalen Windows-Reflog (Rebase löscht Commits nicht sofort, nur die
+Referenz darauf). Als Tag zum Submodul-Remote gepusht, damit der SHA wieder fetchbar ist:
+
+```
+git push origin de933088a293a555854cd13b3423aec0731925e5:refs/tags/orphan-de933088
+```
+
+Ändert keine bestehende Historie auf beiden Repos — der Umbrella-Commit `b2ae19b`
+verweist weiterhin auf `de933088`, aber dieser SHA ist jetzt dauerhaft über den Tag
+erreichbar. Nach dem Push: Linux-`git pull` läuft wieder durch.
+
+**Lektion:** wird ein Submodul synchronisiert (Rebase/Merge, das bestehende Commits
+ersetzt), NACHDEM bereits (auch nur lokal) ein Umbrella-Commit den alten SHA eingefroren
+hat, muss der alte SHA vor dem Verwerfen als Ref gepusht werden — oder der Sync-Schritt
+muss VOR dem ersten Submodul-Commit passieren (Regel 8). Ein `git reflog`-Check im
+Submodul (`git cat-file -t <sha>`) verrät, ob ein vermeintlich verlorener Commit lokal
+noch rettbar ist.
