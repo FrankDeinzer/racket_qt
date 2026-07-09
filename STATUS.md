@@ -5,6 +5,36 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-10 (Linux) — Redraw-Bug validiert, grün (2026-07-10_prompt Phase 4)
+
+**Kontext:** `docs/2026-07-10_prompt.md` Phase 4. Voller Bericht:
+`docs/2026-07-10_report-linux.md`.
+
+- **Sync — grün.** Umbrella `main` war bereits aktuell (`96cabe5`, Zeiger auf
+  gui@`04935cb6`); gui-Submodul stand 1 Commit zurück (`87ebd078`) — nach Rückfrage
+  sauberer ff-Pull auf `04935cb6`. Diff geprüft: exakt die vier im Windows-Report
+  beschriebenen Änderungen in `canvas.rkt`, kein `shim.cpp`-Anteil → Shim war bereits
+  aktuell, nur Bytecode neu gebaut. Re-Smoke 3/3 grün. Light Mode bestätigt
+  (`racket-prefs.rktd`).
+- **Repro — grün.** Da `xdotool` fehlt: kleiner XTest-Helfer selbst gebaut (Scratch,
+  gegen `libX11`/`libXtst.so.6`) für echte synthetische Keystrokes. 6× `(define line-N N)`
+  in echtem `PLT_QT=1`-DrRacket: alle sechs Zeilen bleiben sichtbar (Screenshot via `xwd` +
+  Eigenbau-Parser), Debug-Log zeigt `begin-/end-refresh-sequence -> suspend-/resume-flush`
+  aktiv feuernd statt der alten No-op-Meldungen. Identisch zum Windows-Nachher-Ergebnis.
+- **Resize/Minimieren-Zusatzsicht: NICHT validiert, Ursache ungeklärt (offene
+  Beobachtung, kein geschlossenes Nicht-Problem).** Roher `XResizeWindow`-Aufruf löste
+  nachweislich keinen `set-size`/`shim_widget_set_geometry` im Debug-Log aus, aber die
+  „reines Test-Artefakt"-Erklärung ist nicht schlüssig (KWin läuft als EWMH-WM;
+  Fenster-Attribute passen nicht zu „Server dupliziert Inhalt"). Fließt als offener Punkt
+  in die macOS-Resize-Prüfung ein. Blockiert das Ergebnis der eigentlichen
+  Tipp-Repro-Validierung nicht.
+- **Commits:** keine — reine Validierung. `docs/HACKING.md` §16 ergänzt (Linux grün),
+  dieser Eintrag, `docs/2026-07-10_report-linux.md`.
+- **Nächster Schritt:** macOS-Validierung (`docs/2026-07-10_prompt.md` Phase 5/6), danach
+  Redraw-Zeile in `CLAUDE.md` als vollständig geschlossen markieren.
+
+---
+
 ## Session 2026-07-10 (Windows) — Redraw-Bug gefixt + visuell bestätigt (2026-07-10_prompt)
 
 **Kontext:** `docs/2026-07-10_prompt.md`. Voller Bericht: `docs/2026-07-10_report-win.md`.

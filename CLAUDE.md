@@ -97,7 +97,7 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 | **Linux Smoke** | **✅ 2026-06-29** |
 | **E-0 – Widget-Stubs + text-field% fix** | **✅ 2026-06-30** |
 | **E-0 – gui-lib-Angleich 1.78→1.80 + echtes DrRacket** | **✅ 2026-07-08 (E-0-Menü geschlossen: Tippen/Enter/Ausführen funktioniert; Menüleiste sichtbar+horizontal [Titel-Fix] UND gefüllt [addAction-Fix] UND Popups korrekt platziert [mapToGlobal-Fix], auf Windows+macOS+Linux bestätigt; je ein zusätzlicher Startup-Crash auf macOS [`tab-panel%` `set-label`-Arity] und Linux [`frame%` `set-icon` fehlte] gefunden+gefixt; Redraw-Bug separat offen, eigene Session)** |
-| **Redraw-Bug — Windows gefixt, Linux/macOS-Validierung offen** | **🟡 2026-07-10 (Windows: gefixt + visuell bestätigt — `start-backing-retained` + `suspend-/resume-flush` [Prompt] plus zwei zusätzlich nötige Änderungen: `reset-backing-retained` bei `set-size`-Resize, Konstruktor-Reihenfolge-Fix für `dc`. Details `docs/HACKING.md` §16, `docs/2026-07-10_report-win.md`. Linux/macOS müssen denselben Codepfad noch nachziehen+validieren, dann E-0 vollständig geschlossen [Menüs + Redraw])** |
+| **Redraw-Bug — Windows gefixt + Linux validiert, macOS-Validierung offen** | **🟡 2026-07-10 (Windows: gefixt + visuell bestätigt — `start-backing-retained` + `suspend-/resume-flush` [Prompt] plus zwei zusätzlich nötige Änderungen: `reset-backing-retained` bei `set-size`-Resize, Konstruktor-Reihenfolge-Fix für `dc`. Linux: ff-Pull + identischer Tipp-Repro grün, Diff geprüft. Details `docs/HACKING.md` §16, `docs/2026-07-10_report-win.md`, `docs/2026-07-10_report-linux.md`. macOS muss denselben Codepfad noch nachziehen+validieren, dann E-0 vollständig geschlossen [Menüs + Redraw])** |
 | E – Widget-Breite (dialog%, message%, …) | ⬜ |
 
 **Checkpoint D — erledigt:**
@@ -194,11 +194,26 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
   Toolbar-Icon (Save) erscheint abhängig vom Zeitpunkt des letzten vollen Repaint-Zyklus
   — betrifft `wx/qt/button.rkt` (native Widget-Klasse, nicht `canvas%`/`backing-dc%`).
 
-**Nächster Schritt: Linux (Validierung) → macOS (Validierung + macOS-Nebenbefunde) laut
-`docs/2026-07-10_prompt.md` Phase 4/5 → danach Checkpoint E** — Widget-Breite nach
-konkretem App-Bedarf. Da der Fix vier statt zwei Änderungen umfasst, müssen die
-Validierungs-Sessions gegen den tatsächlichen Diff prüfen, nicht nur gegen die
-ursprüngliche 2-Schritt-Beschreibung. Zusätzlich offen: macOS-Menüleisten-Diskrepanz
+**Redraw-Bug — Linux validiert, grün (2026-07-10, `docs/2026-07-10_report-linux.md`):**
+- ff-Pull `qt-backend` `87ebd078`→`04935cb6`, Diff geprüft (exakt die vier oben
+  beschriebenen Änderungen in `canvas.rkt`, kein `shim.cpp`-Anteil → Shim bereits aktuell,
+  nur Bytecode neu). Re-Smoke 3/3 grün. Light Mode bestätigt.
+- Identischer Tipp-Repro (6× echte Keystrokes via selbstgebautem XTest-Helfer, da
+  `xdotool` auf dieser Maschine fehlt): alle sechs Zeilen + `#lang racket` bleiben
+  sichtbar, Debug-Log zeigt `begin-/end-refresh-sequence -> suspend-/resume-flush` aktiv
+  feuernd — identisch zum Windows-Nachher-Ergebnis.
+- Resize-/Minimieren-Zusatzsicht **nicht validiert, Ursache ungeklärt** (roher
+  `XResizeWindow`-Aufruf löste keinen `set-size`/`shim_widget_set_geometry` aus, aber
+  „reines Test-Artefakt" ist nicht schlüssig belegt — KWin läuft als EWMH-WM, Fenster-
+  Attribute passen nicht zu „Server dupliziert Inhalt"; offene Beobachtung, fließt in die
+  macOS-Resize-Prüfung ein) — blockiert das validierte Tipp-Repro-Ergebnis nicht.
+- Reine Validierung, keine Fix-Commits.
+
+**Nächster Schritt: macOS (Validierung + macOS-Nebenbefunde) laut
+`docs/2026-07-10_prompt.md` Phase 5/6 → danach Checkpoint E** — Widget-Breite nach
+konkretem App-Bedarf. Da der Fix vier statt zwei Änderungen umfasst, muss die
+macOS-Validierung gegen den tatsächlichen Diff prüfen, nicht nur gegen die ursprüngliche
+2-Schritt-Beschreibung. Zusätzlich offen: macOS-Menüleisten-Diskrepanz
 (8 statt 9 Menüs, `Windows` fehlt) separat klären, siehe `docs/2026-07-09_report-macos.md`.
 
 ## Dokumentation

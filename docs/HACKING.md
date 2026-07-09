@@ -475,7 +475,7 @@ Kontextmenü jetzt direkt am Klickpunkt (window-relative (400,300) → Menü ers
 ~(403,304)) statt am Fensterrand. `window.rkt` musste neu `"utils.rkt"` requiren (fehlte
 vorher — kein Zirkularproblem, `utils.rkt` requirt nichts aus `wx/qt/`).
 
-## 16. Redraw-Bug — bestätigt + gefixt (Windows, 2026-07-10_prompt) — Linux/macOS-Validierung offen
+## 16. Redraw-Bug — bestätigt + gefixt (Windows, 2026-07-10_prompt); Linux validiert — macOS-Validierung offen
 
 **Symptom:** In echtem DrRacket wird beim Tippen nur die zuletzt bearbeitete Zeile
 angezeigt; alle vorherigen Zeilen erscheinen weiß, obwohl sie im Editor-Puffer noch
@@ -566,10 +566,42 @@ nacheinander getippten Zeilen) statt bei jedem Zyklus auf eine winzige Platzhalt
 zurückzufallen. Verifiziert: identischer Tipp-Repro (alle Zeilen bleiben sichtbar),
 Resize, Minimieren/Wiederherstellen, Smoke 3/3. Report: `docs/2026-07-10_report-win.md`.
 
-**Offen:** Linux/macOS müssen denselben (gemeinsamen) Code-Pfad noch validieren — siehe
-`docs/2026-07-10_prompt.md` Phase 4/5. Da Punkt 3/4 oben über den ursprünglich
-vorgeschriebenen Fix hinausgehen, dürfen die Validierungs-Sessions nicht nur die
-2-Schritt-Beschreibung aus der ursprünglichen Kandidaten-Analyse erwarten, sondern müssen
+**Linux-Validierung (2026-07-10, `docs/2026-07-10_report-linux.md`): grün.** ff-Pull auf
+`qt-backend` `04935cb6` (Diff geprüft — exakt die vier oben beschriebenen Änderungen,
+keine zusätzlichen), Shim war bereits aktuell (Fix ist rein Racket-seitig, `shim.cpp`
+unverändert), Bytecode neu, Smoke 3/3 grün. Identischer Tipp-Repro (synthetische
+Keystrokes via selbstgebautem XTest-Helfer, da `xdotool` auf dieser Maschine fehlt) in
+echtem `PLT_QT=1`-DrRacket: alle sechs getippten Zeilen + `#lang racket` bleiben sichtbar,
+Debug-Log zeigt `begin-refresh-sequence -> suspend-flush` / `end-refresh-sequence ->
+resume-flush` aktiv feuernd. Light Mode bestätigt (`racket-prefs.rktd`:
+`color-scheme-light` = `classic`, kein `os`-Wert). Zusätzliche Resize-/Minimieren-Sicht
+war auf dieser Maschine methodisch nicht sauber möglich (siehe unten) und liefert daher
+kein belastbares Ergebnis — die eigentliche Validierung (Tipp-Repro) ist unabhängig davon
+eindeutig grün.
+
+**Resize-Pfad auf Linux NICHT validiert (Ursache ungeklärt, kein Fix-Anlass, aber auch
+keine Entwarnung):** ein roher `XResizeWindow`-Aufruf (ohne WM-Resize-Geste, nur zum
+Testen synthetisiert, da `xdotool` fehlt) vergrößerte das X-Fenster serverseitig, löste
+aber **keinen** `set-size`/`shim_widget_set_geometry`-Aufruf im Debug-Log aus — Qt hat die
+Größenänderung nachweislich nie verarbeitet. Der Screenshot zeigt dadurch doppelten/
+versetzten Inhalt. Die naheliegende Erklärung „reines X11-Test-Artefakt ohne
+WM-Vermittlung" ist **nicht schlüssig**: KWin (`kwin_x11`) läuft als EWMH-WM auf dieser
+Maschine und relayt `XResizeWindow` auf gemanagte Top-Level-Fenster normalerweise sehr
+wohl per `ConfigureNotify`; außerdem zeigte `xwininfo` vorher `Backing Store State:
+NotUseful` + `NorthWestGravity` — das erklärt kein serverseitiges Duplizieren von Inhalt
+in den neu exponierten Bereich. Kurz: warum Qt nichts verarbeitete UND wieso trotzdem ein
+kohärentes zweites Bild erschien, ist **nicht rekonstruiert**. Minimieren/Wiederherstellen
+über eine korrekte ICCCM-Anfrage (`XIconifyWindow`/`XMapWindow`, Map-State-Wechsel
+technisch bestätigt) zeigte danach unverändert denselben bereits verzerrten Zustand — auch
+das nicht weiter aufgeklärt. **Resize/Minimieren-Verhalten auf Linux bleibt damit offen**,
+unabhängig vom (validierten) Tipp-Repro-Ergebnis. Für eine saubere Diskriminierung bräuchte
+es einen echten EWMH-Resize (`_NET_MOVERESIZE_WINDOW` ans Root-Fenster) oder `xdotool`,
+keins davon in dieser Session nachgerüstet.
+
+**Offen:** macOS muss denselben (gemeinsamen) Code-Pfad noch validieren — siehe
+`docs/2026-07-10_prompt.md` Phase 5. Da Punkt 3/4 oben über den ursprünglich
+vorgeschriebenen Fix hinausgehen, darf die macOS-Validierung nicht nur die
+2-Schritt-Beschreibung aus der ursprünglichen Kandidaten-Analyse erwarten, sondern muss
 gegen den tatsächlichen Diff prüfen.
 
 ## 17. Orphaned Submodule-Commit — `git pull` schlägt mit „not our ref" fehl
