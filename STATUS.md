@@ -5,6 +5,37 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-09 (macOS) — Clean-Start-Check, NICHT sauber, zwei Befunde (2026-07-09_prompt)
+
+**Kontext:** `docs/2026-07-09_prompt.md`. Voller Bericht: `docs/2026-07-09_report-macos.md`.
+
+- **Phase 0 — Sync + Rebuild, grün.** gui-Submodul stand auf `ba2dacc9`, 3 Commits hinter
+  `origin/qt-backend` (`87ebd078`, vom Umbrella schon referenziert). Vor dem Pull ausführlich
+  geprüft (Nutzer-Sorge wegen früherer Fast-Forward-Beschädigung): einziger Remote, HEAD ist
+  strikter Vorfahre, keine lokalen Extra-Commits, Working Tree clean — sauberer Fast-Forward
+  nach Nutzer-Bestätigung. Umbrella-Zeiger zeigte bereits auf `87ebd078`, kein Pointer-Commit
+  nötig. Shim neu gebaut (Ninja), Bytecode neu (`-S`-Override, stale `compiled/`-Dirs vorher
+  entfernt), Re-Smoke 3/3 grün.
+- **Phase 1 — Clean-Start-Check: NICHT sauber, zwei unabhängige Befunde (kein Crash, kein
+  Missing-Method — Guardrail: STOPP+Bericht, kein Fix versucht):**
+  1. **Menüleiste: 8 statt 9 Menüs** — `Windows`-Menü fehlt, verifiziert per `osascript` direkt
+     gegen die native `NSMenu`-Struktur (Daten-Befund, kein Rendering-Artefakt). Abweichung von
+     der eigenen Baseline `docs/2026-07-08_report-4-macos.md` (9 Menüs inkl. `Windows` bei
+     `ba2dacc9`). Code-Diff `ba2dacc9..87ebd078` berührt Menüleisten-/Frame-Aufbau nicht — Ursache
+     unklar, nicht weiter diagnostiziert.
+  2. **Editor-Bereich beim allerersten Paint bereits verzerrt** (vor jeder Eingabe): schwarze
+     Hervorhebungsbalken, überlappender Text am unteren Fensterrand — pixelidentisch über 2
+     unabhängige Screenshots (kein Timing-Artefakt). Diagnose-Hooks aus dem Pull sind strikt
+     `PLT_QT_DEBUG`-gated (verifiziert per Code-Diff) und damit nicht die Ursache. Plausibel
+     dieselbe Bug-Familie wie der dokumentierte Windows-Redraw-Bug (`HACKING.md §16`), aber
+     nicht deckungsgleich (dort erst nach mehreren Zeilen, hier schon beim ersten Paint) —
+     Vermutung, keine Messung.
+- **Commits:** keine — reiner Fast-Forward-Pull, keine Landmine gezündet, kein Fix-Commit.
+- **Nächster Schritt:** beide Befunde in die geplante Redraw-Fix-Session einbringen; Menü-
+  Diskrepanz separat klären.
+
+---
+
 ## Session 2026-07-09 (Linux) — Clean-Start-Check (2026-07-09_prompt)
 
 **Kontext:** `docs/2026-07-09_prompt.md`. Voller Bericht: `docs/2026-07-09_report-linux.md`.
