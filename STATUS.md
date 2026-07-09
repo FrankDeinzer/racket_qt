@@ -5,6 +5,39 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-10 (Windows) — Redraw-Bug gefixt + visuell bestätigt (2026-07-10_prompt)
+
+**Kontext:** `docs/2026-07-10_prompt.md`. Voller Bericht: `docs/2026-07-10_report-win.md`.
+
+- **Phase 0 — grün.** Beide Repos sauber, Submodul-Zeiger deckungsgleich mit
+  `origin/qt-backend` (`87ebd078`). `racket --version` = v9.2 [cs]. Shim aktuell (DLL neuer
+  als `shim.cpp`). Theme explizit `classic` (Light, nicht OS-gesteuert). Smoke 3/3 grün.
+- **Phase 1 — Vorher-Baseline gemessen.** Identischer Repro aus `docs/2026-07-09_report-
+  win.md` (6× `(define line-N N)` real getippt): nur letzte Zeile sichtbar, Rest weiß.
+  Bestätigt per Screenshot + Debug-Log (`begin-/end-refresh-sequence (no-op)` feuert
+  tatsächlich während des Repros).
+- **Phase 2 — Fix, vier Änderungen statt zwei.** Der vorgeschriebene 2-Schritt-Fix
+  (`start-backing-retained` + `suspend-/resume-flush`) hätte den Clean-Start kaputt gemacht
+  (leerer Editor statt `#lang racket`). Zusätzlich nötig: `reset-backing-retained` bei
+  `set-size` (Resize-Hook, wie win32/gtk über `on-resized`/`internal-on-client-size`) und
+  eine Konstruktor-Reihenfolge-Korrektur (`dc` vor dem Seed-`set-size`-Aufruf definieren,
+  sonst Start-Crash). Details `docs/HACKING.md` §16.
+- **Phase 3 — Nachher-Messung, visuell vom Nutzer bestätigt.** Alle 6 Zeilen bleiben
+  sichtbar; zusätzlich verifiziert: Resize, Minimieren/Wiederherstellen. `bm=`-Größe in den
+  Flush-Logs wächst jetzt mit dem Inhalt statt auf eine Platzhaltergröße zurückzufallen.
+  Smoke 3/3 grün.
+- **Nebenbefund (nicht verfolgt, vorbestehend):** Toolbar-Save-Icon erscheint abhängig vom
+  Zeitpunkt des letzten vollen Repaint-Zyklus — betrifft `wx/qt/button.rkt`, nicht
+  `canvas%`/`backing-dc%`.
+- **Commits:** Submodul (`qt-backend` `87ebd078`→`04935cb6`, gepusht), Umbrella-Zeiger-Bump
+  + Doku (`HACKING.md` §16, `CLAUDE.md`-Checkpoint, dieser Eintrag, Report).
+- **Nächster Schritt:** Linux (Validierung) → macOS (Validierung + macOS-Nebenbefunde),
+  siehe `docs/2026-07-10_prompt.md` Phase 4/5. Validierungs-Sessions müssen gegen den
+  tatsächlichen Vier-Änderungen-Diff prüfen, nicht nur gegen die ursprüngliche
+  2-Schritt-Beschreibung aus der Kandidaten-Analyse vom 07-09.
+
+---
+
 ## Session 2026-07-09 (macOS) — Clean-Start-Check, NICHT sauber, zwei Befunde (2026-07-09_prompt)
 
 **Kontext:** `docs/2026-07-09_prompt.md`. Voller Bericht: `docs/2026-07-09_report-macos.md`.

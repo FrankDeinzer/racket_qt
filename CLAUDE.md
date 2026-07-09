@@ -97,7 +97,7 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 | **Linux Smoke** | **✅ 2026-06-29** |
 | **E-0 – Widget-Stubs + text-field% fix** | **✅ 2026-06-30** |
 | **E-0 – gui-lib-Angleich 1.78→1.80 + echtes DrRacket** | **✅ 2026-07-08 (E-0-Menü geschlossen: Tippen/Enter/Ausführen funktioniert; Menüleiste sichtbar+horizontal [Titel-Fix] UND gefüllt [addAction-Fix] UND Popups korrekt platziert [mapToGlobal-Fix], auf Windows+macOS+Linux bestätigt; je ein zusätzlicher Startup-Crash auf macOS [`tab-panel%` `set-label`-Arity] und Linux [`frame%` `set-icon` fehlte] gefunden+gefixt; Redraw-Bug separat offen, eigene Session)** |
-| **Redraw-Bug — Windows-Messung** | **✅ 2026-07-09 (gemessen, NICHT gefixt: Root-Cause-Kandidat identifiziert — `wx/qt/canvas.rkt`s `begin-refresh-sequence`/`end-refresh-sequence` sind No-ops und `start-backing-retained` wird nie aufgerufen, anders als bei win32/gtk/cocoa; dadurch verwirft jeder Flush-Zyklus die Backing-Bitmap statt sie über Teil-Invalidierungen hinweg zu behalten. Details `docs/HACKING.md` §16, `docs/2026-07-09_report-win.md`)** |
+| **Redraw-Bug — Windows gefixt, Linux/macOS-Validierung offen** | **🟡 2026-07-10 (Windows: gefixt + visuell bestätigt — `start-backing-retained` + `suspend-/resume-flush` [Prompt] plus zwei zusätzlich nötige Änderungen: `reset-backing-retained` bei `set-size`-Resize, Konstruktor-Reihenfolge-Fix für `dc`. Details `docs/HACKING.md` §16, `docs/2026-07-10_report-win.md`. Linux/macOS müssen denselben Codepfad noch nachziehen+validieren, dann E-0 vollständig geschlossen [Menüs + Redraw])** |
 | E – Widget-Breite (dialog%, message%, …) | ⬜ |
 
 **Checkpoint D — erledigt:**
@@ -168,7 +168,38 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 - **Linux (2026-07-09, `docs/2026-07-09_report-linux.md`):** Phase 0/1 desselben Prompts nachgezogen — Submodul-Sync (`6df80516`→`87ebd078`, nach Rückfrage), Shim neu gebaut, Bytecode neu, Re-Smoke 3/3 grün, echter `PLT_QT=1`-DrRacket-Start sauber (9 Menüs, kein Crash, keine neue Landmine). Phase 2 (Redraw-Messung) ist laut Prompt Windows-exklusiv, hier nicht wiederholt.
 - **macOS (2026-07-09, `docs/2026-07-09_report-macos.md`): Phase 0 grün, Phase 1 NICHT sauber — zwei Befunde, kein Fix (Guardrail).** Submodul-Sync (`ba2dacc9`→`87ebd078`, nach ausführlicher Sicherheitsprüfung + Rückfrage), Shim neu gebaut, Bytecode neu, Re-Smoke 3/3 grün. Echter `PLT_QT=1`-DrRacket-Start zeigt **kein** Missing-Method-Crash, aber zwei unabhängige Abweichungen: (1) Menüleiste zeigt nur 8 statt 9 Menüs (`Windows` fehlt, per `osascript` gegen die native `NSMenu` verifiziert — Daten-Befund, keine Regression durch den heutigen Sync laut Code-Diff, Ursache offen); (2) Editor-Bereich ist bereits beim allerersten Paint (vor jeder Eingabe) verzerrt (schwarze Balken, überlappender Text, pixelidentisch über 2 Screenshots) — plausibel dieselbe Bug-Familie wie der Windows-Redraw-Bug, aber früher/anders manifestierend; Diagnose-Hooks aus dem Pull als Ursache per Code-Diff ausgeschlossen (strikt `PLT_QT_DEBUG`-gated). Beide Befunde fließen als Cross-Platform-Datenpunkte in die geplante Redraw-Fix-Session ein.
 
-**Nächster Schritt: Redraw-Bug-FIX (eigene Session, gemessener Mechanismus aus 2026-07-09 als Basis, jetzt inkl. macOS-Datenpunkt) → danach Checkpoint E** — Widget-Breite nach konkretem App-Bedarf. Zusätzlich offen: macOS-Menüleisten-Diskrepanz (8 statt 9 Menüs, `Windows` fehlt) separat klären, siehe `docs/2026-07-09_report-macos.md`.
+**Redraw-Bug — Windows gefixt (2026-07-10, `docs/2026-07-10_prompt.md`):**
+- **Fix ist vier Änderungen, nicht zwei.** Der im Prompt vorgeschriebene 2-Schritt-Fix
+  (`start-backing-retained` einmalig + `begin-/end-refresh-sequence` → `suspend-/resume-
+  flush`) reichte **allein nicht** — angewendet ohne die beiden folgenden Ergänzungen
+  rendert bereits der normale Programmstart (vor jeder Eingabe) einen leeren Editor statt
+  `#lang racket`, weil win32/gtk noch einen dritten Baustein haben, den die
+  Kandidaten-Analyse vom 07-09 nicht nannte:
+  1. `(send dc reset-backing-retained)` im `set-size`-Override — sonst bleibt die jetzt
+     retained Bitmap für immer auf der allerersten (oft winzigen Platzhalter-)Größe
+     eingefroren, die vor dem ersten Layout-Durchlauf existierte. win32/gtk lösen das über
+     ihre eigenen Resize-Hooks (`on-resized`/`internal-on-client-size` → `reset-dc`).
+  2. Konstruktor-Reihenfolge: `(define dc ...)` musste vor den Seed-`set-size`-Aufruf im
+     Konstruktor verschoben werden — sonst `dc: undefined; cannot use field before
+     initialization`-Crash beim Start (reines Racket-Klassenfeld-Ordering, kein
+     Qt-Problem, aber nur sichtbar, weil `set-size` jetzt `dc` anfasst).
+- **Vorher/Nachher visuell bestätigt (Nutzer):** identischer Tipp-Repro (6× echte
+  Keystrokes) — vorher nur letzte Zeile sichtbar, Rest weiß; nachher alle Zeilen +
+  `#lang racket` durchgehend sichtbar. Zusätzlich verifiziert: Resize, Minimieren/
+  Wiederherstellen, Smoke 3/3. Diskriminator: `bm=`-Größe in den Flush-Logs wächst jetzt
+  mit dem Inhalt (`854x316`→`854x377`→`854x437`) statt bei jedem Zyklus auf eine
+  Platzhaltergröße zurückzufallen. Details `docs/HACKING.md` §16,
+  `docs/2026-07-10_report-win.md`.
+- Nebenbefund (nicht verfolgt, vorbestehend, nicht durch diesen Fix verursacht): ein
+  Toolbar-Icon (Save) erscheint abhängig vom Zeitpunkt des letzten vollen Repaint-Zyklus
+  — betrifft `wx/qt/button.rkt` (native Widget-Klasse, nicht `canvas%`/`backing-dc%`).
+
+**Nächster Schritt: Linux (Validierung) → macOS (Validierung + macOS-Nebenbefunde) laut
+`docs/2026-07-10_prompt.md` Phase 4/5 → danach Checkpoint E** — Widget-Breite nach
+konkretem App-Bedarf. Da der Fix vier statt zwei Änderungen umfasst, müssen die
+Validierungs-Sessions gegen den tatsächlichen Diff prüfen, nicht nur gegen die
+ursprüngliche 2-Schritt-Beschreibung. Zusätzlich offen: macOS-Menüleisten-Diskrepanz
+(8 statt 9 Menüs, `Windows` fehlt) separat klären, siehe `docs/2026-07-09_report-macos.md`.
 
 ## Dokumentation
 

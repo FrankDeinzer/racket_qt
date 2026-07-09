@@ -475,7 +475,7 @@ Kontextmenü jetzt direkt am Klickpunkt (window-relative (400,300) → Menü ers
 ~(403,304)) statt am Fensterrand. `window.rkt` musste neu `"utils.rkt"` requiren (fehlte
 vorher — kein Zirkularproblem, `utils.rkt` requirt nichts aus `wx/qt/`).
 
-## 16. Redraw-Bug — gemessen, Root-Cause-Kandidat identifiziert, NICHT gefixt — 2026-07-09_prompt
+## 16. Redraw-Bug — bestätigt + gefixt (Windows, 2026-07-10_prompt) — Linux/macOS-Validierung offen
 
 **Symptom:** In echtem DrRacket wird beim Tippen nur die zuletzt bearbeitete Zeile
 angezeigt; alle vorherigen Zeilen erscheinen weiß, obwohl sie im Editor-Puffer noch
@@ -538,11 +538,39 @@ Teilregion" — ergänzt um den strukturellen Befund, warum das bei diesem Backe
 als bei win32/gtk/cocoa, die dieselben Teil-Invalidierungen unschädlich verarbeiten)
 sichtbare Lücken hinterlässt.
 
-**Kein Fix in dieser Session (Guardrail).** Naheliegender Fix für die nächste Session:
-`(send dc start-backing-retained)` einmalig nach der `qt-dc%`-Erzeugung in
-`wx/qt/canvas.rkt`, plus `begin-refresh-sequence`/`end-refresh-sequence` auf
-`suspend-flush`/`resume-flush` verdrahten (Muster 1:1 aus `wx/win32/canvas.rkt:266-330`
-übernehmbar) — noch nicht verifiziert, da diese Session laut Guardrail nur messen durfte.
+**Fix (Windows, verifiziert, 2026-07-10_prompt) — vier Änderungen, nicht zwei:**
+Der oben skizzierte 2-Schritt-Fix (`start-backing-retained` + `suspend-/resume-flush`)
+reichte **allein nicht** — angewendet ohne die beiden folgenden Ergänzungen rendert
+bereits der normale Programmstart (vor jeder Eingabe) einen komplett leeren Editor statt
+`#lang racket`. Der vollständige Fix in `wx/qt/canvas.rkt`:
+
+1. `(send dc start-backing-retained)` einmalig direkt nach der `qt-dc%`-Erzeugung.
+2. `begin-refresh-sequence`/`end-refresh-sequence` auf `(send dc suspend-flush)` /
+   `(send dc resume-flush)` verdrahtet.
+3. **Zusätzlich nötig:** `(send dc reset-backing-retained)` im `set-size`-Override, direkt
+   nach `shim_widget_set_geometry`. Ohne das bleibt die jetzt retained Bitmap für immer auf
+   der Größe eingefroren, die beim allerersten `get-cr`-Aufruf existierte — typischerweise
+   ein winziger Platzhalter (30×30, 1×1), lange bevor Racket das Layout zuweist. win32/gtk
+   lösen das über ihre eigenen Resize-Hooks (`on-resized` bzw. `internal-on-client-size`
+   → `reset-dc` → `reset-backing-retained`); im Qt-Backend ist `set-size` (von Rackets
+   Layout-Engine aufgerufen) die analoge Stelle.
+4. **Zusätzlich nötig:** die `(define dc (new qt-dc% ...))`-Zeile musste vor den
+   Konstruktor-Seed-Aufruf von `set-size` verschoben werden (`base-canvas%`s Konstruktor
+   ruft `set-size` bereits einmal auf, bevor `dc` in der Ursprungsreihenfolge definiert
+   war) — sonst `dc: undefined; cannot use field before initialization` beim Start
+   (Racket-Klassenfeld-Ordering, kein Qt-Problem).
+
+**Diskriminator, der den Fix bestätigt:** `bm=`-Größe in den `on-backing-flush`-Logs
+wächst jetzt mit dem Inhalt (z. B. `854x316` → `854x377` → `854x437` bei sechs
+nacheinander getippten Zeilen) statt bei jedem Zyklus auf eine winzige Platzhaltergröße
+zurückzufallen. Verifiziert: identischer Tipp-Repro (alle Zeilen bleiben sichtbar),
+Resize, Minimieren/Wiederherstellen, Smoke 3/3. Report: `docs/2026-07-10_report-win.md`.
+
+**Offen:** Linux/macOS müssen denselben (gemeinsamen) Code-Pfad noch validieren — siehe
+`docs/2026-07-10_prompt.md` Phase 4/5. Da Punkt 3/4 oben über den ursprünglich
+vorgeschriebenen Fix hinausgehen, dürfen die Validierungs-Sessions nicht nur die
+2-Schritt-Beschreibung aus der ursprünglichen Kandidaten-Analyse erwarten, sondern müssen
+gegen den tatsächlichen Diff prüfen.
 
 ## 17. Orphaned Submodule-Commit — `git pull` schlägt mit „not our ref" fehl
 
