@@ -1,14 +1,14 @@
 #lang racket/gui
-; W3 measurement probe (prompt08072026-2): characterizes the QMenuBar
+; W3 measurement probe (2026-07-08_prompt-2): characterizes the QMenuBar
 ; click-does-not-open bug via three isolated modes. Run with PLT_QT_DEBUG=1 so
 ; the shim's gated stderr diagnostics (popup APPEARED/GONE, activeWindow) fire.
-; MEASUREMENT ONLY -- no fix here; see prompt08072026-2 guardrails.
+; MEASUREMENT ONLY -- no fix here; see 2026-07-08_prompt-2 guardrails.
 ;
 ; Usage:
 ;   racket examples/menu-click-probe.rkt direct    ; discriminator 1
 ;   racket examples/menu-click-probe.rkt keyboard  ; discriminator 3 (external SendKeys)
 ;   racket examples/menu-click-probe.rkt click     ; discriminator 4 (user clicks)
-;   racket examples/menu-click-probe.rkt mixed     ; addAction-Fix: leaf+submenu (prompt08072026-3)
+;   racket examples/menu-click-probe.rkt mixed     ; addAction-Fix: leaf+submenu (2026-07-08_prompt-3)
 ;   racket examples/menu-click-probe.rkt dynamic   ; addAction-Fix: separators/checkable/enable/delete
 (require racket/cmdline
          (only-in mred/private/wx/qt/menu-bar debug-get-appended-menu)
@@ -36,7 +36,7 @@
 
 ; "dynamic" mode: separators + a checkable item + enable/check/delete dispatch
 ; over the item-table -- verifies these still work now that leaf items really
-; hang in the QMenu (addAction-Fix, prompt08072026-3).
+; hang in the QMenu (addAction-Fix, 2026-07-08_prompt-3).
 (define m-dyn (new menu% [label "Dyn"] [parent mb]))
 (define item-a (new menu-item% [label "Alpha"] [parent m-dyn] [callback (lambda (i e) (void))]))
 (new separator-menu-item% [parent m-dyn])

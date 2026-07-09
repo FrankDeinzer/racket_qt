@@ -387,7 +387,7 @@ oberhalb der Plattform). Fix = Titel via `shim_menu_set_title` durchreichen; KEI
 Layout-Trigger, KEIN `setNativeMenuBar`, KEINE Geometrie-Reservierung. Diskriminator ist
 die Action-TEXT-Länge (0×0-Rect), NICHT `QMenuBar::height()`.
 
-**Klick-Bug — korrigierte Diagnose (prompt08072026-2, offen, NICHT gefixt):** Die
+**Klick-Bug — korrigierte Diagnose (2026-07-08_prompt-2, offen, NICHT gefixt):** Die
 ursprüngliche Hypothese ("Klick auf Menütitel öffnet nie ein Dropdown, egal was im Menü
 steht") war eine Artefakt-Beobachtung aus einem Testfall mit nur Blatt-Einträgen
 (`examples/menu-frame.rkt`: File→Quit, sonst nichts). Der reale Befund an echtem DrRacket
@@ -426,7 +426,7 @@ zusammenhängend mit fehlendem Fenster-Fokus, aber nicht isoliert bestätigt. F1
 haben); Ergebnis daher **inkonklusiv**, nicht als "Tastatur-Aktivierung funktioniert nicht"
 zu werten.
 
-## 15. Menü-Blatt-Items (gefixt) + Popup-Positionierung (gefixt) — prompt08072026-3
+## 15. Menü-Blatt-Items (gefixt) + Popup-Positionierung (gefixt) — 2026-07-08_prompt-3
 
 **addAction-Fix (`0be24d85`/`71b7347` gui/`main`):** Root Cause aus §14 bestätigt und
 behoben. `shim_action_create` erzeugte die `QAction` ohne sie per `QMenu::addAction()`

@@ -314,7 +314,7 @@ void shim_window_show(void* win, int visible)
             "mb.visible=%d actions=%d central.geom=(%d,%d %dx%d)\n",
             mb->height(), mb->sizeHint().height(), (int)mb->isVisible(),
             (int)mb->actions().size(), cg.x(), cg.y(), cg.width(), cg.height());
-        // W3 measurement (prompt08072026-2), discriminator 2: QMenuBar popups
+        // W3 measurement (2026-07-08_prompt-2), discriminator 2: QMenuBar popups
         // often require an active window. One-shot print, not a loop change.
         QWidget* aw = QApplication::activeWindow();
         if (aw)
@@ -575,7 +575,7 @@ void shim_menu_remove_action(void* menu, void* action)
 // Gated, on-demand dump of a QMenu's actions().size() and per-action state.
 // Unlike the popup-transition diagnostic in shim_pump, this fires every call
 // regardless of popup visibility -- needed to observe enable/check/delete
-// dispatch on a menu that stays open across mutations (prompt08072026-3).
+// dispatch on a menu that stays open across mutations (2026-07-08_prompt-3).
 void shim_menu_debug_dump(void* menu)
 {
     if (!plt_qt_debug()) return;

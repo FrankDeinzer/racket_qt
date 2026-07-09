@@ -1,4 +1,4 @@
-# Beobachtung — Menüleisten-/Redraw-Diagnose auf Windows (Phase 3, prompt07072026)
+# Beobachtung — Menüleisten-/Redraw-Diagnose auf Windows (Phase 3, 2026-07-07_prompt)
 
 **Datum:** 2026-07-07
 **Plattform:** Windows 11 Enterprise, x86-64

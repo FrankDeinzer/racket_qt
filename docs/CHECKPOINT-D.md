@@ -1,6 +1,6 @@
 # Checkpoint D — Plan: Eingabe-Rückgrat & Editor-Smoke
 
-**Zweck:** Execution-Brief für die nächste Implementierungssession (Claude Code). Baut auf `docs/report240626.md` (Checkpoint C) auf. Die fixen Architektur-Entscheidungen aus `docs/BRIEF.md` / `docs/ARCHITECTURE.md` gelten unverändert und werden hier **nicht** neu verhandelt.
+**Zweck:** Execution-Brief für die nächste Implementierungssession (Claude Code). Baut auf `docs/2026-06-24_report.md` (Checkpoint C) auf. Die fixen Architektur-Entscheidungen aus `docs/BRIEF.md` / `docs/ARCHITECTURE.md` gelten unverändert und werden hier **nicht** neu verhandelt.
 
 ---
 
@@ -112,6 +112,6 @@ D-1 ist die Voraussetzung für D-2 (Editor = zusammengesetztes D-1). Der Test-Ha
 ## Doku-Pflichten je Meilenstein
 
 - **`HACKING.md`:** neue Vertrags-Einträge (`public*`/`override*`), neue Lektionen.
-- **`STATUS.md`:** append-only Session-Log (Format wie `report240626.md`).
+- **`STATUS.md`:** append-only Session-Log (Format wie `2026-06-24_report.md`).
 - **`ARCHITECTURE.md`:** nur, wenn sich eine fixe Entscheidung ändert — mit Begründung.
 - **Commits in beide Repos** (Umbrella + gui-Fork), Submodul-Zeiger im Umbrella aktualisieren.

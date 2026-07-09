@@ -5,9 +5,9 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
-## Session 2026-07-08 (5, Linux) — Menü-Fixes cross-platform-validiert + set-icon-Crash gefixt (prompt08072026-4)
+## Session 2026-07-08 (5, Linux) — Menü-Fixes cross-platform-validiert + set-icon-Crash gefixt (2026-07-08_prompt-4)
 
-**Kontext:** `docs/prompt08072026-4.md`. Voller Bericht: `docs/report08072026-4-linux.md`.
+**Kontext:** `docs/2026-07-08_prompt-4.md`. Voller Bericht: `docs/2026-07-08_report-4-linux.md`.
 
 - **Racket-Version (gemessen, Phase 0):** v9.2 [cs] x86_64. gui-Submodul stand vor Sync auf
   `381425d5` (stale-Shim-Falle wie vorhergesagt) — auf `ba2dacc9` nachgezogen (enthält bereits
@@ -43,9 +43,9 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
-## Session 2026-07-08 (4, macOS) — Menü-Fixes cross-platform-validiert + neuer DrRacket-Crash gefixt (prompt08072026-4)
+## Session 2026-07-08 (4, macOS) — Menü-Fixes cross-platform-validiert + neuer DrRacket-Crash gefixt (2026-07-08_prompt-4)
 
-**Kontext:** `docs/prompt08072026-4.md`. Voller Bericht: `docs/report08072026-4-macos.md`.
+**Kontext:** `docs/2026-07-08_prompt-4.md`. Voller Bericht: `docs/2026-07-08_report-4-macos.md`.
 
 - **Racket-Version (gemessen, Phase 0):** v9.2 [cs], arm64. gui-Submodul stand vor Sync 4
   Commits hinter `origin/qt-backend` (stale-Shim-Falle wie vorhergesagt) — auf `1641f888`
@@ -85,9 +85,9 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
-## Session 2026-07-08 (3) — Menüs voll funktional: addAction-Fix + mapToGlobal-Fix (prompt08072026-3)
+## Session 2026-07-08 (3) — Menüs voll funktional: addAction-Fix + mapToGlobal-Fix (2026-07-08_prompt-3)
 
-**Kontext:** `docs/prompt08072026-3.md`. Voller Bericht: `docs/report08072026-3.md`.
+**Kontext:** `docs/2026-07-08_prompt-3.md`. Voller Bericht: `docs/2026-07-08_report-3.md`.
 
 - **Racket-Version (gemessen, Phase 0):** v9.2 [cs].
 - **Phase 1 — addAction-Fix (gefixt, gemessen, gepusht).** Root-Cause-Kandidat aus
@@ -116,9 +116,9 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
-## Session 2026-07-08 (2) — Klick-Bug gemessen: korrigierte Diagnose (prompt08072026-2)
+## Session 2026-07-08 (2) — Klick-Bug gemessen: korrigierte Diagnose (2026-07-08_prompt-2)
 
-**Kontext:** `docs/prompt08072026-2.md`.
+**Kontext:** `docs/2026-07-08_prompt-2.md`.
 
 - **Racket-Version (gemessen, Phase 0):** v9.2 [cs] — `CLAUDE.md` hatte hier noch v8.18
   stehen (Versionsdrift aus einer älteren Session), jetzt korrigiert.
@@ -129,12 +129,12 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
   bestätigt: Menüleiste horizontal (File/Edit/View/Language/Racket/Insert/Scripts/Tabs/Help),
   nicht mehr gestapelt. Titel-Fix wirkt im vollen Widget-Baum, nicht nur im Minimal-Repro.
 - **W3 — Klick-Bug gemessen, NICHT gefixt (Guardrail).** Die Hypothese aus
-  `report08072026.md` („Klick öffnet nie ein Dropdown, Event-Loop-Familie mit Redraw-Bug")
+  `2026-07-08_report.md` („Klick öffnet nie ein Dropdown, Event-Loop-Familie mit Redraw-Bug")
   wurde durch eine Nutzerbeobachtung an echtem DrRacket **korrigiert**: Dropdowns erscheinen
   für Menüs mit Submenü-Kindern (z. B. File→„Open Recent", Edit→„Key Bindings"), aber nur die
   Submenü-Einträge sind sichtbar — reine Blatt-Items fehlen. Komplett blattlose Menüs (wie
   der ursprüngliche Minimal-Repro `menu-frame.rkt`: File→Quit) zeigen deshalb gar keinen
-  Dropdown — das erklärt rückwirkend das „kein einziges popup APPEARED" aus `report08072026.md`.
+  Dropdown — das erklärt rückwirkend das „kein einziges popup APPEARED" aus `2026-07-08_report.md`.
   **Root-Cause-Kandidat verifiziert** (Code-Lektüre + gezielte Probe, kein Fix): `shim_action_create`
   (`qt-shim/src/shim.cpp`) erzeugt eine `QAction`, hängt sie aber nie per `addAction`/
   `insertAction` an ihr `QMenu` — nur `shim_menu_add_submenu`s `addMenu()` tut das
@@ -161,9 +161,9 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
-## Session 2026-07-08 (1) — Menüleiste sichtbar: Titel-Fix (prompt08072026)
+## Session 2026-07-08 (1) — Menüleiste sichtbar: Titel-Fix (2026-07-08_prompt)
 
-**Kontext:** `docs/prompt08072026.md`, Ergebnis: `docs/report08072026.md`. (Nachträglich in
+**Kontext:** `docs/2026-07-08_prompt.md`, Ergebnis: `docs/2026-07-08_report.md`. (Nachträglich in
 STATUS.md aufgenommen — dieser Eintrag fehlte bisher.)
 
 - **Root Cause gefunden:** `menu-bar% append` (`wx/qt/menu-bar.rkt`) bekam den Menütitel,
@@ -184,7 +184,7 @@ STATUS.md aufgenommen — dieser Eintrag fehlte bisher.)
 
 ## Session 2026-07-07 (3) — Windows Menü/Redraw-Diagnose (kein Re-Sync)
 
-**Kontext:** `docs/prompt07072026.md`, Ergebnis: `docs/report07072026_win.md`.
+**Kontext:** `docs/2026-07-07_prompt.md`, Ergebnis: `docs/2026-07-07_report_win.md`.
 
 - **Kein Re-Sync nötig** — der 1.78→1.80-Merge ist auf Windows entstanden und gepusht.
   Umbrella `main` sauber/aktuell, gui-Submodul `qt-backend` @ `381425d5`, `info.rkt` = **1.80**.
@@ -200,14 +200,14 @@ STATUS.md aufgenommen — dieser Eintrag fehlte bisher.)
   stützt einen Bug im gemeinsamen `editor-canvas%`/`text%`-Redraw-Pfad (fehlender
   Backing-Store-Persist).
 - **Damit liegen alle drei Plattform-Beobachtungen vor** — Eingabe für den Rendering-Fix-Prompt.
-- **Commit:** nur `docs/report07072026_win.md` + dieser STATUS-Eintrag (Screenshots out-of-band,
+- **Commit:** nur `docs/2026-07-07_report_win.md` + dieser STATUS-Eintrag (Screenshots out-of-band,
   nicht im Repo).
 
 ---
 
 ## Session 2026-07-07 — macOS auf 1.80 re-synced + Menü/Redraw-Diagnose
 
-**Kontext:** `docs/prompt07072026.md`, Ergebnis: `docs/report07072026_macos.md`.
+**Kontext:** `docs/2026-07-07_prompt.md`, Ergebnis: `docs/2026-07-07_report_macos.md`.
 
 - **macOS auf 1.80 re-synced, Smoke 3/3.** gui-Submodul FF-Pull 1.78→**1.80**
   (`381425d5`), stale `compiled/`-Caches gelöscht, Shim + Fork (`raco make`) neu
@@ -221,13 +221,13 @@ STATUS.md aufgenommen — dieser Eintrag fehlte bisher.)
 - **Redraw-Beobachtung:** Total-Blank nur **transient** (erholt sich nach Ruhe),
   Live-Tippen rendert stabil; stabil verloren nur der vor-Interaktion per `insert`
   gesetzte Text + vertikaler Versatz → milderes, eigenständiges Thema.
-- **Commit:** Umbrella `main` `25a13cb` (nur `docs/report07072026_macos.md`), gepusht.
+- **Commit:** Umbrella `main` `25a13cb` (nur `docs/2026-07-07_report_macos.md`), gepusht.
 
 ---
 
 ## Session 2026-07-07 (2) — Linux auf 1.80 re-synced + Menü/Redraw-Diagnose
 
-**Kontext:** `docs/prompt07072026.md`, Ergebnis: `docs/report07072026_linux.md`.
+**Kontext:** `docs/2026-07-07_prompt.md`, Ergebnis: `docs/2026-07-07_report_linux.md`.
 
 - **Linux auf 1.80 re-synced, Smoke 3/3.** gui-Submodul stand detached auf altem
   `6169a245` ohne lokalen `qt-backend`-Branch → `checkout -b qt-backend --track
@@ -252,7 +252,7 @@ STATUS.md aufgenommen — dieser Eintrag fehlte bisher.)
 
 ## Session 2026-07-02 — gui-lib-Angleich 1.78→1.80 + echtes DrRacket
 
-**Kontext:** `docs/prompt02072026.md`, Ergebnis: `docs/CHECKPOINT-E0-ledger.md`.
+**Kontext:** `docs/2026-07-02_prompt.md`, Ergebnis: `docs/CHECKPOINT-E0-ledger.md`.
 
 ### Was passiert ist
 

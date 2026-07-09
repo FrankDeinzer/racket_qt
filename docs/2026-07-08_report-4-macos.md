@@ -1,4 +1,4 @@
-# Bericht — macOS-Validierung addAction-/mapToGlobal-Fix + DrRacket-Startup-Crash gefixt (prompt08072026-4)
+# Bericht — macOS-Validierung addAction-/mapToGlobal-Fix + DrRacket-Startup-Crash gefixt (2026-07-08_prompt-4)
 
 **Datum:** 2026-07-08
 **Plattform:** macOS arm64 (`aarch64-macosx/cs`), Darwin 25.5.0
@@ -10,7 +10,7 @@
 Source-Override ist zwingend, sonst stiller Fallback auf cocoa, siehe §2)
 
 **Kurzfassung:** Ursprünglicher Auftrag war reine Validierung (kein Fix) der beiden von Windows
-gebrachten Menü-Fixes (`report08072026-3.md`). Beide Fixes wurden auf Datenebene (Probe,
+gebrachten Menü-Fixes (`2026-07-08_report-3.md`). Beide Fixes wurden auf Datenebene (Probe,
 isolierter `client-to-screen`-Test) **und** visuell in echtem DrRacket bestätigt. Dabei kam ein
 **neuer, unabhängiger Startup-Crash** zutage (`set-label`-Arity-Mismatch in der qt-`tab-panel%`-
 Stub-Klasse), der DrRacket auf macOS am Hochfahren hinderte und damit die visuelle
@@ -28,7 +28,7 @@ ohne Default-Popup-Menü), nicht als Bug im mapToGlobal-Fix — kein weiterer Fi
 - `racket --version` → **v9.2 [cs]** (gemessen, arm64 bestätigt via `system-library-subpath` →
   `aarch64-macosx/cs`).
 - Umbrella (`main`): sauber, HEAD `45174c5`, referenziert bereits Submodul-SHA `1641f888`
-  (Ziel-Commit aus `report08072026-3.md`).
+  (Ziel-Commit aus `2026-07-08_report-3.md`).
 - gui-Submodul (`third_party/gui`, Branch `qt-backend`): **vor** Sync 4 Commits hinter
   `origin/qt-backend`, stand auf `381425d5` (alt, vor beiden Menü-Fixes) — klassische
   stale-Shim-Falle, wie vom Prompt vorhergesagt.
@@ -150,7 +150,7 @@ Insert/Scripts/Windows/Help), kein Crash. Smoke 3/3 weiterhin grün nach dem Fix
 
 ## 6. Guardrail-Abweichung — bewusst, mit Nutzer-Autorisierung
 
-Der Original-Prompt (`prompt08072026-4.md`) sah für diese Session **keine Fix-Commits**
+Der Original-Prompt (`2026-07-08_prompt-4.md`) sah für diese Session **keine Fix-Commits**
 vor („nur Sync + Rebuild + Messung + Doku … bei Abweichung: STOPP, berichten, NICHT
 selbständig nachbessern"). Der DrRacket-Crash aus §5 wurde dem Nutzer gemeldet und
 gestoppt; der Nutzer hat die Scope-Erweiterung **explizit angewiesen**

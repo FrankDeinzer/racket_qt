@@ -1,4 +1,4 @@
-# Bericht — Linux-Validierung addAction-/mapToGlobal-Fix + DrRacket-Startup-Crash gefixt (prompt08072026-4)
+# Bericht — Linux-Validierung addAction-/mapToGlobal-Fix + DrRacket-Startup-Crash gefixt (2026-07-08_prompt-4)
 
 **Datum:** 2026-07-08
 **Plattform:** Linux x86_64, KDE Plasma/X11
@@ -14,8 +14,8 @@ Source-Override ist zwingend, sonst stiller Fallback auf gtk; verifiziert über 
 `menubar_create`-Zeilen)
 
 **Kurzfassung:** Ursprünglicher Auftrag war reine Validierung (kein Fix) der beiden von Windows
-gebrachten Menü-Fixes (`report08072026-3.md`), analog zur bereits abgeschlossenen macOS-Session
-(`report08072026-4-macos.md`). Beide Fixes wurden auf Datenebene (Probe) **und** in echtem
+gebrachten Menü-Fixes (`2026-07-08_report-3.md`), analog zur bereits abgeschlossenen macOS-Session
+(`2026-07-08_report-4-macos.md`). Beide Fixes wurden auf Datenebene (Probe) **und** in echtem
 DrRacket bestätigt. Wie auf macOS kam dabei ein **neuer, unabhängiger Startup-Crash** zutage
 (`set-icon`-Methode fehlt komplett in der qt-`frame%`-Klasse), der DrRacket am Hochfahren
 hinderte und die visuelle Validierung blockierte. Nutzer hat die Scope-Erweiterung nach
@@ -103,7 +103,7 @@ Wie in §3 beschrieben zeigte der Vollbild-Screenshot dieses Popup ebenfalls nic
 (gleiches Capture-Artefakt) — die Positions-/Inhaltsvalidierung stützt sich auf den gated
 Debug-Dump plus unabhängige `xwininfo`-Geometrieabfrage, beides datengestützt und eindeutig.
 
-**Anmerkung zu Klick-Synthese:** anders als macOS (wo laut `report08072026-4-macos.md` weder
+**Anmerkung zu Klick-Synthese:** anders als macOS (wo laut `2026-07-08_report-4-macos.md` weder
 `cliclick` noch Quartz/PyObjC verfügbar waren und der Nutzer manuell klicken musste) konnte auf
 dieser Linux-Maschine ein echter synthetischer Maus-Klick über `libXtst`/`ctypes` erzeugt werden
 — dadurch liegt hier sogar ein direkter Nachweis über einen echten Klick-Trigger vor, nicht nur
@@ -170,7 +170,7 @@ ausreichend.
 
 ## 7. Guardrail-Abweichung — bewusst, mit Nutzer-Autorisierung
 
-Der Original-Prompt (`prompt08072026-4.md`) sah für diese Session **keine Fix-Commits** vor.
+Der Original-Prompt (`2026-07-08_prompt-4.md`) sah für diese Session **keine Fix-Commits** vor.
 Der DrRacket-Crash aus §5 wurde dem Nutzer über `AskUserQuestion` gemeldet und die Entscheidung
 eingeholt; der Nutzer hat die Scope-Erweiterung **explizit gewählt** („Ja, fixen"). Alle übrigen
 Guardrails (kein `exec()`/`QEventLoop`, cocoa/gtk/win32 unberührt, Redraw-Bug unberührt, gated

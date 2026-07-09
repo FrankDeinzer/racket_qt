@@ -1,4 +1,4 @@
-# Beobachtung — Menüleisten-/Redraw-Diagnose auf Linux (Phase 3, prompt07072026)
+# Beobachtung — Menüleisten-/Redraw-Diagnose auf Linux (Phase 3, 2026-07-07_prompt)
 
 **Datum:** 2026-07-07
 **Plattform:** Kubuntu 22.04 (Plasma/KDE, X11, `kwin_x11`), x86_64

@@ -1,4 +1,4 @@
-# Beobachtung — Menüleisten-/Redraw-Diagnose auf macOS (Phase 3, prompt07072026)
+# Beobachtung — Menüleisten-/Redraw-Diagnose auf macOS (Phase 3, 2026-07-07_prompt)
 
 **Datum:** 2026-07-07
 **Plattform:** macOS 15 (Darwin 25.5.0), arm64 (Apple M1 / T8103)
