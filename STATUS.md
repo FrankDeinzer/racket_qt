@@ -5,6 +5,35 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-10 (macOS) — Redraw-Bug validiert, grün; E-0 vollständig geschlossen (2026-07-10_prompt Phase 5/6)
+
+**Kontext:** `docs/2026-07-10_prompt.md` Phase 5/6. Voller Bericht:
+`docs/2026-07-10_report-macos.md`.
+
+- **Sync — grün.** ff-Pull `qt-backend` `87ebd078`→`04935cb6` (nach Rückfrage). Diff
+  geprüft: identisch zu Windows/Linux (nur `canvas.rkt`, kein `shim.cpp`). Shim bereits
+  aktuell, Bytecode neu (stale `compiled/` entfernt, `raco make`). Re-Smoke 3/3 grün.
+- **Theme-Check zunächst fehlerhaft, dann selbst korrigiert.** Legacy-Key
+  `framework:color-scheme` zeigte scheinbar Dark Mode; der tatsächlich maßgebliche Pref
+  `framework:white-on-black-mode?` stand die ganze Zeit auf `#f` (Light, explizit gesetzt,
+  nicht `'platform`). Lektion in `docs/HACKING.md` §16 festgehalten. Erklärt plausibel auch,
+  warum der 07-09-Editor-Garble-Befund jetzt nicht mehr reproduzierbar ist.
+- **Repro — grün.** `System Events click at` bewegte den Fokus nicht in den Qt-Canvas;
+  eigener CoreGraphics-Klick-Helfer gebaut (analog zum Linux-XTest-Helfer). Danach: alle
+  sieben Zeilen (`#lang racket/base` + 6× `define`) bleiben sichtbar, Debug-Log zeigt
+  `begin-/end-refresh-sequence -> suspend-/resume-flush` aktiv feuernd. Resize +
+  Occlusion-Zyklus zusätzlich verifiziert, beides grün. Re-Smoke danach 3/3 grün.
+- **macOS-Nebenbefunde erneut geprüft:** Editor-Garble (07-09) reproduziert sich unter
+  bestätigtem Light Mode nicht mehr. Menüleisten-Befund (8 statt 9, „Windows" fehlt)
+  besteht weiterhin unverändert — offener Punkt, eigene Diagnose-Session.
+- **Commits:** keine — reine Validierung. `docs/HACKING.md` §16 (macOS-Validierung,
+  Redraw auf allen drei Plattformen geschlossen), `CLAUDE.md`-Checkpoint-Update,
+  `docs/2026-07-10_report-macos.md`, dieser Eintrag.
+- **Redraw-Bug damit auf allen drei Plattformen geschlossen. E-0 vollständig.** Nächster
+  Meilenstein: Checkpoint E (Widget-Breite).
+
+---
+
 ## Session 2026-07-10 (Linux) — Redraw-Bug validiert, grün (2026-07-10_prompt Phase 4)
 
 **Kontext:** `docs/2026-07-10_prompt.md` Phase 4. Voller Bericht:

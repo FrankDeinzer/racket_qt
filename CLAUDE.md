@@ -97,8 +97,8 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 | **Linux Smoke** | **✅ 2026-06-29** |
 | **E-0 – Widget-Stubs + text-field% fix** | **✅ 2026-06-30** |
 | **E-0 – gui-lib-Angleich 1.78→1.80 + echtes DrRacket** | **✅ 2026-07-08 (E-0-Menü geschlossen: Tippen/Enter/Ausführen funktioniert; Menüleiste sichtbar+horizontal [Titel-Fix] UND gefüllt [addAction-Fix] UND Popups korrekt platziert [mapToGlobal-Fix], auf Windows+macOS+Linux bestätigt; je ein zusätzlicher Startup-Crash auf macOS [`tab-panel%` `set-label`-Arity] und Linux [`frame%` `set-icon` fehlte] gefunden+gefixt; Redraw-Bug separat offen, eigene Session)** |
-| **Redraw-Bug — Windows gefixt + Linux validiert, macOS-Validierung offen** | **🟡 2026-07-10 (Windows: gefixt + visuell bestätigt — `start-backing-retained` + `suspend-/resume-flush` [Prompt] plus zwei zusätzlich nötige Änderungen: `reset-backing-retained` bei `set-size`-Resize, Konstruktor-Reihenfolge-Fix für `dc`. Linux: ff-Pull + identischer Tipp-Repro grün, Diff geprüft. Details `docs/HACKING.md` §16, `docs/2026-07-10_report-win.md`, `docs/2026-07-10_report-linux.md`. macOS muss denselben Codepfad noch nachziehen+validieren, dann E-0 vollständig geschlossen [Menüs + Redraw])** |
-| E – Widget-Breite (dialog%, message%, …) | ⬜ |
+| **Redraw-Bug — auf allen drei Plattformen gefixt + validiert** | **✅ 2026-07-10 (Windows: gefixt + visuell bestätigt — `start-backing-retained` + `suspend-/resume-flush` [Prompt] plus zwei zusätzlich nötige Änderungen: `reset-backing-retained` bei `set-size`-Resize, Konstruktor-Reihenfolge-Fix für `dc`. Linux + macOS: ff-Pull + identischer Tipp-Repro grün, Diff geprüft. Details `docs/HACKING.md` §16, `docs/2026-07-10_report-win.md`, `docs/2026-07-10_report-linux.md`, `docs/2026-07-10_report-macos.md`. **E-0 damit vollständig geschlossen** [Menüs + Redraw]; offene macOS-/Linux-Nebenbefunde siehe unten)** |
+| E – Widget-Breite (dialog%, message%, …) | ⬜ nächster Meilenstein |
 
 **Checkpoint D — erledigt:**
 - **D-0:** Layout-Refactor — `QVBoxLayout` raus, `shim_widget_set_geometry()` rein, `panel%` real
@@ -209,12 +209,32 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
   macOS-Resize-Prüfung ein) — blockiert das validierte Tipp-Repro-Ergebnis nicht.
 - Reine Validierung, keine Fix-Commits.
 
-**Nächster Schritt: macOS (Validierung + macOS-Nebenbefunde) laut
-`docs/2026-07-10_prompt.md` Phase 5/6 → danach Checkpoint E** — Widget-Breite nach
-konkretem App-Bedarf. Da der Fix vier statt zwei Änderungen umfasst, muss die
-macOS-Validierung gegen den tatsächlichen Diff prüfen, nicht nur gegen die ursprüngliche
-2-Schritt-Beschreibung. Zusätzlich offen: macOS-Menüleisten-Diskrepanz
-(8 statt 9 Menüs, `Windows` fehlt) separat klären, siehe `docs/2026-07-09_report-macos.md`.
+**Redraw-Bug — macOS validiert, grün (2026-07-10, `docs/2026-07-10_report-macos.md`):**
+- ff-Pull `qt-backend` `87ebd078`→`04935cb6`, Diff geprüft (identisch zu Windows/Linux,
+  kein `shim.cpp`-Anteil). Re-Smoke 3/3 grün.
+- **Theme-Prüfung anfangs fehlerhaft, dann korrigiert:** der Legacy-Key
+  `framework:color-scheme` zeigte scheinbar Dark Mode; der tatsächlich maßgebliche Schalter
+  `framework:white-on-black-mode?` stand die ganze Zeit auf `#f` (Light, explizit gesetzt).
+  Siehe `docs/HACKING.md` §16 für die Diagnose-Lektion — künftig `white-on-black-mode?`
+  prüfen, nicht `color-scheme`.
+- Identischer Tipp-Repro (echte CGEvent-Keystrokes/-Klicks — `System Events click at`
+  erreichte den Qt-Canvas nicht, eigener kleiner CoreGraphics-Klick-Helfer gebaut, analog
+  zum Linux-XTest-Helfer): alle sieben Zeilen bleiben sichtbar, Debug-Log zeigt
+  `begin-/end-refresh-sequence -> suspend-/resume-flush` aktiv feuernd. Resize +
+  Occlusion-Zyklus zusätzlich verifiziert. Re-Smoke 3/3 grün.
+- **macOS-Nebenbefund „Editor-Garble beim ersten Paint" (07-09) reproduziert sich unter
+  korrekt identifiziertem Light Mode NICHT** — plausibel derselbe Theme-Key-Fehlgriff wie
+  oben. **Menüleisten-Befund (8 statt 9, „Windows" fehlt) besteht weiterhin unverändert** —
+  offener Punkt, eigene Diagnose-Session.
+- Reine Validierung, keine Fix-Commits.
+
+**Redraw-Bug damit auf allen drei Plattformen (Windows/macOS/Linux) geschlossen. E-0
+vollständig (Menüs + Redraw). Nächster Meilenstein: Checkpoint E** — Widget-Breite nach
+konkretem App-Bedarf. Offene Nebenbefunde für eigene, spätere Sessions: macOS-Menüleisten-
+Diskrepanz (8 statt 9 Menüs, `Windows` fehlt, `docs/2026-07-10_report-macos.md` Abschnitt 4.2),
+Linux-Resize-/Minimieren-Verhalten unter KWin/X11 (`docs/2026-07-10_report-linux.md`
+Abschnitt 3), vorbestehender Windows-Nebenbefund zum Toolbar-Save-Icon-Timing
+(`wx/qt/button.rkt`).
 
 ## Dokumentation
 

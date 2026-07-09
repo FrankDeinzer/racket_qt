@@ -475,7 +475,7 @@ Kontextmenü jetzt direkt am Klickpunkt (window-relative (400,300) → Menü ers
 ~(403,304)) statt am Fensterrand. `window.rkt` musste neu `"utils.rkt"` requiren (fehlte
 vorher — kein Zirkularproblem, `utils.rkt` requirt nichts aus `wx/qt/`).
 
-## 16. Redraw-Bug — bestätigt + gefixt (Windows, 2026-07-10_prompt); Linux validiert — macOS-Validierung offen
+## 16. Redraw-Bug — bestätigt + gefixt (Windows, 2026-07-10_prompt); Linux + macOS validiert, auf allen drei Plattformen geschlossen
 
 **Symptom:** In echtem DrRacket wird beim Tippen nur die zuletzt bearbeitete Zeile
 angezeigt; alle vorherigen Zeilen erscheinen weiß, obwohl sie im Editor-Puffer noch
@@ -598,11 +598,35 @@ unabhängig vom (validierten) Tipp-Repro-Ergebnis. Für eine saubere Diskriminie
 es einen echten EWMH-Resize (`_NET_MOVERESIZE_WINDOW` ans Root-Fenster) oder `xdotool`,
 keins davon in dieser Session nachgerüstet.
 
-**Offen:** macOS muss denselben (gemeinsamen) Code-Pfad noch validieren — siehe
-`docs/2026-07-10_prompt.md` Phase 5. Da Punkt 3/4 oben über den ursprünglich
-vorgeschriebenen Fix hinausgehen, darf die macOS-Validierung nicht nur die
-2-Schritt-Beschreibung aus der ursprünglichen Kandidaten-Analyse erwarten, sondern muss
-gegen den tatsächlichen Diff prüfen.
+**macOS-Validierung (2026-07-10, `docs/2026-07-10_report-macos.md`): grün.** ff-Pull auf
+`qt-backend` `04935cb6` (Diff geprüft — exakt die vier oben beschriebenen Änderungen, kein
+`shim.cpp`-Anteil), Shim bereits aktuell, Bytecode neu, Smoke 3/3 grün. Echte
+CGEvent-synthetisierte Keystrokes (System Events' `click at` bewegte den Fokus nicht in den
+Qt-Canvas — eigener kleiner CoreGraphics-Klick-Helfer nötig, analog zum Linux-XTest-Helfer)
+in `PLT_QT=1`-DrRacket: alle sieben Zeilen (`#lang racket/base` + 6× `define`) bleiben
+sichtbar, Debug-Log zeigt `begin-/end-refresh-sequence -> suspend-/resume-flush` aktiv
+feuernd, `bm=`-Größe bleibt bei voller Widget-Größe. Zusätzlich verifiziert: Resize,
+Occlusion-Zyklus (Fokus weg/zurück). Minimieren via Accessibility technisch nicht sauber
+ansteuerbar (Qt-Fenster exponiert `AXMinimizeButton` nicht vollständig) — Occlusion-Zyklus
+deckt denselben Expose-Pfad ab.
+
+**Theme-Diagnose-Lektion (wichtig für künftige Sessions):** Der naheliegende Pref-Key
+`framework:color-scheme` ist laut Code-Kommentar in `framework/private/main.rkt` **Legacy**
+und irreführend für die Frage „ist Light oder Dark Mode aktiv" — er wird nur ausgewertet,
+wenn der eigentliche Schalter `framework:white-on-black-mode?` auf `'platform` steht oder
+man tatsächlich im Dark-Zweig ist. Der korrekte Diagnosebefehl ist
+`(preferences:get 'framework:white-on-black-mode?)` (`#t`=Dark, `#f`=Light,
+`'platform`=OS-gesteuert). Eine Prüfung des Legacy-Keys allein führte in dieser Session kurzzeitig
+zu einer falschen „Dark Mode aktiv"-Meldung, obwohl Light Mode explizit gesetzt war — und
+erklärt plausibel auch den macOS-Nebenbefund „Editor-Garble beim ersten Paint" aus
+`docs/2026-07-09_report-macos.md`: der reproduziert sich unter korrekt identifiziertem Light
+Mode nicht mehr (siehe `docs/2026-07-10_report-macos.md` Abschnitt 4.1).
+
+**Redraw-Bug damit auf allen drei Plattformen (Windows/macOS/Linux) validiert und
+geschlossen.** Linux-Resize/-Minimieren bleibt als separate, ungeklärte Beobachtung offen
+(siehe oben) — blockiert das Schließen des Redraw-Themas nicht. macOS-Befund A
+(fehlendes „Windows"-Menü, 8 statt 9) bleibt ebenfalls offen, siehe
+`docs/2026-07-10_report-macos.md` Abschnitt 4.2 — eigene Diagnose-Session.
 
 ## 17. Orphaned Submodule-Commit — `git pull` schlägt mit „not our ref" fehl
 
