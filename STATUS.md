@@ -5,6 +5,39 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-09 (Windows) — Clean-Start-Check + Redraw-Bug gemessen (2026-07-09_prompt)
+
+**Kontext:** `docs/2026-07-09_prompt.md`. Voller Bericht: `docs/2026-07-09_report.md`.
+
+- **Phase 0 — Stand verifiziert.** `racket --version` = v9.2 [cs] (gemessen). gui-Submodul war
+  bereits auf `qt-backend` `b2369d48` (enthält alle vier Fixes: addAction, mapToGlobal,
+  set-label, set-icon, plus einen Kommentar-Fix aus der Vorsession) — kein Pull nötig. Shim war
+  gegenüber `shim.cpp` veraltet (Kommentar-Fix von heute) → neu gebaut. `raco setup mred
+  framework` neu kompiliert (Windows: Installation-wide-Link). Re-Smoke 3/3 grün.
+- **Phase 1 — Clean-Start-Check: sauber beim ersten Start.** Echtes `PLT_QT=1 DrRacket.exe`:
+  9 Menüs (File/Edit/View/Language/Racket/Insert/Scripts/Tabs/Help), Editor sichtbar, kein
+  Crash, keine neue Landmine gezündet — Screenshot bestätigt.
+- **Phase 2 — Redraw-Bug gemessen, NICHT gefixt (Guardrail).** Vier gated Diskriminatoren
+  hinter `PLT_QT_DEBUG` in `shim.cpp` (`paintEvent`, `shim_canvas_blit_argb`) und
+  `wx/qt/canvas.rkt` (`refresh`, `flush`, `begin-`/`end-refresh-sequence`,
+  `queue-backing-flush`) eingebaut (additiv, bleiben im Code). Ergebnis: Blit deckt immer die
+  volle Widget-Fläche ab (A widerlegt), Backing-Bitmap bleibt immer volle Größe (B als
+  „falsche Größe" widerlegt), jeder Editor-Repaint läuft über den vollen
+  `refresh→blit_argb`-Pfad statt isoliertem `request_repaint` (C widerlegt), Minimieren+
+  Wiederherstellen ändert nichts am Symptom (spricht gegen reine Trigger-Frage). Root-Cause-
+  Kandidat per Code-Vergleich mit win32/gtk/cocoa gefunden: `begin-refresh-sequence`/
+  `end-refresh-sequence` sind im Qt-Backend No-ops, `start-backing-retained` wird nie
+  aufgerufen — dadurch verwirft `backing-dc%` die Backing-Bitmap nach jedem Flush statt sie
+  über Teil-Invalidierungen hinweg zu behalten. Details/Messwerte: `docs/HACKING.md` §16.
+- **Commits:** gui-Submodul (`qt-backend`) — Kommentar-Update (Session-Label-Rename) bereits
+  vor dieser Session gepusht; diese Session fügt die gated Diagnose-Hooks in `canvas.rkt`
+  hinzu (eigener Commit). Umbrella (`main`) — `shim.cpp`-Diagnose-Hooks, `docs/HACKING.md` §16,
+  `CLAUDE.md`-Checkpoint-Tabelle, dieser STATUS-Eintrag, `docs/2026-07-09_report.md`.
+- **Nächster Schritt:** Redraw-Bug-FIX (eigene Session) auf Basis des hier gemessenen
+  Mechanismus — dann Checkpoint E.
+
+---
+
 ## Session 2026-07-08 (5, Linux) — Menü-Fixes cross-platform-validiert + set-icon-Crash gefixt (2026-07-08_prompt-4)
 
 **Kontext:** `docs/2026-07-08_prompt-4.md`. Voller Bericht: `docs/2026-07-08_report-4-linux.md`.

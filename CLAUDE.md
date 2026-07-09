@@ -96,6 +96,7 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 | **Linux Smoke** | **✅ 2026-06-29** |
 | **E-0 – Widget-Stubs + text-field% fix** | **✅ 2026-06-30** |
 | **E-0 – gui-lib-Angleich 1.78→1.80 + echtes DrRacket** | **✅ 2026-07-08 (E-0-Menü geschlossen: Tippen/Enter/Ausführen funktioniert; Menüleiste sichtbar+horizontal [Titel-Fix] UND gefüllt [addAction-Fix] UND Popups korrekt platziert [mapToGlobal-Fix], auf Windows+macOS+Linux bestätigt; je ein zusätzlicher Startup-Crash auf macOS [`tab-panel%` `set-label`-Arity] und Linux [`frame%` `set-icon` fehlte] gefunden+gefixt; Redraw-Bug separat offen, eigene Session)** |
+| **Redraw-Bug — Windows-Messung** | **✅ 2026-07-09 (gemessen, NICHT gefixt: Root-Cause-Kandidat identifiziert — `wx/qt/canvas.rkt`s `begin-refresh-sequence`/`end-refresh-sequence` sind No-ops und `start-backing-retained` wird nie aufgerufen, anders als bei win32/gtk/cocoa; dadurch verwirft jeder Flush-Zyklus die Backing-Bitmap statt sie über Teil-Invalidierungen hinweg zu behalten. Details `docs/HACKING.md` §16, `docs/2026-07-09_report.md`)** |
 | E – Widget-Breite (dialog%, message%, …) | ⬜ |
 
 **Checkpoint D — erledigt:**
@@ -153,7 +154,18 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 - Beide Zusatz-Crashes betreffen ausschließlich `wx/qt/` und sind reine No-op-Stubs für Methoden, die dieses Backend bisher schlicht nicht kannte — kein Verhalten für bestehende Aufrufer geändert.
 - **E-0-Menü damit auf allen drei Plattformen (Windows/macOS/Linux) vollständig geschlossen.** Redraw-Bug bleibt separat offen (eigene Session). Windows sollte vor nächstem Re-Sync über die beiden neuen Fixes informiert werden.
 
-**Nächster Schritt: Redraw-Bug (eigene Session) → danach Checkpoint E** — Widget-Breite nach konkretem App-Bedarf.
+**Redraw-Bug — Windows-Messung, kein Fix (2026-07-09, `docs/2026-07-09_prompt.md`):**
+- **Repo-Sync (Phase 0):** Windows war bereits auf `qt-backend` `b2369d48` (enthält alle vier Menü-/Startup-Fixes); Shim neu gebaut (`shim.cpp`-Kommentar-Fix war neuer als die DLL), `raco setup mred framework` neu kompiliert. Smoke 3/3 grün.
+- **Clean-Start-Check (Phase 1): sauber beim ersten Start.** Echtes `PLT_QT=1 DrRacket.exe`: 9 Menüs, Editor sichtbar, kein Crash — keine neue Landmine gezündet.
+- **Redraw-Bug gemessen (Phase 2), vier gated Diskriminatoren hinter `PLT_QT_DEBUG` (additiv, in `qt-shim/src/shim.cpp` + `wx/qt/canvas.rkt` — bleiben im Code, wie die bestehende Menü-Diagnose):**
+  1. `paintEvent`-Requested- vs. Blit-Rechteck: Blit deckt **immer** die volle Widget-Fläche ab (nie zu klein) — (A) widerlegt.
+  2. Backing-QImage-Größe über Zyklen: bleibt **immer** voll widget-groß, schrumpft nie — (B) im Sinne „falsche Größe" widerlegt.
+  3. Racket-seitige Aufrufkette: jeder Editor-Repaint (auch reines Caret-Blinken) läuft vollständig `refresh → queue-paint → queue-backing-flush → blit_argb`, kein isolierter `request_repaint` ohne frischen Blit für die Editor-Canvas — (C) widerlegt.
+  4. Fenster minimieren+wiederherstellen (voller Expose): Symptom **bleibt unverändert** — spricht gegen „falscher Trigger" und für einen strukturellen Bitmap-Lifecycle-Fehler.
+- **Root-Cause-Kandidat (Code-Vergleich, noch nicht gefixt):** `wx/qt/canvas.rkt`s `begin-refresh-sequence`/`end-refresh-sequence` sind No-ops; win32/gtk/cocoa verdrahten beide auf `dc.suspend-flush`/`resume-flush`. Zusätzlich fehlt der einmalige `(send dc start-backing-retained)`-Aufruf nach DC-Erzeugung (bei den drei anderen Backends vorhanden). Ohne diese Klammerung wird `retained-cr` nach jedem einzelnen Flush verworfen (`backing-dc%`s `reset-backing-retained`) statt über eine ganze Repaint-Sequenz hinweg erhalten — jede Teil-Invalidierung (z. B. nur die Caret-/aktuelle Zeile) landet dadurch auf einer frisch geleerten Bitmap, der Rest bleibt weiß. Details/Messwerte: `docs/HACKING.md` §16.
+- **Kein Fix in dieser Session (Guardrail eingehalten).** Fix ist die nächste Session, mit diesem gemessenen Mechanismus als Ausgangspunkt.
+
+**Nächster Schritt: Redraw-Bug-FIX (eigene Session, gemessener Mechanismus aus 2026-07-09 als Basis) → danach Checkpoint E** — Widget-Breite nach konkretem App-Bedarf.
 
 ## Dokumentation
 

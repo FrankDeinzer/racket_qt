@@ -82,10 +82,21 @@ public:
     }
 
 protected:
-    void paintEvent(QPaintEvent*) override {
+    void paintEvent(QPaintEvent* e) override {
         QPainter p(this);
         if (!backing.isNull())
             p.drawImage(QRect(0, 0, width(), height()), backing);
+        // Redraw-bug measurement (2026-07-09_prompt), discriminator 1: does
+        // the OS-requested repaint region differ from what we actually blit
+        // (always the full widget rect, regardless of e->rect())?
+        if (plt_qt_debug() && e) {
+            QRect r = e->rect();
+            fprintf(stderr,
+                    "[PLT_QT_DEBUG] paintEvent requested=(%d,%d %dx%d) "
+                    "blitted=(0,0 %dx%d) backing=%dx%d\n",
+                    r.x(), r.y(), r.width(), r.height(),
+                    width(), height(), backing.width(), backing.height());
+        }
     }
 
     void resizeEvent(QResizeEvent* e) override {
@@ -414,6 +425,17 @@ void shim_canvas_blit_argb(void*          canvas_ptr,
                            int w, int h, int stride)
 {
     auto* c = static_cast<RacketCanvas*>(canvas_ptr);
+    // Redraw-bug measurement (2026-07-09_prompt), discriminator 2: does the
+    // backing QImage stay full-canvas-sized on every flush, or does it
+    // shrink to a sub-region? Logs size + timing, one line per blit.
+    if (plt_qt_debug()) {
+        static auto t_start = std::chrono::steady_clock::now();
+        long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t_start).count();
+        fprintf(stderr,
+                "[PLT_QT_DEBUG] blit_argb t=%lldms new=%dx%d prev_backing=%dx%d\n",
+                ms, w, h, c->backing.width(), c->backing.height());
+    }
     QImage img(w, h, QImage::Format_ARGB32_Premultiplied);
     for (int y = 0; y < h; y++) {
         auto*          dst_row = reinterpret_cast<uint32_t*>(img.scanLine(y));

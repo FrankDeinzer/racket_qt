@@ -474,3 +474,72 @@ Verifiziert: Rechtsklick im Definitions-Editor von echtem DrRacket öffnet das
 Kontextmenü jetzt direkt am Klickpunkt (window-relative (400,300) → Menü erscheint bei
 ~(403,304)) statt am Fensterrand. `window.rkt` musste neu `"utils.rkt"` requiren (fehlte
 vorher — kein Zirkularproblem, `utils.rkt` requirt nichts aus `wx/qt/`).
+
+## 16. Redraw-Bug — gemessen, Root-Cause-Kandidat identifiziert, NICHT gefixt — 2026-07-09_prompt
+
+**Symptom:** In echtem DrRacket wird beim Tippen nur die zuletzt bearbeitete Zeile
+angezeigt; alle vorherigen Zeilen erscheinen weiß, obwohl sie im Editor-Puffer noch
+vorhanden sind (Undo/Ausführen funktionieren normal — reiner Anzeigefehler).
+
+**Vier gated Diskriminatoren** (hinter `PLT_QT_DEBUG`, additiv, bleiben im Code wie die
+bestehende Menü-Diagnose — `qt-shim/src/shim.cpp` `paintEvent`/`shim_canvas_blit_argb`,
+`wx/qt/canvas.rkt` `refresh`/`flush`/`begin-`/`end-refresh-sequence`/`queue-backing-flush`):
+
+1. **`paintEvent`: angeforderte vs. tatsächlich geblittete Region.** Qt fordert beim
+   Editor-Repaint durchgehend `requested=(0,0 1400x436)` an; unser Code blittet immer
+   `(0,0 width x height)` — deckungsgleich (die 16px-Differenz ist Rand-Toleranz). Kleinere
+   angeforderte Regionen (z. B. `(0,27 30x3)` bei Toolbar-Icons) werden ebenfalls immer
+   voll und nicht unterdimensioniert geblittet. → **(A) „Blit-Region zu klein" widerlegt.**
+2. **Backing-QImage-Größe + Zeitpunkt bei jedem `shim_canvas_blit_argb`.** Über mehrere
+   hundert Zyklen (inkl. reinem Caret-Blinken alle ~500 ms) bleibt die Größe für die
+   Editor-Canvas konstant bei der vollen Widget-Größe (z. B. `1416x436`, nach Resize
+   `1416x603`) — nie eine Teilgröße. Ein zweiter, unabhängiger 69×19-Kanal (vermutlich ein
+   Toolbar-/Caret-Widget) läuft mit fester eigener Größe daneben. → **(B) im Sinne
+   „QImage falsch dimensioniert" widerlegt** — die Größe stimmt immer.
+3. **Racket-seitige Aufrufkette.** Jeder Editor-Repaint — auch der reine Caret-Blink,
+   nicht nur Tastatureingabe — durchläuft vollständig `refresh → queue-paint →
+   queue-backing-flush → on-backing-flush (proc fired, volle Bitmap-Größe) → blit_argb →
+   request_repaint`. Der direkte `flush`-Pfad (`request_repaint` ohne frischen Blit) feuert
+   ausschließlich für kleine Toolbar-Widgets in den ersten ~4s nach Start (50× beobachtet,
+   nie für die Editor-Canvas). → **(C) „falscher Repaint-Trigger" für den Editor-Bereich
+   widerlegt.**
+4. **Fenster minimieren + wiederherstellen (erzwingt vollen Expose).** Symptom bleibt
+   unverändert — die weißen Zeilen kommen nicht zurück, obwohl derselbe volle
+   `(0,0 1400x436)`-Zyklus erneut durchläuft. Spricht gegen eine reine Trigger-Frage (ein
+   erzwungener zusätzlicher voller Expose ändert nichts) und für einen strukturellen
+   Bitmap-Lifecycle-Fehler, der bei **jedem** Zyklus neu auftritt — auch bei ohnehin schon
+   „vollen" Zyklen.
+
+**Root-Cause-Kandidat (Code-Vergleich mit win32/gtk/cocoa, NICHT gefixt):**
+`wx/qt/canvas.rkt`s `begin-refresh-sequence`/`end-refresh-sequence` sind reine `(void)`
+No-ops. Bei win32 (`wx/win32/canvas.rkt:327-330`) und gtk (`wx/gtk/canvas.rkt:644-647`)
+verdrahten beide Methoden `(send dc suspend-flush)` / `(send dc resume-flush)` — cocoa
+folgt demselben Muster über `start-backing-retained`/`end-backing-retained`. Zusätzlich
+rufen win32 und gtk direkt nach der `dc`-Erzeugung einmalig `(send dc
+start-backing-retained)` auf (`wx/win32/canvas.rkt:266`, `wx/gtk/canvas.rkt:672`) — im
+Qt-Backend fehlt dieser Aufruf komplett (`grep` über `wx/qt/canvas.rkt` liefert keinen
+Treffer für `start-backing-retained`).
+
+Ohne diese Klammerung bleibt `retained-counter` in `backing-dc%`
+(`wx/common/backing-dc.rkt`) permanent bei 0, sodass `on-backing-flush` bei **jedem**
+`release-cr` sofort in den `else`-Zweig läuft und `reset-backing-retained` aufruft — das
+setzt `retained-cr` und die interne Bitmap-Referenz auf `#f` zurück. Der nächste `get-cr`-
+Aufruf legt dadurch zwangsläufig eine **neue, leere** Bitmap an (`make-backing-bitmap`
+über `get-backing-size`). Wenn eine Teil-Invalidierung (z. B. nur die Caret-/aktuelle
+Zeile, wie bei reinem Blinken) davon ausgeht, dass der Rest der vorherigen Bitmap noch
+gültig ist — was bei win32/gtk/cocoa dank der offenen `retained`-Sitzung zutrifft —, trifft
+das im Qt-Backend nicht zu: die Bitmap ist zu diesem Zeitpunkt bereits leer, nur die neu
+gezeichnete Teil-Region bekommt Inhalt, der Rest bleibt weiß. Das erklärt Messung 1-4
+vollständig und konsistent (volle Größe + voller Trigger-Zyklus, aber nur teilweise
+gefüllter Inhalt).
+
+**Einordnung zu den 4 Original-Hypothesen:** am nächsten an (D) „Racket invalidiert nur
+Teilregion" — ergänzt um den strukturellen Befund, warum das bei diesem Backend (anders
+als bei win32/gtk/cocoa, die dieselben Teil-Invalidierungen unschädlich verarbeiten)
+sichtbare Lücken hinterlässt.
+
+**Kein Fix in dieser Session (Guardrail).** Naheliegender Fix für die nächste Session:
+`(send dc start-backing-retained)` einmalig nach der `qt-dc%`-Erzeugung in
+`wx/qt/canvas.rkt`, plus `begin-refresh-sequence`/`end-refresh-sequence` auf
+`suspend-flush`/`resume-flush` verdrahten (Muster 1:1 aus `wx/win32/canvas.rkt:266-330`
+übernehmbar) — noch nicht verifiziert, da diese Session laut Guardrail nur messen durfte.
