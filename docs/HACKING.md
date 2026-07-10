@@ -745,6 +745,24 @@ deren Controls ihre native Größe direkt beim `super-make-object`/`CreateWindow
 kennen — nur unser Qt-`get-width`/`get-height` liest ein reines Racket-Feld ohne
 Qt-Rückfrage).
 
+**Update (2026-07-10-3_prompt): bestätigt + gefixt.** Neue Shim-Funktion
+`shim_widget_get_size_hint` (`QWidget::sizeHint()`, out-Params wie
+`shim_widget_client_to_screen`), aufgerufen über eine neue `window%`-Methode
+`seed-size-from-native-hint` (`wx/qt/window.rkt`) — fragt die native Größe ab und
+seedet `window%`s `w`/`h` per bestehendem `set-size`-Pfad (kein `get-width`/
+`get-height`-Override, also kompatibel mit dem `same-dimension?`-Cache).
+`button.rkt`/`message.rkt`/`check-box.rkt` rufen sie direkt nach `super-new`;
+`list-box.rkt` erst nach dem Befüllen der Choices (sizeHint soll den Inhalt
+widerspiegeln). `canvas%` bleibt bewusst kein Aufrufer (eigener Seed-Pfad,
+`dc`-Feld existiert zum Zeitpunkt von `super-new` noch nicht). Vorher/Nachher an
+einem isolierten 3-`button%`-Repro (`examples/panel-sizing-probe.rkt`) sowie am
+echten `dialog-widgets-probe.rkt` (Workaround-`[min-width]`/`[min-height]`
+entfernt) visuell bestätigt: Stapelung behoben, `list-box%`/`check-box%` layouten
+korrekt ohne Workaround. Debug-Log (`PLT_QT_DEBUG`) zeigt `pre-seed w=0 h=0` →
+`sizeHint=81x26` etc., exakt wie oben diagnostiziert. Smoke 3/3 grün, canvas%-Pfad
+(hello.rkt) nicht regrediert. Commits: gui `8904b264`, Umbrella `9e54291`.
+Details: `docs/2026-07-10-3_report-win.md`.
+
 ### 18.3 Neuer Fund: `dialog%`-Modalität blockiert native Control-Callbacks nicht (Phase 1)
 
 **Befund (Nutzer-bestätigt, visuell):** bei offenem modalem Dialog (`dialog-widgets-probe.rkt`)
@@ -777,6 +795,29 @@ eines modalen Dialogs (`dialog-mixin`s `direct-show`) `QWidget::setEnabled(false
 dem Eltern-`window%` aufrufen (neue Shim-Funktion `shim_widget_set_enabled`), symmetrisch
 beim Schließen wieder `#t`. Kein `exec()`/keine geschachtelte Schleife nötig — reine
 Toolkit-Property, analog zu win32/gtk.
+
+**Update (2026-07-10-3_prompt): bestätigt + gefixt, beide Lücken durch (a) allein
+gelöst.** Neue Shim-Funktion `shim_widget_set_enabled` (`QWidget::setEnabled`).
+`wx/qt/frame.rkt` bekommt eine `modal-enable`-Methode, 1:1 gespiegelt an
+`wx/win32/frame.rkt`s gleichnamiger Methode: berechnet `on? = (not (other-modal?
+this #f ignoring))` über das bestehende, unveränderte `other-modal?`/`dialog-level`-
+Bookkeeping und pusht das Ergebnis auf den Shim. `wx/qt/dialog.rkt`s `direct-show`
+ruft `modal-enable` auf jedem Top-Level-Fenster der Eventspace (`get-top-level-windows`),
+1:1 gespiegelt an `wx/win32/dialog.rkt`s `direct-show`. Lücke (a) (kein
+Toolkit-Disable) ist damit geschlossen. Für Lücke (b) (native Callbacks nicht an
+`other-modal?` angebunden) wurde wie im Phase-2c-Plan **gemessen statt blind
+gefixt**: `QWidget::setEnabled(false)` auf dem Frame kaskadiert in Qt automatisch auf
+alle Kind-Widgets und unterbindet deren Mausereignis-Zustellung komplett — ein
+Klick auf einen disabled `button%` erreicht seinen `clicked`-Callback in Qt gar nicht
+erst. Empirisch bestätigt (`dialog-widgets-probe.rkt`: kein `PARENT BUTTON CLICKED`-
+Print bei offenem Modal, obwohl der Klick simuliert wurde). Lücke (b) brauchte damit
+**keine separate Absicherung** — kein zusätzlicher `other-modal?`-Guard in den
+nativen Klick-Callbacks nötig. Vorher/Nachher visuell bestätigt: Eltern-Fenster
+grau/disabled bei offenem Dialog, Klick ohne Effekt; nach Schließen (OK/Cancel)
+wieder normal eingefärbt und klickbar; Dialog-Controls (`list-box%`/`check-box%`/
+OK/Cancel) bleiben während der gesamten Zeit voll funktional. Smoke 3/3 grün. Kein
+`exec()`/keine geschachtelte Schleife. Commits: gui `f92352e0`, Umbrella `4030fe2`.
+Details: `docs/2026-07-10-3_report-win.md`.
 
 ### 18.4 Widget-Hinzufügen: `list-box%`/`check-box%` konkret (Ergänzung zu §5)
 

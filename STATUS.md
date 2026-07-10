@@ -5,6 +5,53 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-10 (3, Windows) — Panel-Sizing-Fix + Modalitäts-Fix (2026-07-10-3_prompt)
+
+**Kontext:** `docs/2026-07-10-3_prompt.md`. Voller Bericht: `docs/2026-07-10-3_report-win.md`.
+
+- **Phase 0 — grün.** `racket --version` = v9.2 [cs]. Beide Repos sauber auf
+  `04935cb6`/`96cabe5` (Fetch bestätigt deckungsgleich mit origin). Shim aktuell (DLL
+  neuer als `shim.cpp`). Light Mode bestätigt (`framework:white-on-black-mode?` = `#f`).
+  Smoke 3/3 grün.
+- **Phase 1 — Fix A (Panel-Sizing, §18.2): gefixt, gemessen, gepusht.** Neue Shim-Funktion
+  `shim_widget_get_size_hint` (`QWidget::sizeHint()`), neue `window%`-Methode
+  `seed-size-from-native-hint` (`wx/qt/window.rkt`), aufgerufen von
+  `button.rkt`/`message.rkt`/`check-box.rkt` (nach `super-new`) und `list-box.rkt` (nach
+  dem Befüllen der Choices) — bewusst NICHT von `canvas%` (eigener Seed-Pfad, `dc`-Feld
+  existiert bei `super-new` noch nicht). Vorher: isoliertes 3-`button%`-Repro
+  (`examples/panel-sizing-probe.rkt`, neu) zeigt nur das zuletzt erzeugte Button (Rest
+  exakt überdeckt) — Screenshot bestätigt, Debug-Log zeigt `pre-seed w=0 h=0`. Nachher:
+  alle drei Buttons sauber vertikal gestapelt, Debug-Log zeigt `sizeHint=81x26` etc.
+  `dialog-widgets-probe.rkt`s Workaround-`[min-width]`/`[min-height]` entfernt —
+  `list-box%`/`check-box%`/OK/Cancel layouten weiterhin korrekt. Smoke 3/3, `hello.rkt`
+  (canvas%-Pfad) visuell nicht regrediert. Commits: gui `8904b264` (gepusht), Umbrella
+  `9e54291` (gepusht).
+- **Phase 2 — Fix B (Modalität, §18.3): gefixt, gemessen, gepusht.** Neue Shim-Funktion
+  `shim_widget_set_enabled` (`QWidget::setEnabled`). `wx/qt/frame.rkt` bekommt
+  `modal-enable` (1:1 gespiegelt an `wx/win32/frame.rkt`, berechnet über das bestehende
+  `other-modal?`/`dialog-level`-Bookkeeping), `wx/qt/dialog.rkt`s `direct-show` ruft sie
+  auf jedem Top-Level-Fenster der Eventspace auf (1:1 gespiegelt an
+  `wx/win32/dialog.rkt`). Gemessen statt blind gefixt, ob Lücke (b) (native Callbacks
+  nicht an `other-modal?` angebunden) nach (a) noch nötig ist: **nein** — Qts
+  `setEnabled(false)`-Kaskade blockiert native Klick-Callbacks der Kind-Widgets bereits
+  vollständig (kein `PARENT BUTTON CLICKED`-Print bei simuliertem Klick auf den
+  disabled-Parent-Button). Vorher/Nachher visuell bestätigt: Parent-Frame grau/disabled
+  bei offenem Modal, Klick ohne Wirkung; nach OK/Cancel wieder normal eingefärbt +
+  klickbar; Dialog-Controls bleiben durchgehend funktional. Smoke 3/3 grün. Kein
+  `exec()`/keine geschachtelte Schleife. Commits: gui `f92352e0` (gepusht), Umbrella
+  `4030fe2` (gepusht).
+- **Vier separate Commits (zwei pro Fix, Submodul zuerst, dann Umbrella-Pointer),
+  jeweils sofort gepusht** — saubere Rollback-Punkte pro Fix, wie vom Prompt gefordert.
+- **Doku:** `docs/HACKING.md` §18.2/§18.3 von „Kandidat" auf „bestätigt + gefixt"
+  aktualisiert (Fix-Details ergänzt, Original-Diagnose als Historie erhalten),
+  `CLAUDE.md`-Checkpoint-Tabelle + Narrative aktualisiert, dieser Eintrag, Report.
+- **Nächster Schritt:** Linux-Validierung (Phase 3) → macOS-Validierung (Phase 4), siehe
+  `docs/2026-07-10-3_prompt.md`. Danach file-selector (Block danach, jetzt auf modal
+  korrektem `dialog%` aufsetzend), dann Preferences (Block danach, jetzt mit
+  funktionierendem Auto-Layout).
+
+---
+
 ## Session 2026-07-10 (2, Windows) — Checkpoint E begonnen: `list-box%`/`check-box%` echt (2026-07-10-2_prompt)
 
 **Kontext:** `docs/2026-07-10-2_prompt.md`. Voller Bericht: `docs/2026-07-10-2_report-win.md`.
