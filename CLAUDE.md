@@ -99,7 +99,7 @@ PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
 | **E-0 – gui-lib-Angleich 1.78→1.80 + echtes DrRacket** | **✅ 2026-07-08 (E-0-Menü geschlossen: Tippen/Enter/Ausführen funktioniert; Menüleiste sichtbar+horizontal [Titel-Fix] UND gefüllt [addAction-Fix] UND Popups korrekt platziert [mapToGlobal-Fix], auf Windows+macOS+Linux bestätigt; je ein zusätzlicher Startup-Crash auf macOS [`tab-panel%` `set-label`-Arity] und Linux [`frame%` `set-icon` fehlte] gefunden+gefixt; Redraw-Bug separat offen, eigene Session)** |
 | **Redraw-Bug — auf allen drei Plattformen gefixt + validiert** | **✅ 2026-07-10 (Windows: gefixt + visuell bestätigt — `start-backing-retained` + `suspend-/resume-flush` [Prompt] plus zwei zusätzlich nötige Änderungen: `reset-backing-retained` bei `set-size`-Resize, Konstruktor-Reihenfolge-Fix für `dc`. Linux + macOS: ff-Pull + identischer Tipp-Repro grün, Diff geprüft. Details `docs/HACKING.md` §16, `docs/2026-07-10_report-win.md`, `docs/2026-07-10_report-linux.md`, `docs/2026-07-10_report-macos.md`. **E-0 damit vollständig geschlossen** [Menüs + Redraw]; offene macOS-/Linux-Nebenbefunde siehe unten)** |
 | **E begonnen — `list-box%`/`check-box%` echt** | **✅ 2026-07-10 (Windows, `2026-07-10-2_prompt`: `QListWidget`/`QCheckBox` nativ gespiegelt gegen wx/win32+wx/gtk, nutzerbestätigt funktional [Selektion, Toggle, OK/Cancel] in isoliertem `dialog%`-Testskript — geplanter Autosave-Recovery-Treiber zog laut Quelltext keins der beiden Widgets, gemeldet+Nutzer bestätigte Wechsel zu Stufe 2. Zwei neue, vorbestehende Befunde gemessen, NICHT gefixt: Panel-Sizing-Bug [`button%`/`message%`/`check-box%`/`list-box%` seeden min-size als 0, Controls in `vertical-panel%` landen übereinander] und `dialog%`-Modalität blockiert native Control-Callbacks nicht [Parent-Button bleibt bei offenem Dialog klickbar — fehlendes `EnableWindow`/`gtk_widget_set_sensitive`-Äquivalent]. Details `docs/HACKING.md` §18, `docs/2026-07-10-2_report-win.md`. Cross-Platform-Validierung bewusst nicht Teil dieser Session)** |
-| **E — Panel-Sizing-Fix + Modalitäts-Fix (Windows)** | **✅ 2026-07-10 (Windows, `2026-07-10-3_prompt`: beide Fundament-Befunde aus §18.2/§18.3 gefixt + Vorher/Nachher gemessen. Panel-Sizing: neue `seed-size-from-native-hint` [`QWidget::sizeHint()`] in `wx/qt/window.rkt`, aufgerufen von `button%`/`message%`/`check-box%`/`list-box%` — 3-`button%`-Stapel-Repro behoben, Workaround-`[min-*]` aus `dialog-widgets-probe.rkt` entfernt. Modalität: neue `frame%.modal-enable` [gespiegelt an `wx/win32/frame.rkt`] + `dialog%.direct-show`-Verdrahtung [gespiegelt an `wx/win32/dialog.rkt`], neue Shim-Funktion `shim_widget_set_enabled`; Parent-Frame grau/disabled+unklickbar bei offenem Modal, wieder normal nach Schließen, native Callback-Blockade [Lücke b] durch Qts eigene `setEnabled`-Kaskade bereits mitgelöst [gemessen, keine Extra-Absicherung nötig]. Smoke 3/3, canvas%-Pfad nicht regrediert. Details `docs/HACKING.md` §18.2/§18.3, `docs/2026-07-10-3_report-win.md`. Cross-Platform-Validierung: Linux/macOS stehen noch aus)** |
+| **E — Panel-Sizing-Fix + Modalitäts-Fix (Windows)** | **✅ 2026-07-10 (Windows, `2026-07-10-3_prompt`: beide Fundament-Befunde aus §18.2/§18.3 gefixt + Vorher/Nachher gemessen. Panel-Sizing: neue `seed-size-from-native-hint` [`QWidget::sizeHint()`] in `wx/qt/window.rkt`, aufgerufen von `button%`/`message%`/`check-box%`/`list-box%` — 3-`button%`-Stapel-Repro behoben, Workaround-`[min-*]` aus `dialog-widgets-probe.rkt` entfernt. Modalität: neue `frame%.modal-enable` [gespiegelt an `wx/win32/frame.rkt`] + `dialog%.direct-show`-Verdrahtung [gespiegelt an `wx/win32/dialog.rkt`], neue Shim-Funktion `shim_widget_set_enabled`; Parent-Frame grau/disabled+unklickbar bei offenem Modal, wieder normal nach Schließen, native Callback-Blockade [Lücke b] durch Qts eigene `setEnabled`-Kaskade bereits mitgelöst [gemessen, keine Extra-Absicherung nötig]. Smoke 3/3, canvas%-Pfad nicht regrediert. Details `docs/HACKING.md` §18.2/§18.3, `docs/2026-07-10-3_report-win.md`. Linux-Validierung ✅ 2026-07-10 [ff-Pull, Shim neu gebaut, beide Fixe grün, Details `docs/2026-07-10-3_report-linux.md`]; macOS steht noch aus)** |
 | E – Widget-Breite (Rest: choice%, radio-box%, slider%, tab-panel%; file-selector; Preferences) | ⬜ läuft |
 
 **Checkpoint D — erledigt:**
@@ -237,8 +237,8 @@ macOS-Menüleisten-Diskrepanz (8 statt 9 Menüs, `Windows` fehlt,
 unter KWin/X11 (`docs/2026-07-10_report-linux.md` Abschnitt 3), vorbestehender
 Windows-Nebenbefund zum Toolbar-Save-Icon-Timing (`wx/qt/button.rkt`).
 
-**Panel-Sizing-Fix + Modalitäts-Fix — Windows gefixt, Cross-Platform-Validierung
-offen (2026-07-10, `docs/2026-07-10-3_prompt.md`):**
+**Panel-Sizing-Fix + Modalitäts-Fix — Windows gefixt, Linux validiert, macOS offen
+(2026-07-10, `docs/2026-07-10-3_prompt.md`):**
 - **Fix A (Panel-Sizing, §18.2):** neue Shim-Funktion `shim_widget_get_size_hint`
   (`QWidget::sizeHint()`), neue `window%`-Methode `seed-size-from-native-hint`
   (`wx/qt/window.rkt`) — seedet `w`/`h` über den bestehenden `set-size`-Pfad (kein
@@ -262,11 +262,18 @@ offen (2026-07-10, `docs/2026-07-10-3_prompt.md`):**
 - Beide Fixe: kein `exec()`/keine geschachtelte Schleife, cocoa/gtk/win32 nur als
   Referenz gelesen. Smoke 3/3 grün, canvas%-Pfad (hello.rkt) nicht regrediert. Details
   `docs/HACKING.md` §18.2/§18.3, `docs/2026-07-10-3_report-win.md`.
-- **OFFEN — Cross-Platform-Pflicht-Folgeschritt:** Linux/macOS müssen `qt-backend`
-  (jetzt `f92352e0`) + Umbrella `main` (jetzt `4030fe2`) neu ziehen, Shim **neu bauen**
-  (beide Fixe ändern `shim.cpp`), Bytecode neu, re-smoken, dann dieselben zwei
-  Validierungen (3-`button%`-Stapelung, Parent-Klickbarkeit bei offenem Modal)
-  nachvollziehen — reine Validierung, keine Fix-Commits erwartet.
+- **Linux-Validierung erledigt (2026-07-10, `docs/2026-07-10-3_prompt.md` Phase 3,
+  `docs/2026-07-10-3_report-linux.md`):** ff-Pull `qt-backend` `04935cb6`→`f92352e0`
+  (Umbrella `main` war bereits aktuell), Shim neu gebaut (beide neuen Funktionen
+  kompilieren), Bytecode neu, Smoke 3/3 grün, Light Mode bestätigt. Beide Validierungen
+  grün: 3-`button%`-Stapelung (`panel-sizing-probe.rkt`) sauber; Parent-Button bei
+  offenem Modal (`dialog-widgets-probe.rkt`) nicht klickbar (kein Callback-Print),
+  nach Schließen des Dialogs sofort wieder klickbar (Gegenprobe bestätigt Klick-Mechanik
+  UND Blockade-Ursächlichkeit). Reine Validierung, keine Fix-Commits.
+- **OFFEN — macOS:** muss `qt-backend` (jetzt `f92352e0`) + Umbrella `main` (jetzt
+  `4030fe2`, Doku-Commits danach) neu ziehen, Shim **neu bauen** (beide Fixe ändern
+  `shim.cpp`), Bytecode neu, re-smoken, dann dieselben zwei Validierungen nachvollziehen
+  — reine Validierung, keine Fix-Commits erwartet.
 - **Nächster Meilenstein nach Cross-Platform-Grün: Checkpoint E** — Rest (choice%,
   radio-box%, slider%, tab-panel%; file-selector; Preferences) auf jetzt funktionierendem
   Auto-Layout + korrekter Modalität aufsetzend.

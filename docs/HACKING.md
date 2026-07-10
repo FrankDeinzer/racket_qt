@@ -763,6 +763,19 @@ korrekt ohne Workaround. Debug-Log (`PLT_QT_DEBUG`) zeigt `pre-seed w=0 h=0` →
 (hello.rkt) nicht regrediert. Commits: gui `8904b264`, Umbrella `9e54291`.
 Details: `docs/2026-07-10-3_report-win.md`.
 
+**Linux-Validierung (2026-07-10-3_prompt, `docs/2026-07-10-3_report-linux.md`): grün.**
+ff-Pull `qt-backend` `04935cb6` → `f92352e0` (3 Commits: `08bf0af6` list-box%/check-box%,
+`8904b264` Fix A, `f92352e0` Fix B — Umbrella `main` war bereits auf `f86bb09`/Zeiger
+`f92352e0` aktuell, kein Pull dort nötig). Shim neu gebaut (`shim_widget_get_size_hint`
++ `shim_widget_set_enabled` beide neu in `shim.cpp`), Bytecode neu, Smoke 3/3 grün. Light
+Mode bestätigt (`racket-prefs.rktd`: `plt:framework-pref:framework:white-on-black?` =
+`#f`). `examples/panel-sizing-probe.rkt` (unverändert, keine Workarounds): Screenshot
+(`xwd` + selbstgeschriebener XWD→PNG-Parser, da `pnmtopng`/`convert` auf dieser Maschine
+fehlen) zeigt alle drei `button%` sauber vertikal gestapelt, keine Überdeckung —
+identisch zum Windows-Nachher-Ergebnis. `dialog-widgets-probe.rkt` ohne Workaround
+bestätigt: `list-box%` (4 Einträge) + `check-box%` layouten korrekt neben OK/Cancel.
+Reine Validierung, keine Fix-Commits.
+
 ### 18.3 Neuer Fund: `dialog%`-Modalität blockiert native Control-Callbacks nicht (Phase 1)
 
 **Befund (Nutzer-bestätigt, visuell):** bei offenem modalem Dialog (`dialog-widgets-probe.rkt`)
@@ -818,6 +831,21 @@ wieder normal eingefärbt und klickbar; Dialog-Controls (`list-box%`/`check-box%
 OK/Cancel) bleiben während der gesamten Zeit voll funktional. Smoke 3/3 grün. Kein
 `exec()`/keine geschachtelte Schleife. Commits: gui `f92352e0`, Umbrella `4030fe2`.
 Details: `docs/2026-07-10-3_report-win.md`.
+
+**Linux-Validierung (2026-07-10-3_prompt, `docs/2026-07-10-3_report-linux.md`): grün.**
+Nach Sync/Rebuild (siehe §18.2-Linux-Absatz oben) `dialog-widgets-probe.rkt` per
+synthetischem `libXtst`-Klick (kein `xdotool` auf dieser Maschine, selbstgebauter
+XTest-Helfer analog zu den Redraw-Validierungssessions) bedient: Dialog geöffnet
+(`list-box%`/`check-box%` sichtbar+funktional), Klick auf den — wegen
+Fenster-Überlappung eigens per `XMoveWindow` freigelegten — Parent-Button bei
+offenem Modal löst **keinen** `PARENT BUTTON CLICKED`-Print aus (stdout war
+Block-gepuffert, sichtbar erst nach Prozessende); derselbe Klick nach Schließen des
+Dialogs (OK) löst den Print sofort aus — bestätigt, dass die Klick-Mechanik selbst
+funktioniert und die Blockade ursächlich an der offenen Modalität hängt, nicht an
+einem Test-Artefakt. Visueller Grau-Kontrast zwischen enabled/disabled war in diesem
+Qt-Stil bei dieser Auflösung nicht eindeutig unterscheidbar (Pixel-Sampling ähnlich,
+~127 vs. ~131 auf 0–765-Skala) — die funktionale Blockade ist der belastbare Befund,
+nicht der visuelle Eindruck. Reine Validierung, keine Fix-Commits.
 
 ### 18.4 Widget-Hinzufügen: `list-box%`/`check-box%` konkret (Ergänzung zu §5)
 

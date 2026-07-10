@@ -5,6 +5,36 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-10 (3, Linux) — Panel-Sizing-Fix + Modalitäts-Fix, Cross-Platform-Validierung (2026-07-10-3_prompt)
+
+**Kontext:** `docs/2026-07-10-3_prompt.md`. Voller Bericht: `docs/2026-07-10-3_report-linux.md`.
+
+- **Sync (nach Nutzer-Bestätigung):** gui-Submodul `qt-backend` ff-Pull `04935cb6` →
+  `f92352e0` (3 Commits: `08bf0af6` list-box%/check-box%, `8904b264` Fix A, `f92352e0`
+  Fix B). Umbrella `main` war bereits aktuell (`f86bb09`, Zeiger auf `f92352e0`), kein
+  Pull dort nötig.
+- Shim neu gebaut (`cmake --build qt-shim/build/linux-x64`) — beide neuen
+  Shim-Funktionen (`shim_widget_get_size_hint`, `shim_widget_set_enabled`) kompilieren
+  sauber. Bytecode neu (`raco make -l mred`). Smoke 3/3 grün. Light Mode bestätigt
+  (`racket-prefs.rktd`: `framework:white-on-black?` = `#f`).
+- **Fix A (Panel-Sizing) validiert:** `examples/panel-sizing-probe.rkt` (unverändert)
+  — Screenshot (`xwd` + selbstgeschriebener XWD→PNG-Parser, da kein
+  `pnmtopng`/`convert`/`scrot` auf dieser Maschine) zeigt alle drei `button%` sauber
+  vertikal gestapelt. `dialog-widgets-probe.rkt` ohne Workaround: `list-box%`
+  (4 Einträge)/`check-box%` layouten korrekt neben OK/Cancel.
+- **Fix B (Modalität) validiert:** synthetischer `libXtst`-Klick (kein `xdotool`,
+  selbstgebauter Helfer wie in den Redraw-Sessions) auf den Parent-Button bei offenem
+  Modal löst keinen Callback aus (stdout-Log leer bis Prozessende); derselbe Klick
+  nach Schließen des Dialogs löst ihn sofort aus — bestätigt Blockade ist ursächlich
+  an die Modalität gebunden, kein Test-Artefakt. Visueller Grau-Kontrast in diesem
+  Qt-Stil nicht eindeutig sichtbar, funktionale Blockade aber eindeutig.
+- Details `docs/HACKING.md` §18.2/§18.3 (Linux-Validierungsabsätze ergänzt).
+- **Reine Validierung, keine Fix-Commits.** Nächster Schritt: macOS-Validierung
+  (Phase 4), danach Checkpoint E (choice%/radio-box%/slider%/tab-panel%;
+  file-selector; Preferences).
+
+---
+
 ## Session 2026-07-10 (3, Windows) — Panel-Sizing-Fix + Modalitäts-Fix (2026-07-10-3_prompt)
 
 **Kontext:** `docs/2026-07-10-3_prompt.md`. Voller Bericht: `docs/2026-07-10-3_report-win.md`.
