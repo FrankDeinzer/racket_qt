@@ -380,6 +380,17 @@ void shim_widget_set_focus(void* widget)
     static_cast<QWidget*>(widget)->setFocus();
 }
 
+// QWidget::setEnabled() -- toolkit-level parent disable while a modal
+// dialog is open, mirroring win32's EnableWindow(hwnd, on?) and gtk's
+// gtk_widget_set_sensitive(). Qt disables the whole widget subtree (title
+// bar interaction stays with the window manager; child controls stop
+// receiving mouse/keyboard input), so this is called on a frame's own
+// top-level handle, not per-child (docs/HACKING.md §18.3).
+void shim_widget_set_enabled(void* widget, int enabled)
+{
+    static_cast<QWidget*>(widget)->setEnabled(enabled != 0);
+}
+
 // Translates a point in widget-local coordinates to global screen coordinates
 // (QWidget::mapToGlobal). Used by window%'s client-to-screen so popup-menu and
 // context menus land at the true screen position instead of the raw local
