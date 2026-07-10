@@ -5,6 +5,50 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-10 (2, Windows) — Checkpoint E begonnen: `list-box%`/`check-box%` echt (2026-07-10-2_prompt)
+
+**Kontext:** `docs/2026-07-10-2_prompt.md`. Voller Bericht: `docs/2026-07-10-2_report-win.md`.
+
+- **Treiber-Korrektur vor jeder Implementierung:** geplanter Treiber (Autosave-Recovery-
+  Dialog) zieht laut Quelltext (`framework/private/autosave.rkt`) weder `list-box%` noch
+  `check-box%` — gemeldet statt stillschweigend weitergemacht, Nutzer bestätigte direkten
+  Wechsel zu Stufe 2 (isoliertes Testskript `examples/dialog-widgets-probe.rkt`).
+- **`list-box%`/`check-box%` jetzt echt** (`QListWidget`/`QCheckBox`), nativ gegen
+  wx/win32 + wx/gtk gespiegelt. Nutzerbestätigt funktional: Single-Selection über 4
+  Einträge, Checkbox an/ab, OK/Cancel schließen den Dialog korrekt. Details
+  `docs/HACKING.md` §18.
+- **Zwei neue, vorbestehende (nicht durch diese Session verursachte) Befunde, beide
+  NICHT gefixt (Scope-Entscheidung, advisor-abgestimmt):**
+  1. **Panel-Sizing-Bug:** jedes echte Qt-Control (`button%`/`message%` schon vorher,
+     jetzt auch `check-box%`/`list-box%`) seedet `min-width`/`min-height` als 0
+     (`wxitem.rkt` fragt `get-width`/`get-height` vor dem ersten `set-size` ab) — mehrere
+     Controls in einem `vertical-panel%` landen dadurch alle exakt übereinander.
+     Workaround für den Treiber dieser Session: explizite `[min-width]`/`[min-height]`.
+  2. **`dialog%`-Modalität blockiert native Control-Callbacks nicht:** Parent-Button
+     bleibt bei offenem modalem Dialog klickbar. Root Cause: win32/gtk disablen das
+     Eltern-Fenster Toolkit-seitig (`EnableWindow`/`gtk_widget_set_sensitive`) beim
+     Öffnen eines modalen Dialogs, unser `wx/qt/dialog.rkt` tut das nicht; zusätzlich
+     sind native Klick-Callbacks ohnehin nicht an `other-modal?` angebunden. Direkte
+     Eingabe für den geplanten file-selector-Prompt.
+- **Session-Infrastruktur-Zwischenfall (kein Code-Bug):** RDP-Sitzung des Nutzers
+  (MacBook-Client, trennt bei Sleep) hing die Shell zunächst in eine getrennte Windows-
+  Session — Screenshots/Fenster für den Nutzer unsichtbar. Nach Trennen der RDP-Verbindung
+  lief die Shell in der aktiven Konsolen-Session weiter, Screenshots funktionierten.
+  Automatisiertes synthetisches Klicken erreichte den Zielbutton trotz mehrerer Ansätze
+  (`SendInput`/`mouse_event`/`PostMessage`) nicht zuverlässig — Nutzer hat stattdessen
+  direkt interagiert und den Dialog bestätigt.
+- **Commits:** gui-Submodul (neue `wx/qt/check-box.rkt`/`list-box.rkt` + Shim-Bindings +
+  `platform.rkt`), gepusht; Umbrella-Zeiger-Bump + `qt-shim/src/shim.cpp` +
+  `examples/dialog-widgets-probe.rkt` + `docs/HACKING.md` §18 + `CLAUDE.md`-Checkpoint +
+  dieser Eintrag + Report.
+- **Cross-Platform-Validierung bewusst NICHT Teil dieser Session** (macOS/Linux ziehen
+  später, eigener Re-Smoke + Report).
+- **Nächster Schritt:** Panel-Sizing-Fix (§18.2) und Modalitäts-Fix (§18.3) sind jeweils
+  eigene Sessions; danach file-selector (Modalitäts-Fix als Voraussetzung) bzw.
+  Preferences-Dialog (Panel-Sizing-Fix hilft dort ebenfalls).
+
+---
+
 ## Session 2026-07-10 (macOS) — Redraw-Bug validiert, grün; E-0 vollständig geschlossen (2026-07-10_prompt Phase 5/6)
 
 **Kontext:** `docs/2026-07-10_prompt.md` Phase 5/6. Voller Bericht:

@@ -677,3 +677,131 @@ hat, muss der alte SHA vor dem Verwerfen als Ref gepusht werden — oder der Syn
 muss VOR dem ersten Submodul-Commit passieren (Regel 8). Ein `git reflog`-Check im
 Submodul (`git cat-file -t <sha>`) verrät, ob ein vermeintlich verlorener Commit lokal
 noch rettbar ist.
+
+---
+
+## 18. `list-box%`/`check-box%` echt gemacht + zwei neue Befunde (2026-07-10-2_prompt)
+
+### 18.1 Treiber-Korrektur: Autosave-Recovery-Dialog zieht weder `list-box%` noch `check-box%`
+
+Der ursprünglich geplante Treiber (DrRackets Autosave-Recovery-Dialog) wurde vor jeder
+Implementierung gegen den tatsächlichen Quelltext geprüft
+(`framework/private/autosave.rkt`, `restore-autosave-files/gui/table`): die Zeilen-UI
+baut sich ausschließlich aus `message%`, `button%`, `canvas:color%` (Editor-Canvas) und
+`vertical-/horizontal-panel%` auf — keine `check-box%`/`list-box%`-Instanziierung, auch
+nicht über `frame:focus-table-mixin` (reine Fokus-Tracking-Mixin, keine Widgets). Der
+frühere Report-Befund „Farbblöcke statt Text/Checkboxen" (`2026-07-10_report-win.md`
+§4.2) war vermutlich derselbe, damals noch ungefixte `canvas%`-Redraw-Bug, keine fehlenden
+Checkbox-Widgets. **Konsequenz:** Stufe 2 (isoliertes Testskript,
+`examples/dialog-widgets-probe.rkt`) war von Anfang an die richtige Wahl, nicht nur ein
+Fallback — die TOC-Präparation aus Phase 0b wurde deshalb nicht durchgeführt (auch keine
+Schreibaktion auf die echte `PLT-autosave-toc.rktd` des Nutzers).
+
+### 18.2 Neuer Fund: `wxitem.rkt` seedet `min-width`/`min-height` aus `get-width`/`get-height` — 0 bei jedem echten Qt-Control
+
+**Symptom:** mehrere `button%` (oder beliebige echte Controls) in einem `vertical-panel%`
+landen alle exakt übereinander (nur das zuletzt erzeugte ist sichtbar), unabhängig von
+`list-box%`/`check-box%` — reproduziert mit drei nackten `button%`s ganz ohne neuen Code.
+
+**Root Cause:** `wxitem.rkt`s `make-item%` ruft direkt nach `super-make-object`
+(bevor die generische Panel-Sizing-Logik je `set-size` aufgerufen hat):
+```
+(set-min-width (init-min (get-width)))
+(set-min-height (init-min (get-height)))
+```
+`get-width`/`get-height` sind bei uns `window%`s Basis-Felder `w`/`h`, die ausschließlich
+von einem vorherigen `set-size`-Aufruf gesetzt werden — zu diesem Zeitpunkt im
+Konstruktor also immer `0`. Jedes echte Qt-Control (`button%`, `message%`, `check-box%`,
+`list-box%`) seedet damit `min-width`/`min-height` = 0, der generische
+Panel-Sizing-Algorithmus (`wxpanel.rkt`s `do-get-graphical-min-size` über
+`(send child get-info)`) advanced den Y-Offset dadurch nie, und `set-size` wird später
+mit `nw=0`/`nh=0` aufgerufen — unser `(when (and nw (> nw 0) ...) (shim_widget_set_geometry ...))`-Guard
+überspringt dann den `setGeometry`-Call komplett, sodass das Widget auf Qts unangetasteter
+Default-Geometrie (0,0, kleine Default-Größe) sitzen bleibt. Alle Kinder landen so exakt
+übereinander; sichtbar ist nur das zuletzt erzeugte (Z-Order).
+
+**Betroffen:** `button%`, `message%` (schon vor dieser Session „real"), plus die neuen
+`check-box%`/`list-box%` — strukturell, nicht spezifisch für diese Session. `canvas%`
+ist NICHT betroffen, weil es laut Checkpoint E-0 (2026-06-30) bereits einen Seed-Call im
+Konstruktor bekommen hat, der `window%`s `w`/`h` vor diesem Query korrekt setzt.
+
+**NICHT gefixt** (Scope-Entscheidung, mit advisor abgestimmt): der Fix (Qt
+`sizeHint()` abfragen und im Konstruktor seeden, analog zu `canvas%`s Muster) würde
+`button.rkt`/`message.rkt` anfassen — beides außerhalb des Sessions-Scopes
+(„nur `list-box%`/`check-box%`"), und verdient eigene Cross-Platform-Validierung statt
+als Mitfahrer in diesem Commit zu laufen. **Workaround für diese Session:**
+`examples/dialog-widgets-probe.rkt` setzt auf jedem Control explizit `[min-width n]
+[min-height n]` (normale `area<%>`-Init-Args, generischer Code, umgeht den kaputten Seed).
+Das beweist, dass `list-box%`/`check-box%` funktional korrekt sind (Items rendern,
+Selektion/Toggle feuert den Callback) — **beweist nicht**, dass sie ohne diesen
+Workaround in einem echten Dialog automatisch sauber layoutet werden; der echte
+Autosave-Dialog (oder jeder andere Dialog mit >1 Control pro Panel) würde weiterhin
+kollabieren, bis dieser Seed-Bug separat gefixt ist. Nächster Schritt: eigene Session,
+Fix in `button.rkt`/`message.rkt`/`check-box.rkt`/`list-box.rkt` (neue Shim-Funktion
+`QWidget::sizeHint()` abfragen, Konstruktor seedet `window%`s `w`/`h` vor dem
+`get-width`/`get-height`-Query von `make-item%`), dann alle drei Plattformen erneut
+prüfen (dieser Bug betrifft plausibel auch gtk/win32-unabhängige Codepfade nicht, da
+deren Controls ihre native Größe direkt beim `super-make-object`/`CreateWindowEx`
+kennen — nur unser Qt-`get-width`/`get-height` liest ein reines Racket-Feld ohne
+Qt-Rückfrage).
+
+### 18.3 Neuer Fund: `dialog%`-Modalität blockiert native Control-Callbacks nicht (Phase 1)
+
+**Befund (Nutzer-bestätigt, visuell):** bei offenem modalem Dialog (`dialog-widgets-probe.rkt`)
+bleibt der Parent-Frame-Button weiterhin klickbar (normales Klick-Feedback) — die
+Modal-Sperre greift nicht für native Widget-Klicks.
+
+**Root Cause (Code-Vergleich, win32/gtk gegen qt):** win32 und gtk erzwingen Modalität
+NICHT nur über das gemeinsame `other-modal?`/`dialog-level`-Bookkeeping
+(`wx/common/dialog.rkt`), sondern zusätzlich über einen **Toolkit-seitigen Disable** des
+Eltern-Fensters beim Öffnen eines modalen Dialogs:
+- win32: `wx/win32/window.rkt` ruft `(EnableWindow hwnd on?)` in `direct-show` —
+  `EnableWindow(hwnd, FALSE)` sperrt Maus-/Tastatureingabe für das gesamte native
+  Eltern-HWND auf OS-Ebene.
+- gtk: `wx/gtk/window.rkt` ruft `(gtk_widget_set_sensitive gtk on?)` — GTK-Äquivalent.
+
+Unser `wx/qt/dialog.rkt`/`frame.rkt` haben **kein** Äquivalent (kein
+`QWidget::setEnabled(false)` auf dem Eltern-Widget). Zusätzlich verlässt sich
+`other-modal?` ohnehin nur auf `dispatch-on-char`/`dispatch-on-event`
+(`wx/qt/window.rkt`), die NUR für über `on-char`/`on-event` geroutete Eingaben greifen
+(z. B. `canvas%`-Maus/-Tastatur). `button%`/`check-box%`/`list-box%`s native
+Klick-/Selektions-Callbacks (`shim_button_create`s `click_cb` etc.) posten direkt in die
+Eventspace-Queue, OHNE über `dispatch-on-event`/`other-modal?` zu laufen — selbst wenn
+Qt den Parent nicht disabled, würde `other-modal?` diese Controls also gar nicht prüfen.
+**Zwei getrennte Lücken, nicht eine:** (a) kein Parent-Disable beim Öffnen, (b) native
+Control-Callbacks sind ohnehin nicht an `other-modal?` angebunden.
+
+**NICHT gefixt** (Phase-1-Auftrag war Instrumentieren/Dokumentieren, kein Fix; direkte
+Eingabe für den geplanten file-selector-Prompt). Fix-Kandidat für später: beim Öffnen
+eines modalen Dialogs (`dialog-mixin`s `direct-show`) `QWidget::setEnabled(false)` auf
+dem Eltern-`window%` aufrufen (neue Shim-Funktion `shim_widget_set_enabled`), symmetrisch
+beim Schließen wieder `#t`. Kein `exec()`/keine geschachtelte Schleife nötig — reine
+Toolkit-Property, analog zu win32/gtk.
+
+### 18.4 Widget-Hinzufügen: `list-box%`/`check-box%` konkret (Ergänzung zu §5)
+
+- Kontrakt-Methodennamen **gegen gtk UND win32** verifiziert, nicht geraten (gauge%-Lektion,
+  §5 Punkt 4 gilt genauso für Wert-/Auswahl-Protokolle wie für Klassen-Ketten):
+  `check-box%` (`set-value`/`get-value`, Callback-Event-Typ `'check-box`),
+  `list-box%` (`number`, `get-data`/`set-data`, `set-string [col 0]`, `append`
+  case-lambda via `(public [append* append])`-Rename-Trick — sonst shadowt die eigene
+  Methode `racket/list`s `append` innerhalb des eigenen Methodenkörpers, `clear`, `set`,
+  `get-selections`/`get-selection`, `selected?`, `select` case-lambda mit `extend?`-
+  Semantik (gtk-Vorbild: `extend?=#f` löscht zuerst alle anderen Selektionen),
+  `set-selection`, `set-first-visible-item`/`get-first-item`/`number-of-visible-items`
+  (Best-Effort-Annäherung über `QListWidget::indexAt`/`sizeHintForRow`, nicht exakt wie
+  gtk/win32 — nur für Mausrad-Scroll-Schrittweite relevant, nicht selektionsrelevant).
+- Multi-Column/Report-Mode (`get-column-order`, `append-column`, etc.) sind reine
+  No-op-Stubs — `QListWidget` ist single-column-only in diesem Backend, kein Treiber
+  braucht mehr (win32 hat für Multi-Column sogar eine komplett andere native Control,
+  `PLTSysListView32` statt `PLTLISTBOX`).
+- Signal→Callback: `itemSelectionChanged`/`toggled` verbinden sich im Shim per
+  `QObject::connect` mit einer C++-Lambda, die **nur** `cb(ud)` aufruft (kein Zustand im
+  Signal-Handler) — Racket-Seite liest den aktuellen Zustand danach per separatem
+  Shim-Query (`shim_list_box_get_selections`-Äquivalent, `shim_check_box_get_checked`),
+  exakt das bestehende `button%`/`message%`-Muster (Shim postet nur, Zustand wird separat
+  abgefragt).
+- Programmatische Zustandsänderungen (`set-value`, `select`, `set-current`) blocken das
+  Qt-Signal per `QSignalBlocker` im Shim, damit sie nicht denselben Callback re-triggern
+  wie ein echter Nutzer-Klick — mirrored gtks `ignore-click?`/win32s
+  `suppress-callback`-Parameter, nur auf Shim- statt Racket-Seite umgesetzt.

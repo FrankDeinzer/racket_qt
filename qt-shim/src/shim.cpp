@@ -2,6 +2,9 @@
 #include <QMainWindow>
 #include <QWidget>
 #include <QPushButton>
+#include <QCheckBox>
+#include <QListWidget>
+#include <QSignalBlocker>
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
@@ -21,6 +24,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <chrono>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -673,6 +677,162 @@ void* shim_label_create(void* parent_widget, const char* text)
 void shim_label_set_text(void* label_ptr, const char* text)
 {
     static_cast<QLabel*>(label_ptr)->setText(QString::fromUtf8(text));
+}
+
+// ---- check-box (check-box%) --------------------------------------------
+
+void* shim_check_box_create(void*           parent_widget,
+                            const char*     label,
+                            shim_callback_t toggle_cb,
+                            void*           ud)
+{
+    auto* parent = static_cast<QWidget*>(parent_widget);
+    auto* cb = new QCheckBox(QString::fromUtf8(label), parent);
+    if (toggle_cb) {
+        QObject::connect(cb, &QCheckBox::toggled,
+                         [toggle_cb, ud](bool) { toggle_cb(ud); });
+    }
+    return cb;
+}
+
+// Blocks the toggled signal so programmatic set-value calls (mirroring
+// gtk/win32's no-clicked?/suppress-callback pattern) don't re-fire the
+// Racket callback -- only genuine user clicks should.
+void shim_check_box_set_checked(void* cb_ptr, int on)
+{
+    auto* cb = static_cast<QCheckBox*>(cb_ptr);
+    QSignalBlocker blocker(cb);
+    cb->setChecked(on != 0);
+}
+
+int shim_check_box_get_checked(void* cb_ptr)
+{
+    return static_cast<QCheckBox*>(cb_ptr)->isChecked() ? 1 : 0;
+}
+
+// ---- list-box (list-box%) -----------------------------------------------
+// Single-column QListWidget only -- this backend's list-box% does not yet
+// implement multi-column/report-mode lists (no driver needs it; see
+// docs/HACKING.md's widget-addition checklist).
+
+void* shim_list_box_create(void*           parent_widget,
+                           int             kind, // 0=single 1=multiple 2=extended
+                           shim_callback_t sel_cb,
+                           void*           ud)
+{
+    auto* parent = static_cast<QWidget*>(parent_widget);
+    auto* lb = new QListWidget(parent);
+    QAbstractItemView::SelectionMode mode;
+    switch (kind) {
+        case 1:  mode = QAbstractItemView::MultiSelection;    break;
+        case 2:  mode = QAbstractItemView::ExtendedSelection; break;
+        default: mode = QAbstractItemView::SingleSelection;   break;
+    }
+    lb->setSelectionMode(mode);
+    if (sel_cb) {
+        QObject::connect(lb, &QListWidget::itemSelectionChanged,
+                         [sel_cb, ud]() { sel_cb(ud); });
+    }
+    return lb;
+}
+
+void shim_list_box_clear(void* lb_ptr)
+{
+    static_cast<QListWidget*>(lb_ptr)->clear();
+}
+
+void shim_list_box_append(void* lb_ptr, const char* s)
+{
+    static_cast<QListWidget*>(lb_ptr)->addItem(QString::fromUtf8(s));
+}
+
+void shim_list_box_set_string(void* lb_ptr, int i, const char* s)
+{
+    auto* lb = static_cast<QListWidget*>(lb_ptr);
+    if (auto* item = lb->item(i))
+        item->setText(QString::fromUtf8(s));
+}
+
+void shim_list_box_delete(void* lb_ptr, int i)
+{
+    auto* lb = static_cast<QListWidget*>(lb_ptr);
+    delete lb->takeItem(i);
+}
+
+int shim_list_box_count(void* lb_ptr)
+{
+    return static_cast<QListWidget*>(lb_ptr)->count();
+}
+
+int shim_list_box_is_selected(void* lb_ptr, int i)
+{
+    auto* lb = static_cast<QListWidget*>(lb_ptr);
+    auto* item = lb->item(i);
+    return (item && item->isSelected()) ? 1 : 0;
+}
+
+// Blocks itemSelectionChanged while applying a programmatic selection change
+// (same rationale as shim_check_box_set_checked above).
+void shim_list_box_select(void* lb_ptr, int i, int on)
+{
+    auto* lb = static_cast<QListWidget*>(lb_ptr);
+    QSignalBlocker blocker(lb);
+    if (auto* item = lb->item(i))
+        item->setSelected(on != 0);
+}
+
+void shim_list_box_set_current(void* lb_ptr, int i)
+{
+    auto* lb = static_cast<QListWidget*>(lb_ptr);
+    QSignalBlocker blocker(lb);
+    lb->setCurrentRow(i);
+}
+
+int shim_list_box_selected_count(void* lb_ptr)
+{
+    return static_cast<QListWidget*>(lb_ptr)->selectedItems().size();
+}
+
+// Returns the row of the idx-th selected item in ascending row order
+// (deterministic — QListWidget::selectedItems() order is unspecified),
+// or -1 if idx is out of range.
+int shim_list_box_selected_at(void* lb_ptr, int idx)
+{
+    auto* lb = static_cast<QListWidget*>(lb_ptr);
+    QList<int> rows;
+    for (auto* item : lb->selectedItems())
+        rows.append(lb->row(item));
+    std::sort(rows.begin(), rows.end());
+    if (idx >= 0 && idx < rows.size())
+        return rows[idx];
+    return -1;
+}
+
+void shim_list_box_scroll_to(void* lb_ptr, int i)
+{
+    auto* lb = static_cast<QListWidget*>(lb_ptr);
+    if (auto* item = lb->item(i))
+        lb->scrollToItem(item);
+}
+
+// Best-effort approximations for list-box%'s wheel-scroll bookkeeping
+// (get-first-item/number-of-visible-items) -- cosmetic scroll-step math only,
+// not selection-affecting, so an approximation is acceptable here.
+int shim_list_box_first_visible(void* lb_ptr)
+{
+    auto* lb = static_cast<QListWidget*>(lb_ptr);
+    QModelIndex idx = lb->indexAt(QPoint(0, 0));
+    return idx.isValid() ? idx.row() : 0;
+}
+
+int shim_list_box_visible_count(void* lb_ptr)
+{
+    auto* lb = static_cast<QListWidget*>(lb_ptr);
+    if (lb->count() == 0) return 0;
+    int rowH = lb->sizeHintForRow(0);
+    if (rowH <= 0) return lb->count();
+    int h = lb->viewport()->height();
+    return (std::max)(1, h / rowH);
 }
 
 } // extern "C"
