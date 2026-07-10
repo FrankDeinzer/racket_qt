@@ -776,6 +776,18 @@ identisch zum Windows-Nachher-Ergebnis. `dialog-widgets-probe.rkt` ohne Workarou
 bestätigt: `list-box%` (4 Einträge) + `check-box%` layouten korrekt neben OK/Cancel.
 Reine Validierung, keine Fix-Commits.
 
+**macOS-Validierung (2026-07-10-3_prompt, `docs/2026-07-10-3_report-macos.md`): grün.**
+ff-Pull `qt-backend` `04935cb6` → `f92352e0` (Umbrella `main` bereits deckungsgleich,
+Zeiger schon `f92352e0`, kein Pull dort nötig). Shim neu gebaut (`cmake --build
+qt-shim/build/macos-arm64`, beide neuen Funktionen kompilieren sauber), Bytecode neu
+(`-S`-Source-Override, `raco make`), Smoke 3/3 grün. Light Mode bestätigt
+(`org.racket-lang.prefs.rktd`: `white-on-black-mode?` = `#f`). `examples/panel-sizing-
+probe.rkt` (unverändert): Screenshot (`osascript`/`screencapture`) zeigt alle drei
+`button%` sauber vertikal gestapelt, keine Überdeckung — identisch zum Windows-/
+Linux-Nachher-Ergebnis. `dialog-widgets-probe.rkt` ohne Workaround bestätigt: `list-box%`
+(4 Einträge) + `check-box%` layouten korrekt neben OK/Cancel. Reine Validierung, keine
+Fix-Commits.
+
 ### 18.3 Neuer Fund: `dialog%`-Modalität blockiert native Control-Callbacks nicht (Phase 1)
 
 **Befund (Nutzer-bestätigt, visuell):** bei offenem modalem Dialog (`dialog-widgets-probe.rkt`)
@@ -846,6 +858,21 @@ einem Test-Artefakt. Visueller Grau-Kontrast zwischen enabled/disabled war in di
 Qt-Stil bei dieser Auflösung nicht eindeutig unterscheidbar (Pixel-Sampling ähnlich,
 ~127 vs. ~131 auf 0–765-Skala) — die funktionale Blockade ist der belastbare Befund,
 nicht der visuelle Eindruck. Reine Validierung, keine Fix-Commits.
+
+**macOS-Validierung (2026-07-10-3_prompt, `docs/2026-07-10-3_report-macos.md`): grün.**
+Nach Sync/Rebuild (siehe §18.2-macOS-Absatz oben) `dialog-widgets-probe.rkt` per
+Accessibility-API (`osascript`/System Events — Klick auf benannte Buttons/Checkbox,
+zuverlässiger als Pixel-Koordinaten) bedient: Dialog geöffnet (`list-box%`/`check-box%`
+sichtbar+funktional, `check-box toggled: #t` im Log), Klick auf den Parent-Button bei
+offenem Modal löst **keinen** `PARENT BUTTON CLICKED`-Print aus; derselbe Klick nach
+Schließen des Dialogs (OK) löst ihn sofort aus (einziges Vorkommen des Prints im Log,
+direkt nach `dialog closed —…`) — bestätigt wie bei Linux, dass die Blockade ursächlich
+an der offenen Modalität hängt, nicht an einem Test-Artefakt. **Visueller Kontrast hier
+deutlich sichtbar** (anders als Linux): Screenshot zeigt Parent-Fenster-Buttons klar
+ausgegraut (helleres Grau) gegenüber den scharfen schwarzen Labels im aktiven Dialog —
+deckt sich mit dem für Windows berichteten deutlichen Kontrast, plausibel eine
+Theme-/Style-Differenz auf Linux (KDE/Breeze), nicht Teil dieses Scopes. Reine
+Validierung, keine Fix-Commits.
 
 ### 18.4 Widget-Hinzufügen: `list-box%`/`check-box%` konkret (Ergänzung zu §5)
 

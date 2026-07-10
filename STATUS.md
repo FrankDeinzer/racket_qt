@@ -5,6 +5,33 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-10 (3, macOS) — Panel-Sizing-Fix + Modalitäts-Fix, Cross-Platform-Validierung abgeschlossen (2026-07-10-3_prompt)
+
+**Kontext:** `docs/2026-07-10-3_prompt.md`. Voller Bericht: `docs/2026-07-10-3_report-macos.md`.
+
+- **Sync (nach Nutzer-Bestätigung):** gui-Submodul `qt-backend` ff-Pull `04935cb6` →
+  `f92352e0`. Umbrella `main` war bereits aktuell (Zeiger `f92352e0`), kein Pull dort
+  nötig. Shim neu gebaut (`cmake --build qt-shim/build/macos-arm64`), Bytecode neu
+  (`-S`-Source-Override, `raco make`), Smoke 3/3 grün. Light Mode bestätigt
+  (`org.racket-lang.prefs.rktd`: `white-on-black-mode?` = `#f`).
+- **Fix A (Panel-Sizing) validiert:** `examples/panel-sizing-probe.rkt` (unverändert) —
+  Screenshot (`osascript`/`screencapture`) zeigt alle drei `button%` sauber vertikal
+  gestapelt. `dialog-widgets-probe.rkt` ohne Workaround: `list-box%`/`check-box%`
+  layouten korrekt neben OK/Cancel.
+- **Fix B (Modalität) validiert:** Klick via Accessibility-API (`osascript`/System
+  Events) auf den Parent-Button bei offenem Modal löst keinen Callback aus; derselbe
+  Klick nach Schließen des Dialogs löst ihn sofort aus (einziges Log-Vorkommen, direkt
+  nach `dialog closed —…`) — bestätigt Blockade ist ursächlich an die Modalität
+  gebunden. **Visueller Grau-Kontrast hier deutlich sichtbar** (anders als Linux,
+  ähnlich Windows) — plausibel Theme-/Style-Differenz, nicht Teil des Scopes.
+- Details `docs/HACKING.md` §18.2/§18.3 (macOS-Validierungsabsätze ergänzt).
+- **Reine Validierung, keine Fix-Commits. Cross-Platform-Validierung (Windows/Linux/
+  macOS) für Fix A + Fix B damit abgeschlossen.** Nächster Schritt: Checkpoint E
+  fortsetzen (choice%/radio-box%/slider%/tab-panel%), danach file-selector, danach
+  Preferences.
+
+---
+
 ## Session 2026-07-10 (3, Linux) — Panel-Sizing-Fix + Modalitäts-Fix, Cross-Platform-Validierung (2026-07-10-3_prompt)
 
 **Kontext:** `docs/2026-07-10-3_prompt.md`. Voller Bericht: `docs/2026-07-10-3_report-linux.md`.
