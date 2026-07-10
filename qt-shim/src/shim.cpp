@@ -393,6 +393,20 @@ void shim_widget_client_to_screen(void* widget, int x, int y, int* out_x, int* o
     *out_y = g.y();
 }
 
+// QWidget::sizeHint() -- the control's natural size, queried right after
+// construction so item-based widgets (button%/message%/check-box%/list-box%)
+// can seed window%'s w/h fields the same way win32/gtk controls already know
+// their real size immediately after CreateWindowEx/gtk_widget_size_request
+// (see docs/HACKING.md §18.2: without this, make-item%'s post-construction
+// min-width/min-height seed always reads 0, and children stack on top of
+// each other in a panel).
+void shim_widget_get_size_hint(void* widget, int* out_w, int* out_h)
+{
+    QSize s = static_cast<QWidget*>(widget)->sizeHint();
+    *out_w = s.width();
+    *out_h = s.height();
+}
+
 // ---- canvas -------------------------------------------------------------
 
 void* shim_canvas_create(void*           parent_widget,
