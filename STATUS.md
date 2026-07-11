@@ -5,6 +5,48 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-11 (Windows) — `file-selector` echt: `get-file`/`put-file` via non-modaler `QFileDialog` (2026-07-11_prompt)
+
+**Kontext:** `docs/2026-07-11_prompt.md`.
+
+- **Kernfrage geklärt (Checkpoint 1):** `QFileDialog::open()` (nie `exec()`) zeigt den
+  Dialog window-modal an und kehrt sofort zurück; das Ergebnis kommt über
+  `QDialog::finished`, das während eines normalen `shim_pump()`-Aufrufs feuert. Racket-
+  seitig nach außen synchron über denselben `(yield (semaphore-peek-evt done-sema))`-
+  Mechanismus wie `dialog%`s Modal-Show (`../common/dialog.rkt`). Kein `exec()`, kein
+  eigener `QEventLoop`.
+- **Echter Bug gefunden + gefixt (nicht nur gemessen):** ein frischer `_fun`-Callback pro
+  `get-file`/`put-file`-Aufruf (statt einmalig pro Widget-Konstruktor wie überall sonst in
+  diesem Backend) crashte reproduzierbar nach ein paar Aufrufen (`APPCRASH`/`c0000005`,
+  per WER bestätigt) bzw. produzierte nach einem Zwischenfix einen `make-ffi-callback:
+  contract violation`-Hang. Root Cause: Racket-CS-Callbacks sind immer atomic, und
+  `_fun`s Ctype-Konverter erzeugt bei jedem Aufruf einen neuen nativen Trampolin, egal ob
+  dieselbe Prozedur erneut übergeben wird (keine Memoisierung nach Prozedur-Identität).
+  Fix: genau ein `function-ptr`-Callback einmal beim Modul-Laden, Dispatch über eine als
+  `ud` durchgereichte Ganzzahl-ID; `shim_file_dialog_create`s `cb`-Parameter in
+  `utils.rkt` als reines `_pointer` deklariert (nicht `_file_dialog_cb_t`), damit der
+  fertige Callback-Pointer nicht erneut gewrappt wird. Details `docs/HACKING.md` §19.
+- **Verifiziert (Nutzer, `examples/file-dialog-probe.rkt`, echte Interaktion):** 8/8
+  aufeinanderfolgende Öffnen-Zyklen (jedes Mal andere Datei), `cb`-Adresse im Log über
+  alle 8 identisch; 5× Öffnen→Abbrechen; mehrfach Speichern→Speichern (inkl. Overwrite-
+  Warnung bei existierender Datei) und Speichern→Abbrechen — alles grün. Smoke 3/3.
+- **Zwei separate Commits pro Repo (get-file; put-file), jeweils sofort gepusht** — get-
+  file zuerst (Submodul `qt-backend` `15dee9f9`, Umbrella `main` `a40ae55`), dann put-
+  file (Submodul `19954ffd`, Kernmechanik identisch — nur der `'put`-Style-Bail-out aus
+  dem ersten Commit entfernt).
+- **Doku:** `docs/HACKING.md` §19 (neue Lektion: Einmal-Callback-plus-Userdata-ID-Muster
+  für Nicht-Widget-Callbacks), `CLAUDE.md`-Checkpoint-Tabelle, dieser Eintrag.
+- **Phase 3 (nativer Windows-Dialog) — gemessen, trägt.** `PLT_QT_NATIVE_FILE_DIALOG=1`
+  (Env-Schalter, kein neuer `get-file`/`put-file`-Parameter): nativer Windows-Common-
+  Dialog läuft über denselben non-modalen `open()`+Pump-Mechanismus, 7/7 Zyklen grün,
+  gleicher Callback über alle Aufrufe. Als Stil-Option vermerkt; Qt-eigener Dialog bleibt
+  Standard-Pfad. Details `docs/HACKING.md` §19.
+- **Nächster Schritt:** Cross-Platform-Matrix (Linux/macOS × Qt-eigen/nativ, 4 Fälle pro
+  Plattform) — eigene Runde. Danach Rest von Checkpoint E (choice%/radio-box%/slider%/
+  tab-panel%), dann Preferences.
+
+---
+
 ## Session 2026-07-10 (3, macOS) — Panel-Sizing-Fix + Modalitäts-Fix, Cross-Platform-Validierung abgeschlossen (2026-07-10-3_prompt)
 
 **Kontext:** `docs/2026-07-10-3_prompt.md`. Voller Bericht: `docs/2026-07-10-3_report-macos.md`.

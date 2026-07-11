@@ -901,3 +901,90 @@ Validierung, keine Fix-Commits.
   Qt-Signal per `QSignalBlocker` im Shim, damit sie nicht denselben Callback re-triggern
   wie ein echter Nutzer-Klick — mirrored gtks `ignore-click?`/win32s
   `suppress-callback`-Parameter, nur auf Shim- statt Racket-Seite umgesetzt.
+
+## 19. `file-selector` echt gemacht — `QFileDialog` non-modal via `open()` (2026-07-11_prompt)
+
+**Mechanik (Kernfrage der Sitzung, gemessen + bestätigt):** `QFileDialog::open()`
+(NICHT `exec()`) zeigt den Dialog als *window-modal* an und kehrt sofort zum Aufrufer
+zurück — keine geschachtelte `QEventLoop`. Das Ergebnis kommt über das `QDialog::finished
+(int result)`-Signal, das während eines ganz normalen `shim_pump()`-Aufrufs feuert, exakt
+wie jedes andere Signal in diesem Backend. `get-file`/`put-file` müssen sich nach außen
+aber SYNCHRON verhalten (Rückgabewert = Pfad oder `#f`) — dafür wird `dialog%`s bereits
+bewährter Mechanismus wiederverwendet (`../common/dialog.rkt`, §16/§18.3): `(yield
+(semaphore-peek-evt done-sema))` blockiert den Racket-Aufrufer, während der
+Pump-Hintergrund-Thread weiterläuft und den `finished`-Callback verarbeitet; der Callback
+postet nur ein `queue-event`, das `done-sema` erst danach (im Eventspace-Handler-Thread)
+postet. Kein `exec()`, kein eigener `QEventLoop`, kein Verstoß gegen Regel 1.
+
+**Fund 1 — Parent-Disable ist Fix B, wiederverwendet, nicht neu gebaut:** `shim_widget_
+set_enabled` (§18.3) wird direkt auf den Parent-`frame%`-Handle angewendet (nicht über
+den vollen `get-top-level-windows`/`modal-enable`-Dialog-Level-Mechanismus, da
+`file-selector` keine `dialog%`-Instanz ist) — vor dem Öffnen disabled, im Ergebnis-Thunk
+wieder enabled.
+
+**Fund 2 — echter Bug, kein Architektur-Problem: pro Aufruf einen frischen `_fun`-
+Callback zu erzeugen ist auf Windows nicht sicher.** Jedes andere Widget in diesem
+Backend (`button%`, `check-box%`, `list-box%`, …) erzeugt seinen Klick-/Toggle-Callback
+GENAU EINMAL im Konstruktor und der native Trampolin wird für jedes weitere Event
+wiederverwendet. `file-selector` ist keine langlebige Widget-Instanz — die naheliegende
+erste Implementierung erzeugte bei jedem `get-file`/`put-file`-Aufruf eine frische
+Racket-Closure und übergab sie direkt als `_file_dialog_cb_t`-Argument. Gemessen (echte
+Nutzer-Interaktion, `examples/file-dialog-probe.rkt`, `PLT_QT_DEBUG=1`):
+- Lauf 1 (kein Debug-I/O im Atomic-Callback): 1×Accept, 1×Cancel liefen sauber, **3. Dialog
+  (2. Accept) crashte reproduzierbar** (`APPCRASH`, `c0000005`, WER-Report bestätigt —
+  kein Racket-Backtrace, da echter natíver Absturz). Callback-Adressen der drei Aufrufe
+  lagen exakt 0x1E0 Byte auseinander (`...4040`, `...4220`, `...4400`) — Indiz für einen
+  kleinen, pro-Aufruf allozierten nativen Trampolin-Slot statt eines gecachten.
+- `foreign_procedures.html` bestätigt explizit: „Callbacks are always atomic [in CS]" UND
+  `ffi/unsafe.rkt`s `_cprocedure*` (Zeile ~470) ruft `make-ffi-callback` bei **jedem**
+  Aufruf der Ctype-Konvertierungsfunktion neu auf — es gibt **keine** Memoisierung nach
+  Prozedur-Identität, auch nicht für dieselbe Racket-Prozedur über mehrere Aufrufe hinweg.
+  „Run-time code generation is fast and cached" (static-fun.html) bezieht sich auf den
+  generierten MASCHINENCODE pro Ctype-Signatur, nicht auf einen Cache pro (Prozedur,
+  Ctype)-Paar.
+- **Fix:** genau EIN natives Callback-Objekt einmalig beim Modul-Laden per `(function-ptr
+  dispatch-file-dialog-result _file_dialog_cb_t)` erzeugen; Aufrufe werden über eine kleine
+  Ganzzahl-ID dispatcht, die als das `ud`-`void*` selbst durchgereicht wird (klassisches
+  C-Userdata-Idiom: `(cast id _intptr _pointer)` / Rückweg `(cast ud _pointer _intptr)`,
+  beide Richtungen verifiziert). Ein `pending`-Hasheqv (ID → Ergebnis-Closure) hält die
+  Continuation bis zum Dispatch.
+- **Stolperstein dabei:** Ein `_fun`-typisiertes Parameter (`_file_dialog_cb_t`) versucht
+  bei JEDER Übergabe erneut zu wrappen — auch wenn bereits ein fertiges Callback-Objekt
+  übergeben wird (`make-ffi-callback: contract violation, expected: procedure?, given:
+  #<callback>`). Deshalb ist `shim_file_dialog_create`s `cb`-Parameter in `utils.rkt` als
+  reines `_pointer` deklariert (nicht `_file_dialog_cb_t`) — der einmalig gebaute
+  Callback-Pointer wird so unverändert durchgereicht statt erneut gewrappt zu werden.
+  `_file_dialog_cb_t` bleibt nur für den einmaligen `function-ptr`-Aufruf in Gebrauch.
+- **Verifiziert:** 8/8 aufeinanderfolgende Öffnen-Zyklen (echte Nutzer-Klicks, jedes Mal
+  eine andere Datei gewählt) grün, `cb`-Adresse im Log über alle 8 Aufrufe hinweg
+  **identisch** (Beweis für Trampolin-Wiederverwendung). Zusätzlich 5× Öffnen→Abbrechen
+  und mehrfach Speichern→Speichern (inkl. Overwrite-Warnung bei existierender Datei) sowie
+  Speichern→Abbrechen — alle grün, Nutzer-bestätigt.
+- **Lektion für künftigen Code in diesem Backend:** Sobald eine Funktion (nicht ein
+  langlebiges Widget) einen `_fun`-Callback an den Shim reichen muss, IMMER das
+  Einmal-`function-ptr`-plus-Userdata-ID-Muster verwenden, nie eine frische Closure pro
+  Aufruf — dieser Fehler ist auf Windows nicht sofort sichtbar (3 Aufrufe liefen im
+  allerersten Test sogar sofort beim 1. Versuch durch, in einem späteren Test erst beim
+  3.) und macht sich als schwer reproduzierbarer nativer Absturz bemerkbar, nicht als
+  Racket-Fehler.
+
+**Kontrakt-Details:** `directory`/`filename`/`extension`/`filters` werden 1:1 aus dem
+gemeinsamen `mred/private/filedialog.rkt`-Kontrakt (identisch zu win32/gtk) übernommen;
+`filters` (`(listof (list string? string?))`) wird nach Qts `"Name (*.ext *.ext2);;Name2
+(*.ext3)"`-Syntax übersetzt (win32-Style-`;`-getrennte Muster innerhalb eines Eintrags
+werden zu Leerzeichen). `get-directory`/`get-file-list` (`'dir`/`'multi` im Style) bleiben
+diese Sitzung bewusst außen vor (`#f`, wie der alte Stub) — nicht Teil des Scopes.
+
+**Phase 3 (nativer Windows-Dialog) — gemessen, trägt.** Ein `PLT_QT_NATIVE_FILE_DIALOG`-
+Env-Var-Schalter (analog zu `PLT_QT_DEBUG`) existiert im Shim (`plt_qt_native_file_
+dialog()`), der `QFileDialog::DontUseNativeDialog` umkehrt — bewusst NICHT Teil des
+`get-file`/`put-file`-Kontrakts (kein neuer Parameter), nur ein Mess-Werkzeug. Ergebnis
+(Nutzer, `PLT_QT_NATIVE_FILE_DIALOG=1`, `examples/file-dialog-probe.rkt`): **der native
+Windows-Common-Dialog trägt denselben non-modalen `open()`+`finished`-Signal+Pump-
+Mechanismus wie der Qt-eigene** — 7 aufeinanderfolgende Öffnen-Zyklen (Mix aus Auswählen
+und Abbrechen) grün, dieselbe Callback-Adresse über alle 7 Aufrufe hinweg, kein Crash,
+kein Hang, kein `exec()` nötig. Der native Dialog verlangt also **keine** eigene
+geschachtelte Schleife unter diesem Pump-Modell — als Stil-Option für später vermerkt,
+aber der Qt-eigene Dialog (`DontUseNativeDialog=true`) bleibt der Standard-Pfad dieses
+Backends (kein neuer Parameter im `get-file`/`put-file`-Kontrakt, keine Plattform-
+Fallunterscheidung nötig).
