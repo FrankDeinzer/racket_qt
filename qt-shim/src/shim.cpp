@@ -9,6 +9,7 @@
 #include <QMenu>
 #include <QAction>
 #include <QLabel>
+#include <QFileDialog>
 #include <QImage>
 #include <QPainter>
 #include <QResizeEvent>
@@ -44,6 +45,8 @@ typedef void (*shim_mouse_cb_t)(void* ud, int type, int x, int y, int buttons, i
 typedef void (*shim_key_cb_t)(void* ud, int type, int key, int text_char, int mods);
 // Focus: gained(1=in, 0=out)
 typedef void (*shim_focus_cb_t)(void* ud, int gained);
+// File dialog result: ud, path (UTF-8 C string, NULL if the user canceled).
+typedef void (*shim_file_dialog_cb_t)(void* ud, const char* path);
 
 static int    s_argc = 0;
 static char** s_argv = nullptr;
@@ -56,6 +59,20 @@ static bool plt_qt_debug()
     static int cached = -1;
     if (cached < 0) {
         const char* v = std::getenv("PLT_QT_DEBUG");
+        cached = (v && v[0] && v[0] != '0') ? 1 : 0;
+    }
+    return cached != 0;
+}
+
+// Phase-3 measurement knob (docs/2026-07-11_prompt.md): lets the native
+// Windows common-item dialog be tried against the same open()+pump path
+// without touching the get-file/put-file contract. Off (Qt-own dialog) by
+// default; not a supported/committed API switch, just a data point.
+static bool plt_qt_native_file_dialog()
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char* v = std::getenv("PLT_QT_NATIVE_FILE_DIALOG");
         cached = (v && v[0] && v[0] != '0') ? 1 : 0;
     }
     return cached != 0;
@@ -858,6 +875,87 @@ int shim_list_box_visible_count(void* lb_ptr)
     if (rowH <= 0) return lb->count();
     int h = lb->viewport()->height();
     return (std::max)(1, h / rowH);
+}
+
+// ---- file dialog (get-file / put-file) -----------------------------------
+// QFileDialog run non-modally: open() (window-modal to `parent`, returns to
+// the caller immediately) instead of exec() -- no nested QEventLoop, so it
+// integrates with shim_pump() the same way every other widget here does.
+// The result comes back on QDialog::finished, which fires from inside a
+// normal shim_pump() call; the Racket side turns that into a synchronous
+// return via the same yield-on-semaphore mechanism as dialog% (docs/
+// HACKING.md §16/§18.3). mode: 0 = open existing file, 1 = save.
+void shim_file_dialog_create(void* parent_widget, int mode,
+                             const char* caption, const char* directory,
+                             const char* filename, const char* extension,
+                             const char* filter,
+                             shim_file_dialog_cb_t cb, void* ud)
+{
+    auto* parent = static_cast<QWidget*>(parent_widget);
+    auto* dlg = new QFileDialog(parent, QString::fromUtf8(caption));
+    dlg->setOption(QFileDialog::DontUseNativeDialog,
+                   !plt_qt_native_file_dialog());
+    if (directory && directory[0])
+        dlg->setDirectory(QString::fromUtf8(directory));
+    if (filename && filename[0])
+        dlg->selectFile(QString::fromUtf8(filename));
+    if (extension && extension[0])
+        dlg->setDefaultSuffix(QString::fromUtf8(extension));
+    if (filter && filter[0])
+        dlg->setNameFilter(QString::fromUtf8(filter));
+    if (mode == 1) {
+        dlg->setAcceptMode(QFileDialog::AcceptSave);
+        dlg->setFileMode(QFileDialog::AnyFile);
+    } else {
+        dlg->setAcceptMode(QFileDialog::AcceptOpen);
+        dlg->setFileMode(QFileDialog::ExistingFile);
+    }
+
+    QObject::connect(dlg, &QDialog::finished, [dlg, cb, ud](int result) {
+        if (plt_qt_debug()) {
+            fprintf(stderr, "[PLT_QT_DEBUG] file_dialog finished result=%d\n", result);
+            fflush(stderr);
+        }
+        if (result == QDialog::Accepted) {
+            QStringList sel = dlg->selectedFiles();
+            if (plt_qt_debug()) {
+                fprintf(stderr, "[PLT_QT_DEBUG] file_dialog selectedFiles.size=%d\n",
+                        (int)sel.size());
+                fflush(stderr);
+            }
+            if (!sel.isEmpty()) {
+                QByteArray path = sel.first().toUtf8();
+                if (plt_qt_debug()) {
+                    fprintf(stderr, "[PLT_QT_DEBUG] file_dialog path='%s' calling cb=%p\n",
+                            path.constData(), (void*)cb);
+                    fflush(stderr);
+                }
+                if (cb) cb(ud, path.constData());
+                if (plt_qt_debug()) {
+                    fprintf(stderr, "[PLT_QT_DEBUG] file_dialog cb returned\n");
+                    fflush(stderr);
+                }
+                dlg->deleteLater();
+                if (plt_qt_debug()) {
+                    fprintf(stderr, "[PLT_QT_DEBUG] file_dialog deleteLater done\n");
+                    fflush(stderr);
+                }
+                return;
+            }
+        }
+        if (cb) cb(ud, nullptr);
+        dlg->deleteLater();
+    });
+
+    if (plt_qt_debug())
+        fprintf(stderr,
+                "[PLT_QT_DEBUG] file_dialog_create mode=%d native=%d dir='%s' "
+                "file='%s' filter='%s'\n",
+                mode, (int)plt_qt_native_file_dialog(),
+                directory ? directory : "", filename ? filename : "",
+                filter ? filter : "");
+
+    dlg->open();
 }
 
 } // extern "C"
