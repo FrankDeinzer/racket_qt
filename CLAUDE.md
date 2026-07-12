@@ -111,11 +111,14 @@ referenziert).
 
 **Offene Nebenbefunde, je eigene Session:** macOS-Menüleiste zeigt teils 8 statt 9
 Einträge (`Windows`-Menü fehlt manchmal, Ursache offen); Linux Resize/Minimieren unter
-KWin nicht validiert; Windows Toolbar-Save-Icon-Timing (`wx/qt/button.rkt`); zwei seltene
-Linux-Abstürze (§19, „Crash A/B") plausibel durch die macOS-Menü-Dispatch-Fixes (§19)
-bereits mitbehoben, aber nicht verifiziert; `htdp-lib`-Contract-Bug
-(`test-engine:test-dock-size`) + Folge-Crash beim zweiten Tab in DrRacket, auf macOS
-beobachtet, nicht root-caused (§19). Details je Fund: `STATUS.md`, `docs/HACKING.md`.
+KWin nicht validiert; Windows Toolbar-Save-Icon-Timing (`wx/qt/button.rkt`); Linux Crash A
+(„arity mismatch") nach den macOS-Menü-Dispatch-Fixes (§19) in 4 Versuchen nicht mehr
+reproduziert — plausibel behoben, nicht absolut bewiesen (Original war
+n=1-intermittierend); Linux Crash B (Teardown, „invalid memory reference") 1/1
+unverändert reproduziert, bleibt offen, andere Ursache als die Menü-Fixe; `htdp-lib`-
+Contract-Bug (`test-engine:test-dock-size`) auf macOS UND jetzt auch Linux beobachtet —
+auf Linux bereits bei nur einem offenen Tab (Auslöser weiter gefasst als ursprünglich
+angenommen), nicht root-caused (§19). Details je Fund: `STATUS.md`, `docs/HACKING.md`.
 
 ## Dokumentation
 

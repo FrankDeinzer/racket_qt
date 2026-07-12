@@ -5,6 +5,41 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-12 (2, Linux) — Konsolidierung: Crash-A/B-Rückprüfung + Nativ-Matrix (2026-07-11-2_prompt)
+
+**Kontext:** `docs/2026-07-11-2_prompt.md` (Phase 2 + 3). Voller Bericht:
+`docs/2026-07-11-2_report-linux.md`.
+
+- **Sync (nach Nutzer-Bestätigung):** gui-Submodul ff-Pull `19954ffd` → `caef3e9c` (die
+  zwei macOS-Fixe). Umbrella-Zeiger war bereits korrekt (aus dem Windows-Sync), kein
+  neuer Umbrella-Commit nötig. Nur Racket-Dateien geändert, kein Shim-Rebuild. `raco
+  make` + Smoke 3/3 grün, Light Mode bestätigt.
+- **Crash A (Kernbefund):** 4 gezielte Versuche (frisches DrRacket, sehr früher File →
+  Open-Klick) — 3/4 komplett sauber, 1/4 traf stattdessen den bekannten htdp-Bug (kein
+  Prozessabsturz). Der ursprüngliche `arity mismatch`-Absturz trat in keinem Versuch auf.
+  **Plausibel durch die zwei Fixe behoben, nicht absolut bewiesen** (Original war
+  n=1-intermittierend).
+- **Neuer Datenpunkt:** der bereits aus macOS bekannte htdp-lib-Contract-Bug
+  (`test-engine:test-dock-size`) reproduzierte hier bereits bei nur **einem** offenen
+  Tab (macOS brauchte einen zweiten) — Auslöser ist weiter gefasst als dokumentiert.
+  Kein Prozessabsturz, Prozess blieb nach Wegklicken am Leben (Interactions-Leiste fehlte
+  danach sichtbar). Nicht root-caused, außerhalb des Scopes (`htdp-lib`).
+- **Crash B:** 1/1 exakt reproduziert, unverändert — `invalid memory reference` nach
+  bereits korrekt gedrucktem `put-file`-Rückgabewert in einem Skript ohne `frame%`.
+  Erwartungsgemäß nicht durch die Menü-Fixe berührt (anderer Codepfad). Bleibt offener
+  Befund, nicht gefixt (Guardrail).
+- **Qt-eigen×nativ-Matrix:** Qt-eigen bereits grün (9/9, Vorsession). Nativ
+  (`PLT_QT_NATIVE_FILE_DIALOG=1`): **8/8 Zyklen grün**, Trampolin-Adresse über alle
+  Aufrufe identisch, kein Crash/Hang. Konkreter Dialog-Typ (KDE-nativ vs. Portal) vom
+  Nutzer mangels Vergleich nicht zugeordnet, funktional aber eindeutig bestätigt.
+  Damit Windows+Linux der 3×2-Matrix komplett, macOS-Nativ (Phase 4) steht noch aus.
+- Keine Fix-Commits diese Session (reine Sync + Verifikation + Matrix, wie im Prompt
+  vorgesehen). `docs/HACKING.md` §19 aktualisiert.
+- **Nächster Schritt:** macOS Phase 4 (nativ-Matrix) offen. Crash B + htdp-Rezidiv zur
+  Entscheidung beim Nutzer (eigene Session oder zurückstellen).
+
+---
+
 ## Session 2026-07-12 (Windows) — Konsolidierung: Push-Check + DrRacket-Lücke (2026-07-11-2_prompt)
 
 **Kontext:** `docs/2026-07-11-2_prompt.md`. Voller Bericht: `docs/2026-07-11-2_report-win.md`.

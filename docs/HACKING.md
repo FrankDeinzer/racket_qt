@@ -1094,4 +1094,62 @@ Exception-Behandlung selbst). Nicht root-caused: der Contract-Verstoß selbst li
 Teil dieser Session, keine Fix-Commits dafür. Eigene, dedizierte Session nötig (mit
 gezielter Instrumentierung, nicht mit weiterem Lesen von Shared-Code).
 
-Details, vollständige Logs und Diskriminator-Überlegungen: `docs/2026-07-11_report-linux.md`.
+**Linux Crash-A/B-Rückprüfung nach den zwei macOS-Fixes (2026-07-12,
+`docs/2026-07-11-2_report-linux.md`):** ff-Pull `qt-backend` `19954ffd`→`caef3e9c` (beide
+Fixe rein Racket-seitig, kein Shim-Rebuild nötig), `raco make` + Smoke 3/3 grün, Light
+Mode (BreezeLight) bestätigt.
+
+- **Crash A — plausibel behoben, nicht absolut bewiesen.** 4 gezielte Versuche (frischer
+  `PLT_QT=1 PLT_QT_DEBUG=1`-DrRacket-Start, File → Open so früh wie möglich geklickt):
+  3/4 liefen komplett sauber durch (Dialog öffnet, Datei lädt, kein Fehler im Log). Der
+  ursprüngliche `pre: arity mismatch … terminated in atomic mode!`-Absturz (Prozessende)
+  trat in keinem der 4 Versuche auf. Ein Versuch (1/4) traf stattdessen einen anderen,
+  bereits bekannten Fehler (siehe htdp-Rezidiv unten) — das ist ein abgefangener Dialog,
+  kein Prozessabsturz, zählt also nicht als Crash-A-Repro. Einordnung: gute, aber keine
+  absolute Evidenz (Original war n=1-intermittierend; n=4-sauber ist ein starkes, aber
+  kein beweisendes Signal). Arbeitshypothese „durch `acc73108`/`caef3e9c` mitbehoben"
+  bleibt vorerst bestätigt, nicht abschließend verifiziert.
+- **Crash B — bleibt unverändert offen, wie erwartet nicht durch die Menü-Fixes berührt.**
+  1/1 exakt reproduziert: isoliertes `(put-file …)`-Skript ohne `frame%`, Nutzer tippte
+  Dateinamen und speicherte, Log druckte den korrekten Pfad
+  (`/home/deinzer/src/racket_qt/ffff.rkt`), danach sofort `invalid memory reference. Some
+  debugging context lost`, Prozessende. Identisches Fehlerbild wie im Ursprungsbericht.
+  Bestätigt die bestehende Hypothese, dass Crash B ein Teardown-/`deleteLater()`-
+  Reihenfolgeproblem ist, unabhängig vom Menü-Dispatch-Code der beiden Fixe — bleibt
+  offener Befund für gemeinsamen Code, hier bewusst nicht gefixt (Guardrail).
+- **htdp-lib-Bug-Rezidiv, jetzt auch bei nur EINEM Tab (neuer Datenpunkt gegenüber dem
+  macOS-Bericht).** Einer der 4 Crash-A-Versuche zeigte den bereits dokumentierten
+  „dritten Fund" (oben, macOS-Abschnitt): DrRacket-Internal-Error-Dialog mit exakt
+  `preferences:set: new value doesn't satisfy preferences:set-default predicate — pref
+  symbol: 'test-engine:test-dock-size — given: '(1) — predicate:
+  #<procedure:...ngine/test-tool.rkt:10:25>`. Anders als im macOS-Bericht (der einen
+  zweiten geöffneten Tab als Auslöser brauchte) trat er hier bereits beim allerersten
+  File → Open mit nur einer offenen Registerkarte auf — der Auslöser ist also weiter
+  gefasst als bisher angenommen (nicht zwingend tab-Wechsel-gebunden). Nach dem
+  Wegklicken (OK) blieb der Prozess am Leben, das Definitions-Fenster blieb editierbar,
+  aber die Interactions-Leiste (unterer REPL-Bereich) fehlte sichtbar — konsistent mit
+  einem gestörten Panel-Layout durch die fehlgeschlagene `test-dock-size`-Preference.
+  Weiterhin nicht root-caused, weiterhin außerhalb des Scopes dieser Session (`htdp-lib`,
+  nicht `wx/qt/`) — keine Fix-Versuche, reine Beobachtung für die künftige dedizierte
+  Session.
+
+**Linux Qt-eigen×nativ-Matrix (2026-07-12, `docs/2026-07-11-2_report-linux.md`):**
+Qt-eigen war bereits aus der Vorsession grün (9/9), hier nicht wiederholt. Nativer Pfad
+(`PLT_QT_NATIVE_FILE_DIALOG=1`, `examples/file-dialog-probe.rkt`): **8/8 Zyklen grün**
+(gemischt Open/Save/Cancel), `cb`-Adresse (`0x458d9d60`) über alle 8 Aufrufe identisch
+(Trampolin-Fix greift auch hier), kein Crash, kein Hang, `native=1` im Log durchgehend
+bestätigt. Der native Dialog trägt denselben non-modalen `open()`+Pump-Mechanismus ohne
+Änderung. Welcher konkrete Backend-Dialog erscheint (KDE-nativ vs. xdg-desktop-portal),
+konnte der Nutzer mangels Vergleichsreferenz nicht zuordnen — funktional aber eindeutig
+grün, keine eigene Runloop nötig.
+
+**Qt-eigen×nativ-Matrix-Stand (3 Plattformen × 2 Dialog-Typen):**
+
+| Plattform | Qt-eigen | Nativ |
+|---|---|---|
+| Windows | ✅ (7/7, Vorsession) | ✅ (7/7, Vorsession — Windows-Common-Dialog) |
+| Linux | ✅ (9/9, Vorsession) | ✅ (8/8, diese Session — Dialog-Typ nicht identifiziert, funktional grün) |
+| macOS | ✅ (7/7 + DrRacket, Vorsession) | ⬜ noch offen (Phase 4, eigene macOS-Session) |
+
+Details, vollständige Logs und Diskriminator-Überlegungen: `docs/2026-07-11_report-linux.md`,
+`docs/2026-07-11-2_report-linux.md`.
