@@ -5,6 +5,25 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-12 (Windows) — Konsolidierung: Push-Check + DrRacket-Lücke (2026-07-11-2_prompt)
+
+**Kontext:** `docs/2026-07-11-2_prompt.md`. Voller Bericht: `docs/2026-07-11-2_report-win.md`.
+
+- **Phase 0 (Push-Check):** Beide macOS-Fixe (`acc73108` id-to-menu-item, `caef3e9c`
+  retained-callbacks) waren bereits auf `origin/qt-backend`, Umbrella-Zeiger (`759d025`)
+  bereits auf `origin/main` — kein Push nötig, entgegen der im Prompt offen gelassenen
+  Unsicherheit. Nur der lokale Windows-Submodul-Checkout war zurück (`19954ffd`).
+- **Phase 1 (Sync + DrRacket-Lücke):** Nach Nutzer-Bestätigung `git submodule update
+  --init` → lokal auf `caef3e9c`. Beide Fixe sind reiner Racket-Code (kein Shim-Rebuild
+  nötig). `raco make` + Re-Smoke 3/3 grün. **Nachgeholt:** echtes `PLT_QT=1` DrRacket
+  File → Open + Save As vom Nutzer bestätigt funktionsfähig, kein Crash. Windows
+  Qt-eigen×nativ-Matrix war bereits aus Vorsession komplett (7/7 nativ).
+- **Bewusst nicht getan:** Linux Crash-A/B-Rückprüfung (Kernstück des Blocks) und
+  Linux/macOS-Nativ-Matrix — beide für die jeweilige Maschinen-Session vorgesehen.
+  `docs/HACKING.md` §19 Crash-A/B-Status entsprechend unverändert gelassen.
+
+---
+
 ## Session 2026-07-12 (macOS) — `file-selector` Cross-Platform-Validierung + zwei Bugfixes (2026-07-11_prompt)
 
 **Kontext:** `docs/2026-07-11_prompt.md`. Voller Bericht: `docs/2026-07-11_report-macos.md`.
