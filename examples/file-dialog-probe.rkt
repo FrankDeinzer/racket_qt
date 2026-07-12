@@ -27,4 +27,25 @@
      [callback (lambda (b e)
                  (show-result 'put-file (put-file "Save a file" frame)))])
 
+; Discriminator (docs/2026-07-11_prompt.md follow-up): does a NATIVE MENU click
+; reach get-file the same way a button click does? Isolates menu-dispatch from
+; DrRacket's framework/recovery layer.
+(define mb (new menu-bar% [parent frame]))
+(define menu (new menu% [label "File"] [parent mb]))
+(new menu-item%
+     [label "Open via menu..."]
+     [parent menu]
+     [callback (lambda (i e)
+                 (show-result 'menu-get-file (get-file "Open a file" frame)))])
+(new menu-item%
+     [label "No-op (generic dispatch check)"]
+     [parent menu]
+     [callback (lambda (i e) (show-result 'menu-noop "clicked, no dialog"))])
+(new menu-item%
+     [label "Force GC (retention stress test)"]
+     [parent menu]
+     [callback (lambda (i e)
+                 (collect-garbage)
+                 (show-result 'force-gc "collect-garbage done"))])
+
 (send frame show #t)

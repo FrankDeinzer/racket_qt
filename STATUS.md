@@ -5,6 +5,49 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-12 (macOS) — `file-selector` Cross-Platform-Validierung + zwei Bugfixes (2026-07-11_prompt)
+
+**Kontext:** `docs/2026-07-11_prompt.md`. Voller Bericht: `docs/2026-07-11_report-macos.md`.
+
+- **Sync (nach Nutzer-Bestätigung):** gui-Submodul `qt-backend` ff-Pull `f92352e0` →
+  `19954ffd`. Umbrella `main` war bereits aktuell. Shim neu gebaut, Bytecode neu, Smoke
+  3/3 grün. Light Mode bestätigt.
+- **Button-Pfad sofort grün:** 7/7 `get-file`/`put-file`-Zyklen über den Probe-Treiber,
+  `cb`-Adresse über alle Aufrufe und den `get`→`put`-Wechsel identisch.
+- **Echtes DrRacket File → Open crashte zunächst reproduzierbar (2/2)** —
+  anders als Linux' n=1-Abstürze. Ein Discriminator-Test (`get-file` über einen
+  `menu-item%` statt einen Button) isolierte die Ursache auf den Menü-Klick-Dispatch,
+  nicht auf `file-selector` selbst.
+- **Zwei echte, unabhängige Bugs in `wx/qt/` gefunden + gefixt** (auf Nutzer-Zustimmung,
+  beide nur wx/qt/, kein Shared-Code-Verstoß):
+  1. `wx/qt/platform.rkt`s `id-to-menu-item` rief `get-mred` fälschlich selbst auf statt
+     (wie gtk/win32) die Auflösung dem generischen `wx->mred` zu überlassen. Commit
+     `acc73108`.
+  2. `wx/qt/menu.rkt`s `append` erzeugte pro Menüpunkt eine Callback-Closure, die nirgends
+     retained wurde — GC konnte sie einsammeln, während die native `QAction` einen jetzt
+     toten Funktionszeiger hielt (dieselbe Landmine wie `file-selector`s eigener
+     Trampolin-Fix, §19 Fund 2 — nur hier für jeden normalen Menüpunkt). Fix: neues
+     `retained-callbacks`-Hasheq. Commit `caef3e9c`. Verifiziert mit explizitem
+     `(collect-garbage)`-Stresstest im Probe-Skript.
+- **Nach beiden Fixes: echtes DrRacket File → Open + Save As + ein zweiter File → Open
+  bestätigt funktional** (Nutzer). `file-selector` auf macOS damit End-to-End
+  bestätigt.
+- **Dritter, unabhängiger Fund, NICHT gefixt** (außerhalb `gui-lib`, auf Nutzer-Wunsch
+  untersucht): `htdp-lib`s `test-engine/test-tool.rkt` verletzt beim Öffnen eines
+  zweiten Tabs eine eigene Preference-Contract (`test-engine:test-dock-size`), DrRacket
+  zeigt daraufhin ein „Internal Error"-Fenster, danach folgt ein harter nativer Absturz.
+  Ein isolierter Qt-only-Repro (`examples/tab-close-crash-probe.rkt`, neu) reproduziert
+  den harten Absturz NICHT — braucht den vollen DrRacket-Stack, nicht root-caused.
+  Vermutlich derselbe Mechanismus wie Linux' bereits dokumentiertes Crash A (§19).
+- **Commits (gui-Submodul, noch NICHT gepusht — offene Entscheidung mit dem Nutzer):**
+  `acc73108`, `caef3e9c`.
+- **Nächster Schritt:** Push + Drei-Maschinen-Sync der beiden Fixes abstimmen; Windows/
+  Linux sollten danach ihre dokumentierten Abstürze (Linux Crash A/B) erneut versuchen.
+  Dritter Fund (htdp-lib) für eigene Session. Danach Cross-Platform-Matrix (Qt-eigen/
+  nativ), Rest von Checkpoint E, Preferences.
+
+---
+
 ## Session 2026-07-11 (Linux) — `file-selector` Cross-Platform-Validierung (2026-07-11_prompt)
 
 **Kontext:** `docs/2026-07-11_prompt.md`. Voller Bericht: `docs/2026-07-11_report-linux.md`.

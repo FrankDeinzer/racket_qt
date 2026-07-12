@@ -1018,4 +1018,80 @@ beim Nutzer):
   selbst. In der Probe und in echtem DrRacket (beide halten ein `frame%` offen) nicht
   reproduziert.
 
+**macOS-Validierung + zwei echte Bugfixes (2026-07-12, `docs/2026-07-11_report-macos.md`):**
+Sync (`qt-backend` `f92352e0`→`19954ffd`, nach Nutzer-Bestätigung), Shim neu gebaut, Smoke
+3/3. `get-file`/`put-file` per Button (7/7 Zyklen, Öffnen/Speichern/Abbrechen gemischt)
+sofort grün — der Kern-Wertpfad ist plattformunabhängig unverändert korrekt.
+
+Der Abschluss-Beweis (echtes DrRacket File → Open/Save) crashte auf dieser Maschine
+zunächst **reproduzierbar (2/2)** beim allerersten `File → Open`-Klick, mit `invalid
+memory reference … terminated in atomic mode!`, **kein** `[qt-filedialog]`-Log davor —
+der Fehler lag vor `get-file` selbst, im Menü-Klick-Dispatch. Ein Discriminator-Test
+(`get-file` über einen eigenen `menu-item%` im Probe-Skript statt über einen Button)
+isolierte das sauber: der Dateidialog öffnete sich gar nicht erst; stattdessen ein
+abgefangener, aber prozess-tötender Fehler. Zwei echte, unabhängige Bugs in `wx/qt/`
+gefunden und gefixt (beide potentiell auch Ursache von Linux' Crash A/B oben — gleiches
+Fehlerbild, nur dort seltener/GC-timing-abhängig statt reproduzierbar):
+
+1. **`id-to-menu-item` rief `get-mred` doppelt/verfrüht auf** (`wx/qt/platform.rkt`):
+   ```racket
+   (define (id-to-menu-item id)
+     (and (object? id) (is-a? id menu-item%)
+          (send id get-mred)))
+   ```
+   gtk (`wx/gtk/procs.rkt`) und win32 (`wx/win32/menu-item.rkt`) überlassen die
+   wx→mred-Auflösung vollständig dem generischen `wx->mred` in `wxtop.rkt`s
+   `on-menu-command` (gtk: reine Identität; win32: Hash-Tabellen-Lookup). Qt versuchte,
+   `get-mred` selbst vorwegzunehmen — das crashte beim ersten echten Menü-Dispatch
+   (`generic:get-mred: target is not an instance of the generic's interface`). **Fix:**
+   `(define (id-to-menu-item id) id)`, identisch zu gtks Muster. Commit `acc73108`.
+2. **Menü-Item-Callbacks in `wx/qt/menu.rkt`s `append` waren nie retained** — `cb` war
+   eine rein lokale `let`-Bindung, nur `action` (die `QAction*`) landete in
+   `item-table`. Nichts auf Racket-Seite hielt die Closure am Leben, sobald `append`
+   zurückkehrte — exakt dieselbe Landmine, die `filedialog.rkt`s eigener Kommentar
+   dokumentiert (Fund 2 oben), nur hier nicht für `file-selector`s eigenen Trampolin,
+   sondern für jeden normalen Menüpunkt. Symptom passte exakt: ein frisch geklickter
+   Menüpunkt funktionierte, ein **zweiter** Klick auf denselben oder einen anderen
+   Menüpunkt konnte crashen — verschärft direkt nach GC-Druck (z. B. nach einem
+   Dateidialog-Zyklus). Zwei Fehlerbilder je nachdem, wie viel der Closure bereits
+   eingesammelt war: ein abgefangener `contract violation … target: (object:menu-item%
+   ...) … interface name: wx<%>` (Closure-Environment bereits Garbage) oder ein harter
+   nativer `invalid memory reference` (toter Funktionszeiger direkt aufgerufen). **Fix:**
+   neues `retained-callbacks`-Hasheq in `menu%`, `id → cb`, befüllt in `append`,
+   aufgeräumt in `delete`/`delete-by-position`. Commit `caef3e9c`.
+   - **Verifiziert (härter als der ursprüngliche Bug-Fund):** `examples/file-dialog-
+     probe.rkt` um `menu-item%`-Einträge erweitert (`Open via menu…`, `No-op`, `Force GC`
+     — expliziter `(collect-garbage)`-Stresstest). Vor dem Fix: No-op crashte
+     reproduzierbar nach vorherigem Dialog-Zyklus bzw. nach explizitem `collect-garbage`.
+     Nach dem Fix: `Force GC` → mehrfach `No-op` → `Open via menu…` läuft durch, kein
+     Crash, 4 weitere `get-file`-Zyklen sauber.
+   - Beide Fixe berühren ausschließlich `wx/qt/` (kein Shared-Code-Verstoß gegen die
+     Guardrails dieser Session).
+
+Nach beiden Fixes: **echtes DrRacket File → Open + File → Save As bestätigt funktional**
+(Nutzer) — Datei erscheint im Editor, Speichern landet korrekt auf Platte — **und ein
+zweiter `File → Open` (neue Registerkarte) läuft ebenfalls sauber**, bevor ein dritter,
+unabhängiger Fund auftrat (siehe unten). `file-selector` auf macOS damit End-to-End
+bestätigt, mit zwei echten Bonus-Fixes für latente, plattformübergreifende
+Menü-Dispatch-Speicherfehler.
+
+**Dritter, unabhängiger Fund — NICHT gefixt, außerhalb des `file-selector`-Scopes:**
+ein zweiter `File → Open` öffnete eine neue Registerkarte; das triggerte einen
+vorbestehenden Contract-Verstoß in `htdp-lib`s `test-engine/test-tool.rkt` (`test-panel%`s
+`remove`-Methode speichert unbedingt `(send parent get-percentages)` in die Preference
+`test-engine:test-dock-size`, deren Default-Prädikat exakt 2 Elemente verlangt — bei nur
+einem sichtbaren Panel-Kind liefert `get-percentages` aber `'(1)`). DrRackets eigener
+Fehler-Handler öffnete daraufhin ein „DrRacket Internal Error"-Dialogfenster (in unserem
+Log sauber als `QMainWindow` erschienen) — **danach** folgte ein harter nativer
+`invalid memory reference`-Absturz. Ein isolierter Qt-only-Repro (`examples/tab-close-
+crash-probe.rkt`: `get-percentages` + `delete-child` auf ein Panel mit nur noch einem
+Kind + `collect-garbage` + neues Top-Level-`frame%` erzeugen+zeigen, mimikt die
+Internal-Error-Dialog-Erzeugung) reproduziert den harten Crash **nicht** — der Fehler
+braucht offenbar mehr vom echten DrRacket-Stack (vermutlich die konkrete Widget-Struktur
+des echten Test-Panels mit eingebettetem Editor, oder den Aufruf-Kontext innerhalb der
+Exception-Behandlung selbst). Nicht root-caused: der Contract-Verstoß selbst liegt in
+`htdp-lib` (nicht `wx/qt/`, nicht einmal `gui-lib`) und ist plattformunabhängig — nicht
+Teil dieser Session, keine Fix-Commits dafür. Eigene, dedizierte Session nötig (mit
+gezielter Instrumentierung, nicht mit weiterem Lesen von Shared-Code).
+
 Details, vollständige Logs und Diskriminator-Überlegungen: `docs/2026-07-11_report-linux.md`.
