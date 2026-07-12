@@ -5,6 +5,35 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-11 (Linux) — `file-selector` Cross-Platform-Validierung (2026-07-11_prompt)
+
+**Kontext:** `docs/2026-07-11_prompt.md`. Voller Bericht: `docs/2026-07-11_report-linux.md`.
+
+- **Sync (nach Nutzer-Bestätigung):** gui-Submodul `qt-backend` ff-Pull `f92352e0` →
+  `19954ffd`. Umbrella `main` war bereits aktuell (Zeiger `19954ffd`), kein Pull nötig.
+  Shim neu gebaut, Bytecode neu, Smoke 3/3 grün. Light Mode bestätigt.
+- **Probe-Treiber validiert:** 9/9 Dialog-Zyklen (5× `get-file`, 4× `put-file`, gemischt
+  Accept/Cancel/Overwrite-Warnung), `cb`-Adresse über alle 9 Aufrufe **und über den
+  `get`→`put`-Moduswechsel hinweg** identisch — Einmal-Trampolin-Fix bestätigt.
+- **Echtes DrRacket:** File → Open und File → Save bestätigt funktional (Nutzer,
+  Datei lädt/speichert korrekt). Isolierter Test bestätigt `setDefaultSuffix`
+  (Extension-Anhängen) arbeitet korrekt (`myfile` → `myfile.rkt`).
+- **Zwei unabhängige, seltene Abstürze beobachtet, außerhalb des `get-file`/`put-file`-
+  Wertpfads, nicht root-caused/gefixt** (Guardrail: mutmaßlich gemeinsamer Code,
+  Entscheidung über Verfolgung liegt beim Nutzer): (A) `pre: arity mismatch …
+  terminated in atomic mode!` bei einem sehr frühen Interaktionsversuch mit einer noch
+  nicht vollständig gestarteten DrRacket-Instanz (n=1, nicht reproduziert bei
+  geduldigerem zweiten Versuch); (B) `invalid memory reference` nach bereits korrekt
+  gedrucktem `put-file`-Rückgabewert in einem Skript ohne sichtbares `frame%`
+  (Teardown-Reihenfolge-Verdacht). Details `docs/HACKING.md` §19,
+  `docs/2026-07-11_report-linux.md`.
+- Keine Fix-Commits diese Session — reine Validierung + Befund.
+- **Nächster Schritt:** macOS-Validierung dieses Prompts steht noch aus. Danach
+  Cross-Platform-Matrix (Qt-eigen/nativ), Rest von Checkpoint E, Preferences. Crash A/B
+  zur Entscheidung: gezielt verfolgen oder eigener Session überlassen.
+
+---
+
 ## Session 2026-07-11 (Windows) — `file-selector` echt: `get-file`/`put-file` via non-modaler `QFileDialog` (2026-07-11_prompt)
 
 **Kontext:** `docs/2026-07-11_prompt.md`.

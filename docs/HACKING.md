@@ -988,3 +988,34 @@ geschachtelte Schleife unter diesem Pump-Modell — als Stil-Option für später
 aber der Qt-eigene Dialog (`DontUseNativeDialog=true`) bleibt der Standard-Pfad dieses
 Backends (kein neuer Parameter im `get-file`/`put-file`-Kontrakt, keine Plattform-
 Fallunterscheidung nötig).
+
+**Linux-Validierung (2026-07-11, `docs/2026-07-11_report-linux.md`):** ff-Pull
+`qt-backend` `f92352e0`→`19954ffd`, Shim neu gebaut (`shim_file_dialog_create` kam schon
+über den Umbrella-Pull), Re-Smoke 3/3 grün. Probe-Treiber: 9/9 Dialog-Zyklen (5×
+`get-file`, 4× `put-file`, gemischt Accept/Cancel/Overwrite-Warnung) grün, `cb`-Adresse
+über alle 9 Aufrufe **und über den `get`→`put`-Moduswechsel hinweg** identisch — bestätigt
+das Einmal-Trampolin-Fix (Fund 2 oben) auch hier. Echtes DrRacket: File → Open und File →
+Save bestätigt funktional (Nutzer). Isolierter Test bestätigt `setDefaultSuffix`
+funktioniert korrekt (`myfile` → `myfile.rkt`).
+
+Dabei zwei unabhängige, seltene Abstürze beobachtet, **außerhalb des
+`get-file`/`put-file`-Wertpfads** (in beiden Fällen lief der Dialog-Code entweder nie an
+oder hatte bereits korrekt zurückgegeben, bevor der Absturz folgte) — nicht root-caused,
+nicht gefixt (Guardrail: mutmaßlich gemeinsamer Code, Entscheidung über Verfolgung liegt
+beim Nutzer):
+- **Crash A** (n=1, nicht reproduziert): `pre: arity mismatch … expected: 0, given: 1`,
+  `internal-error: terminated in atomic mode!`, Kontext `wx/qt/queue.rkt:27:5` (Event-Pump-
+  Thread). Trat beim allerersten Interaktionsversuch (File → Open) mit einer noch nicht
+  vollständig gestarteten DrRacket-Instanz auf; ein geduldigerer zweiter Versuch lief
+  sauber durch. Kein `[qt-filedialog]`-Log vor dem Absturz — der Fehler liegt vor dem
+  eigentlichen `get-file`-Aufruf, mutmaßlich in `wx/common/queue.rkt`s
+  `pre-event-sync`-Boundary-Callback-Dispatch (Arity-Signatur passt zu dessen `(p v)`-
+  Aufrufmuster), konkrete Fundstelle nicht identifiziert.
+- **Crash B**: `invalid memory reference` nach bereits gedrucktem, korrektem
+  `put-file`-Rückgabewert, in einem Skript ohne sichtbares `frame%` (Racket-Laufzeit
+  beendet sich nach Modul-Auswertung). Korreliert mit Prozess-Exit/Teardown-Reihenfolge
+  nach einem noch `deleteLater()`-anstehenden `QFileDialog`, nicht mit dem Dialogergebnis
+  selbst. In der Probe und in echtem DrRacket (beide halten ein `frame%` offen) nicht
+  reproduziert.
+
+Details, vollständige Logs und Diskriminator-Überlegungen: `docs/2026-07-11_report-linux.md`.
