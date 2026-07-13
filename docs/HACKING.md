@@ -1297,3 +1297,23 @@ nicht, das Log zeigt explizit: Callback feuert nur bei echten Nutzer-Interaktion
 nie bei einem `set-*`-Aufruf via Code, auch nicht beim härtesten Fall
 (`radio-box%` `set-selection #f` in der 1-Button-Gruppe). macOS-Validierung weiterhin
 offen.
+
+**macOS-Validierung (2026-07-13-2_report-macos, nach Push):** kein neuer Code — reiner
+Sync (lokaler gui-Submodul-Checkout war stale auf `caef3e9c`, 3 Commits zurück; Umbrella
+`main` zeigte bereits korrekt auf `3ba8fa75`; nach Nutzer-Bestätigung, Regel 7,
+Fast-Forward auf `3ba8fa75`, bereits `origin/qt-backend`, kein Netzwerk-Push nötig) +
+Shim-Rebuild (stale-Shim-Falle, `shim.cpp` neuer als `libracketqtshim.dylib`) + Probe.
+`examples/value-widgets-probe.rkt` Nutzer-bestätigt („fertig. alles ok") und per
+Screenshot bestätigt (Choice: Gamma, Radio-box: Three, Single-Radio-Box korrekt
+ungecheckt, Slider nahe Maximum). Konsolen-Log dieses Mal ebenfalls vollständig
+eingefangen (per `kill -TERM` statt Fenster-Schließen-Knopf beendet, um Crash B/Teardown
+nicht zu berühren): die Log-Datei blieb bei laufendem Hintergrundprozess trotz
+gesetztem `'line`-Puffermodus wiederholt bei 0 Byte — in dieser Hintergrund-Redirect-
+Konfiguration also effektiv block-gebuffert, Mechanismus nicht isoliert (kein
+Neu-Raten); erst der Flush im `user break`-Handler beim `kill -TERM` machte das
+vollständige Log lesbar. Dasselbe Symptom wie unter Windows/PowerShell, hier über
+`kill` statt eines Tooling-Workarounds aufgelöst. Bestätigt exakt dasselbe Verhalten
+wie Windows/Linux — Callback feuert nur bei echten Nutzer-Interaktionen, nie bei einem
+`set-*`-Aufruf via Code, auch nicht beim härtesten Fall (`radio-box%` `set-selection #f`
+in der 1-Button-Gruppe). Damit `choice%`/`radio-box%`/`slider%` auf allen drei
+Plattformen validiert.

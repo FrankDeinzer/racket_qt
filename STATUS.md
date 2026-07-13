@@ -5,6 +5,34 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-13 (2, macOS) — `choice%`/`radio-box%`/`slider%`: macOS-Validierung (2026-07-13-2_prompt)
+
+**Kontext:** `docs/2026-07-13-2_prompt.md`. Voller Bericht:
+`docs/2026-07-13-2_report-macos.md`. Fortsetzung der Windows/Linux-Reports — kein neuer
+Widget-Code, reine Cross-Platform-Validierung nach Push. Damit alle drei Plattformen
+abgedeckt.
+
+- **Sync:** Umbrella-`main` zeigte schon korrekt auf gui @ `3ba8fa75` (bereits vor
+  Sitzungsbeginn gepusht/committed). Lokaler macOS-Submodul-Checkout war stale
+  (`caef3e9c`, 3 Commits zurück) — nach Nutzer-Bestätigung (Regel 7) per Fast-Forward
+  auf `3ba8fa75` synchronisiert (bereits auf `origin/qt-backend`, kein Netzwerk-Push
+  nötig).
+- **Shim neu gebaut** (stale-Shim-Falle: `shim.cpp` neuer als
+  `libracketqtshim.dylib`), Light Mode bestätigt (`org.racket-lang.prefs.rktd`), Smoke
+  3/3 vor der Probe.
+- **`examples/value-widgets-probe.rkt`** Nutzer-bestätigt („fertig. alles ok") + per
+  Screenshot verifiziert: Rendering, Interaktion, `set-*`-Non-Retrigger für alle drei
+  Widgets inkl. härtestem Fall (`radio-box%` `[selection #f]`, 1-Button-Gruppe).
+  Konsolen-Log per `kill -TERM` (statt Fenster-Schließen, um Crash B/Teardown nicht zu
+  berühren) vollständig eingefangen — bestätigt exakt dasselbe Verhalten wie
+  Windows/Linux.
+- Keine neuen Commits (reine Validierung). Doku-Updates: `docs/HACKING.md` §20-Addendum,
+  `CLAUDE.md`-Checkpoint-Tabelle (alle 3 Plattformen ✅).
+- **Nächster Schritt:** `tab-panel%` (Block B) bleibt Blocker für die volle
+  Preferences-Ende-zu-Ende-Probe auf allen drei Plattformen.
+
+---
+
 ## Session 2026-07-13 (2, Linux) — `choice%`/`radio-box%`/`slider%`: Linux-Validierung (2026-07-13-2_prompt)
 
 **Kontext:** `docs/2026-07-13-2_prompt.md`. Voller Bericht:
