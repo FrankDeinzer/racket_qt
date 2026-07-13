@@ -4,6 +4,12 @@
 #include <QPushButton>
 #include <QCheckBox>
 #include <QListWidget>
+#include <QComboBox>
+#include <QRadioButton>
+#include <QButtonGroup>
+#include <QBoxLayout>
+#include <QVariant>
+#include <QSlider>
 #include <QSignalBlocker>
 #include <QMenuBar>
 #include <QMenu>
@@ -875,6 +881,203 @@ int shim_list_box_visible_count(void* lb_ptr)
     if (rowH <= 0) return lb->count();
     int h = lb->viewport()->height();
     return (std::max)(1, h / rowH);
+}
+
+// ---- slider (slider%) -----------------------------------------------------
+
+void* shim_slider_create(void*           parent_widget,
+                         int             vertical, // 0=horizontal 1=vertical
+                         int             lo,
+                         int             hi,
+                         int             init_value,
+                         shim_callback_t changed_cb,
+                         void*           ud)
+{
+    auto* parent = static_cast<QWidget*>(parent_widget);
+    auto* sl = new QSlider(vertical ? Qt::Vertical : Qt::Horizontal, parent);
+    sl->setRange(lo, hi);
+    sl->setValue(init_value);
+    if (changed_cb) {
+        QObject::connect(sl, &QSlider::valueChanged,
+                         [changed_cb, ud](int) { changed_cb(ud); });
+    }
+    return sl;
+}
+
+// Blocks valueChanged for programmatic set-value (same rationale as
+// shim_check_box_set_checked above).
+void shim_slider_set_value(void* sl_ptr, int v)
+{
+    auto* sl = static_cast<QSlider*>(sl_ptr);
+    QSignalBlocker blocker(sl);
+    sl->setValue(v);
+}
+
+int shim_slider_get_value(void* sl_ptr)
+{
+    return static_cast<QSlider*>(sl_ptr)->value();
+}
+
+// ---- choice (choice%) ------------------------------------------------------
+
+void* shim_choice_create(void* parent_widget, shim_callback_t changed_cb, void* ud)
+{
+    auto* parent = static_cast<QWidget*>(parent_widget);
+    auto* cb = new QComboBox(parent);
+    if (changed_cb) {
+        QObject::connect(cb, &QComboBox::currentIndexChanged,
+                         [changed_cb, ud](int) { changed_cb(ud); });
+    }
+    return cb;
+}
+
+// QComboBox emits currentIndexChanged when the first item is added
+// (index -1 -> 0) and whenever clear()/removeItem() shifts the current
+// index -- block for every programmatic mutation, not just set-selection.
+void shim_choice_append(void* cb_ptr, const char* s)
+{
+    auto* cb = static_cast<QComboBox*>(cb_ptr);
+    QSignalBlocker blocker(cb);
+    cb->addItem(QString::fromUtf8(s));
+}
+
+void shim_choice_clear(void* cb_ptr)
+{
+    auto* cb = static_cast<QComboBox*>(cb_ptr);
+    QSignalBlocker blocker(cb);
+    cb->clear();
+}
+
+void shim_choice_delete(void* cb_ptr, int i)
+{
+    auto* cb = static_cast<QComboBox*>(cb_ptr);
+    QSignalBlocker blocker(cb);
+    cb->removeItem(i);
+}
+
+int shim_choice_count(void* cb_ptr)
+{
+    return static_cast<QComboBox*>(cb_ptr)->count();
+}
+
+void shim_choice_set_selection(void* cb_ptr, int i)
+{
+    auto* cb = static_cast<QComboBox*>(cb_ptr);
+    QSignalBlocker blocker(cb);
+    cb->setCurrentIndex(i);
+}
+
+int shim_choice_get_selection(void* cb_ptr)
+{
+    return static_cast<QComboBox*>(cb_ptr)->currentIndex();
+}
+
+// ---- radio-box (radio-box%) -------------------------------------------------
+// QButtonGroup + QRadioButtons in a plain QWidget container with a vertical
+// or horizontal QBoxLayout (mirrors gtk's gtk_vbox_new/gtk_hbox_new choice).
+// A hidden, unaddressable "dummy" button shares the same exclusive
+// QButtonGroup so set-selection(-1) can force every real button unchecked:
+// QButtonGroup forbids unchecking the sole checked button by direct click,
+// but checking a different (here invisible) member of the same group is
+// allowed and reaches the same "none selected" state. Mirrors wx/gtk's
+// radio-box.rkt dummy-button trick (gtk_radio_button_new sharing the group).
+//
+// The container QWidget* is the handle returned to Racket -- generic
+// window% geometry code (shim_widget_set_geometry/get_size_hint) operates
+// on it directly like any other widget. Per-instance state (button group,
+// dummy, next id to assign) rides along as a QVariant<void*> property
+// rather than a second handle, since window%'s `handle` field is shared,
+// single-purpose plumbing.
+
+static const int PLT_RADIO_DUMMY_ID = -1000;
+
+struct PltRadioBox {
+    QButtonGroup* group;
+    QRadioButton* dummy;
+    int           next_id;
+};
+
+static PltRadioBox* plt_radio_box_state(void* handle)
+{
+    auto* container = static_cast<QWidget*>(handle);
+    return static_cast<PltRadioBox*>(container->property("plt_radio_box").value<void*>());
+}
+
+void* shim_radio_box_create(void* parent_widget, int horizontal,
+                            shim_callback_t clicked_cb, void* ud)
+{
+    auto* parent = static_cast<QWidget*>(parent_widget);
+    auto* container = new QWidget(parent);
+    QBoxLayout* layout = horizontal
+        ? static_cast<QBoxLayout*>(new QHBoxLayout(container))
+        : static_cast<QBoxLayout*>(new QVBoxLayout(container));
+    (void)layout;
+
+    auto* group = new QButtonGroup(container);
+    auto* dummy = new QRadioButton(container);
+    dummy->setVisible(false);
+    group->addButton(dummy, PLT_RADIO_DUMMY_ID);
+
+    if (clicked_cb) {
+        QObject::connect(group, &QButtonGroup::idClicked,
+                         [clicked_cb, ud](int) { clicked_cb(ud); });
+    }
+
+    auto* state = new PltRadioBox{group, dummy, 0};
+    container->setProperty("plt_radio_box", QVariant::fromValue<void*>(state));
+    return container;
+}
+
+void shim_radio_box_append_button(void* handle, const char* label)
+{
+    auto* container = static_cast<QWidget*>(handle);
+    auto* state = plt_radio_box_state(handle);
+    auto* btn = new QRadioButton(QString::fromUtf8(label), container);
+    container->layout()->addWidget(btn);
+    state->group->addButton(btn, state->next_id++);
+}
+
+// Blocks idClicked for programmatic selection changes (same rationale as
+// shim_check_box_set_checked above) -- targets the group, since that's what
+// the Racket-side callback is connected to, not the individual buttons.
+void shim_radio_box_set_selection(void* handle, int i)
+{
+    auto* state = plt_radio_box_state(handle);
+    QSignalBlocker blocker(state->group);
+    if (i < 0) {
+        state->dummy->setChecked(true);
+    } else if (auto* btn = state->group->button(i)) {
+        btn->setChecked(true);
+    }
+}
+
+int shim_radio_box_get_selection(void* handle)
+{
+    auto* state = plt_radio_box_state(handle);
+    int id = state->group->checkedId();
+    return (id == PLT_RADIO_DUMMY_ID) ? -1 : id;
+}
+
+void shim_radio_box_enable_button(void* handle, int i, int on)
+{
+    auto* state = plt_radio_box_state(handle);
+    if (auto* btn = state->group->button(i))
+        btn->setEnabled(on != 0);
+}
+
+int shim_radio_box_button_focus(void* handle, int i)
+{
+    auto* state = plt_radio_box_state(handle);
+    if (i == -1) {
+        for (auto* btn : state->group->buttons()) {
+            if (btn != state->dummy && btn->hasFocus())
+                return state->group->id(btn);
+        }
+        return 0;
+    }
+    if (auto* btn = state->group->button(i))
+        btn->setFocus();
+    return i;
 }
 
 // ---- file dialog (get-file / put-file) -----------------------------------

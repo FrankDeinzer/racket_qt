@@ -1176,3 +1176,113 @@ rechtfertigt keinen Shared-Code-Fix in dieser Sitzung.
 
 Details, vollständige Logs und Diskriminator-Überlegungen: `docs/2026-07-11_report-linux.md`,
 `docs/2026-07-11-2_report-linux.md`, `docs/2026-07-13_report-macos.md`.
+
+## 20. `choice%`/`radio-box%`/`slider%` echt gemacht — Windows (2026-07-13-2_prompt)
+
+**Orakel-Befund zuerst:** der reale Treiber ist NICHT der volle Preferences-Dialog —
+`framework/private/preferences.rkt`s eigene Navigation (`make-tab/single-panel`,
+Zeile ~321) instanziiert **unconditional** ein `tab-panel%`, auch für die oberste
+Kategorie-Ebene, nicht nur für verschachtelte Unterkategorien. Da `tab-panel%` weiterhin
+Stub ist (Block B, eigener Prompt), ist eine Ende-zu-Ende-Validierung über den echten
+Dialog **strukturell blockiert** — genau der in Phase 1 antizipierte Fall, kein
+Scope-Bruch. Beweis läuft stattdessen über einen neuen isolierten Probe
+(`examples/value-widgets-probe.rkt`, analog `dialog-widgets-probe.rkt`), Nutzer-bestätigt
+(Rendering, Interaktion, `set-*` löst den eigenen Callback nicht erneut aus).
+
+Widget-Inventar (`framework/private/preferences.rkt` + `color-prefs.rkt`, alle real
+DrRacket-Preferences-Nutzung): `slider%` — Anzahl zuletzt geöffneter Dateien (1–100),
+Editor-Schriftgröße (1–127); `radio-box%` — Boolean-„ask me"-Optionen, Druckmodus,
+Farbschema-Auswahl (`mk-color-scheme-radio-buttons`, **1-Button-Gruppen mit
+`[selection #f]`** — der harte Fall für „keiner ausgewählt"); `choice%` — Schriftglättung,
+Klammer-Farbschema, Farbmodus (Windows: Light/Dark; sonst: OS/Light/Dark).
+
+**Kontrakt gegen gtk UND win32 verifiziert (§5/§18.4-Muster), nicht geraten:**
+- `choice%`: init `parent cb label x y w h choices style font`. Methoden
+  `set-selection`/`get-selection`/`number`/`clear`/`append`(einzelnes String-Arg,
+  `(public [append* append])`-Rename-Trick wie bei `list-box%`)/`delete`. Callback
+  Event-Typ `'choice`. `get-string-selection`/`set-string-selection` sind **generisch**
+  auf mred-Ebene (`mritem.rkt`s `basic-list-control%`, gebaut aus `number`/
+  `get-selection`/einer Racket-seitigen Content-Liste) — KEINE eigene Shim-Funktion nötig.
+- `radio-box%`: init `parent cb label x y w h labels val style font`. Methoden
+  `set-selection`/`get-selection`/`number`/`enable-button i on?`/`button-focus i`.
+  Callback Event-Typ `'radio-box`. `style` steuert Layout (`'horizontal` im Style ⇒
+  horizontal, sonst vertikal, mirrored gtks `gtk_hbox_new`/`gtk_vbox_new`-Wahl).
+  `mritem.rkt`s mred-Ebene konstruiert IMMER mit `val=0` (ein Button muss in einer
+  exklusiven Gruppe initial gecheckt sein) und ruft danach ggf. sofort `set-selection`
+  erneut mit dem echten Wert (`#f`/positiv) — d. h. `val=-1` an der Platform-Klasse tritt
+  in der Praxis nie bei Konstruktion auf, wird aber wie gtk/win32 defensiv behandelt.
+- `slider%`: init `parent cb label val lo hi x y w style font`. Nur `set-value`/
+  `get-value` — `min-value`/`max-value` werden mred-seitig als reine Racket-Werte
+  gehalten (`mritem.rkt`s `slider%`), keine `get-range`/`set-range`-Shim-Funktion nötig
+  (anders als `gauge%`, das `get-range`/`set-range` echt braucht).
+- Kontrollprobe für „öffentliche Methode vs. generische Glue-Schicht": `choice%`s
+  `handles-key-code` wird von `wxlitem.rkt`s `wx-internal-choice%` per `override*`
+  spezialisiert (Pfeiltasten/Buchstaben ans Dropdown statt an Navigation) — der
+  Default (immer `#f`) sitzt bereits generisch in `wxwindow.rkt` (`public*`), NICHT in
+  gtk/win32s Platform-Klasse. Unsere `choice.rkt` definiert `handles-key-code`
+  **bewusst nicht** — hätte sonst gegen die `public*`/`override*`-Invariante verstoßen
+  (Regel 3, CLAUDE.md).
+
+**Signal→Callback (mirrored `button%`/`check-box%`/`list-box%`):** `QObject::connect`
+mit einer C++-Lambda, die nur `cb(ud)` ruft; Racket liest den Zustand danach separat ab.
+`QComboBox::currentIndexChanged` statt `activated`, `QButtonGroup::idClicked` statt
+`buttonToggled` (Letzteres feuert zweimal pro Klick — für den alt- UND den
+neu-gecheckten Button; `idClicked` genau einmal, analog gtks `clicked`-Signal statt
+`toggled`).
+
+**Programmatische Zustandsänderungen per `QSignalBlocker` im Shim** (nicht nur
+`set-selection`/`set-value`, sondern JEDE Mutation): `QComboBox::addItem`/`clear`/
+`removeItem`/`setCurrentIndex` lösen alle `currentIndexChanged` aus (insbesondere der
+Sprung von Index -1 auf 0 beim allerersten `addItem` — anders als gtk/win32, wo das
+erste Element KEIN automatisches Select auslöst und die Platform-Klasse es explizit
+nachholen muss; bei `QComboBox` passiert das automatisch, daher entfällt der
+`(when (= count 1) (set-selection 0))`-Schritt aus gtk/win32 komplett). `QSlider::
+setValue`/`QButtonGroup`-Mitglieder-`setChecked` ebenso geblockt; beim `radio-box%`
+gezielt auf der **Gruppe**, nicht auf dem einzelnen Button, da die Racket-Callback-
+Verbindung an `QButtonGroup::idClicked` hängt.
+
+**Härtester Fall: `radio-box% set-selection #f` (kein Button gecheckt) in einer
+exklusiven `QButtonGroup`.** Laut Qt-Doku (`qbuttongroup.html`, MCP-Docs-Tool verifiziert
+statt angenommen) kann der Nutzer den einzig gecheckten Button einer exklusiven Gruppe
+NICHT durch erneuten Klick abwählen — ein anderer Button der Gruppe muss geklickt
+werden. Programmatisches `setChecked(false)` direkt auf den Button ist dafür nicht der
+dokumentierte Pfad. Fix identisch zu `wx/gtk/radio-box.rkt`s Dummy-Button-Trick: ein
+verstecktes, für Racket unadressierbares `QRadioButton` teilt sich dieselbe
+`QButtonGroup` (reservierte ID `PLT_RADIO_DUMMY_ID = -1000`); `set-selection -1` checkt
+den Dummy, `get-selection` mapped dessen ID zurück auf `-1`. Verifiziert über den Probe
+(1-Button-Radio-Box mit `[selection #f]`, Nutzer-bestätigt: startet ungecheckt, „set via
+code" mit `#f` bleibt/wird ungecheckt).
+
+**`radio-box%`-Handle bleibt ein echtes `QWidget*`** (der Container mit
+`QVBoxLayout`/`QHBoxLayout`), damit die generischen `window%`-Methoden
+(`shim_widget_set_geometry`/`shim_widget_get_size_hint` für `seed-size-from-native-hint`)
+unverändert funktionieren. Composite-Zustand (Button-Gruppe, Dummy, nächste ID) hängt
+als `QVariant<void*>`-Property am Container, nicht als zweites Handle — `window%`s
+`handle`-Feld ist single-purpose, gemeinsam genutzte Verdrahtung.
+
+**`seed-size-from-native-hint` nach Befüllung, nicht davor** (§18.2-Muster): `choice%`
+nach der `append`-Schleife, `radio-box%` nach dem Button-Aufbau — `sizeHint()` soll den
+tatsächlichen Inhalt widerspiegeln, nicht die leere Ausgangsgröße.
+
+**Verifikation:** Klassen-Komposition lädt fehlerfrei (kein `public*`/`override*`-
+Konflikt), Smoke 3/3 vor und nach den drei Commits grün, `examples/
+value-widgets-probe.rkt` (alle drei Widgets + „set via code"-Buttons pro Widget)
+Nutzer-bestätigt: Rendering, Interaktion (Dropdown/Radio-Klick/Slider-Drag), `set-*`
+ändert den Wert sichtbar ohne den eigenen Callback erneut auszulösen. Konsolen-Log der
+Probe-Prints selbst nicht eingefangen (PowerShell-`Out-String` puffert die komplette
+Pipe eines noch laufenden Hintergrundprozesses, unabhängig von Racket-seitigem
+`file-stream-buffer-mode` — reine Tooling-Einschränkung dieser Sitzung, kein Befund im
+Produkt); die visuelle/interaktive Nutzer-Bestätigung deckt exakt dieselben Kriterien ab
+und ist der in diesem Projekt etablierte Verifikationsstandard (§18.3 u. a.).
+
+**Nicht Teil dieser Sitzung:** `tab-panel%` (Block B, eigener Prompt — Stub bleibt
+stehen), macOS/Linux-Validierung (separater Prompt nach Push), Preferences-Dialog
+Ende-zu-Ende (blockiert durch `tab-panel%`, s. o.), Bitmap-Labels für `radio-box%`
+(kein Treiber braucht sie — nur `color-prefs.rkt`/`preferences.rkt`s String-Labels sind
+im Scope, analog `list-box%`s Single-Column-Scope-Entscheidung in §18.4).
+
+**Commits (gui-Submodul, `qt-backend`, noch nicht gepusht):** `dc5cef02` (`slider%`),
+`3a2b2d8e` (`choice%`), `3ba8fa75` (`radio-box%`) — getrennt pro Widget
+(Rollback-Punkte, Nutzer-Präferenz). Shim-Additions (`qt-shim/src/shim.cpp`:
+`shim_slider_*`, `shim_choice_*`, `shim_radio_box_*`) sind Umbrella-seitig, noch nicht
+committed zum Zeitpunkt dieses Abschnitts.

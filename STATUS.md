@@ -5,6 +5,44 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-13 (2, Windows) — `choice%`/`radio-box%`/`slider%` echt (2026-07-13-2_prompt)
+
+**Kontext:** `docs/2026-07-13-2_prompt.md`. Voller Bericht: `docs/2026-07-13-2_report-win.md`.
+
+- **Phase 0:** Sync bereits korrekt (gui @ `caef3e9c`, Umbrella-Zeiger passend, kein Pull
+  nötig), Shim aktuell (DLL neuer als `shim.cpp`), Light Mode bestätigt, Smoke 3/3.
+- **Orakel (Phase 1):** der reale Treiber ist der DrRacket-Preferences-Dialog
+  (`framework/private/preferences.rkt` + `color-prefs.rkt`), NICHT ein Autosave-o.ä.-
+  Umweg. Kernbefund: die Preferences-Dialog-eigene Kategorie-Navigation instanziiert
+  selbst unconditional ein `tab-panel%` — noch Stub (Block B) — daher ist Ende-zu-Ende
+  über den echten Dialog strukturell blockiert, genau der in Phase 1 antizipierte Fall
+  (kein Scope-Bruch, kein Stopp nötig). Beweis stattdessen über neuen isolierten Probe
+  `examples/value-widgets-probe.rkt`.
+- **Alle drei Widgets real gemacht**, Kontrakt gegen gtk UND win32 verifiziert (Details
+  `docs/HACKING.md` §20): `slider%` (QSlider, `get-value`/`set-value`), `choice%`
+  (QComboBox, `set-selection`/`get-selection`/`number`/`clear`/`append`/`delete`),
+  `radio-box%` (QRadioButton + QButtonGroup, `set-selection`/`get-selection`/`number`/
+  `enable-button`/`button-focus`). Härtester Fall gelöst: `radio-box%` mit
+  `[selection #f]` (1-Button-Gruppe, keiner ausgewählt) — exklusive `QButtonGroup`
+  erlaubt kein Abwählen des einzig gecheckten Buttons; Fix mirrored `wx/gtk/radio-box.rkt`s
+  Dummy-Button-Trick (verstecktes Gruppenmitglied, reservierte ID). `QSignalBlocker` im
+  Shim für jede programmatische Mutation (nicht nur `set-*`), da `QComboBox`/
+  `QButtonGroup` bei Erstbefüllung/-Klick anders auto-selektieren als gtk/win32.
+- **Verifikation:** Klassen-Komposition fehlerfrei (kein `public*`/`override*`-Konflikt),
+  Smoke 3/3 vor und nach den drei Commits grün, Probe (Rendering + Interaktion + „set via
+  code" pro Widget) Nutzer-bestätigt: „All looks good. all components behave correctly."
+  Konsolen-Log der Probe-Prints selbst nicht eingefangen (PowerShell-`Out-String`-
+  Pufferungs-Limitation dieser Sitzung, kein Produkt-Befund) — visuelle/interaktive
+  Nutzer-Bestätigung deckt dieselben Kriterien ab (etablierter Standard, §18.3 u. a.).
+- **Drei getrennte Commits** (gui-Submodul, `qt-backend`, Rollback-Punkte,
+  Nutzer-Präferenz): `dc5cef02` (`slider%`), `3a2b2d8e` (`choice%`), `3ba8fa75`
+  (`radio-box%`). Shim-Additions (`qt-shim/src/shim.cpp`) sind Umbrella-seitig.
+- **Nächster Schritt:** `tab-panel%` (Block B, eigener Prompt) — danach erst ist die
+  volle Preferences-Dialog-Ende-zu-Ende-Validierung möglich. macOS/Linux-Validierung
+  dieser Session separat nach Push.
+
+---
+
 ## Session 2026-07-13 (macOS) — Nativ-Datei-Dialog-Matrix, Phase 4 (2026-07-13_prompt-macos)
 
 **Kontext:** `docs/2026-07-13_prompt-macos.md`. Voller Bericht:
