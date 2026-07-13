@@ -1286,3 +1286,14 @@ im Scope, analog `list-box%`s Single-Column-Scope-Entscheidung in §18.4).
 (Rollback-Punkte, Nutzer-Präferenz). Shim-Additions (`qt-shim/src/shim.cpp`:
 `shim_slider_*`, `shim_choice_*`, `shim_radio_box_*`) sind Umbrella-seitig, noch nicht
 committed zum Zeitpunkt dieses Abschnitts.
+
+**Linux-Validierung (2026-07-13-2_report-linux, nach Push):** kein neuer Code — reiner
+Sync (lokaler gui-Submodul-Checkout war stale, Fast-Forward auf `3ba8fa75`, bereits auf
+`origin/qt-backend`) + Shim-Rebuild (stale-Shim-Falle, `shim.cpp` neuer als
+`libracketqtshim.so`) + Probe. `examples/value-widgets-probe.rkt` Nutzer-bestätigt
+(Rendering/Interaktion/`set-*`-Non-Retrigger) und diesmal zusätzlich per
+Konsolen-Log bestätigt — anders als auf Windows puffert der Linux-Prozess-Capture
+nicht, das Log zeigt explizit: Callback feuert nur bei echten Nutzer-Interaktionen,
+nie bei einem `set-*`-Aufruf via Code, auch nicht beim härtesten Fall
+(`radio-box%` `set-selection #f` in der 1-Button-Gruppe). macOS-Validierung weiterhin
+offen.

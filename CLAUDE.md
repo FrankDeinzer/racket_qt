@@ -107,7 +107,7 @@ referenziert).
 | E – list-box%/check-box% echt | ✅ 2026-07-10, Windows (§18) |
 | E – Panel-Sizing-Fix + Modalitäts-Fix | ✅ 2026-07-10, alle 3 Plattformen (§18.2/§18.3) |
 | E – `file-selector` (get-file/put-file, Qt-eigener Dialog) | ✅ 2026-07-12, alle 3 Plattformen; Qt-eigen×nativ-Matrix (3×2) komplett 2026-07-13 (§19) |
-| E – `choice%`/`radio-box%`/`slider%` echt | ✅ 2026-07-13, Windows (§20) |
+| E – `choice%`/`radio-box%`/`slider%` echt | ✅ 2026-07-13, Windows + Linux (§20); macOS offen |
 | E – Rest (`tab-panel%`; Preferences Ende-zu-Ende) | ⬜ läuft |
 
 **Offene Nebenbefunde, je eigene Session:** macOS-Menüleiste zeigt teils 8 statt 9
