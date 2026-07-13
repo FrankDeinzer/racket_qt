@@ -106,7 +106,7 @@ referenziert).
 | E-0 – Redraw-Bug (retained-bitmap-Fix) | ✅ 2026-07-10, alle 3 Plattformen (§16) |
 | E – list-box%/check-box% echt | ✅ 2026-07-10, Windows (§18) |
 | E – Panel-Sizing-Fix + Modalitäts-Fix | ✅ 2026-07-10, alle 3 Plattformen (§18.2/§18.3) |
-| E – `file-selector` (get-file/put-file, Qt-eigener Dialog) | ✅ 2026-07-12, alle 3 Plattformen; nativer Windows-Dialog als Datenpunkt geprüft (§19) |
+| E – `file-selector` (get-file/put-file, Qt-eigener Dialog) | ✅ 2026-07-12, alle 3 Plattformen; Qt-eigen×nativ-Matrix (3×2) komplett 2026-07-13 (§19) |
 | E – Rest (choice%, radio-box%, slider%, tab-panel%; Preferences) | ⬜ läuft |
 
 **Offene Nebenbefunde, je eigene Session:** macOS-Menüleiste zeigt teils 8 statt 9
@@ -118,7 +118,10 @@ n=1-intermittierend); Linux Crash B (Teardown, „invalid memory reference") 1/1
 unverändert reproduziert, bleibt offen, andere Ursache als die Menü-Fixe; `htdp-lib`-
 Contract-Bug (`test-engine:test-dock-size`) auf macOS UND jetzt auch Linux beobachtet —
 auf Linux bereits bei nur einem offenen Tab (Auslöser weiter gefasst als ursprünglich
-angenommen), nicht root-caused (§19). Details je Fund: `STATUS.md`, `docs/HACKING.md`.
+angenommen), nicht root-caused (§19); nativer macOS-Save-Dialog hängt bei fehlender
+Endung ein literales `.*` an den Dateinamen an (nur nativer Pfad, Qt-eigener Dialog
+unbetroffen — Diskriminator bestätigt, §19), bewusst nicht gefixt, da native Pfad ohnehin
+nicht der Standard ist. Details je Fund: `STATUS.md`, `docs/HACKING.md`.
 
 ## Dokumentation
 

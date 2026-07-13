@@ -10,6 +10,24 @@
 (define result-msg
   (new message% [parent frame] [label "(no result yet)"] [stretchable-width #t]))
 
+; Heartbeat (docs/2026-07-13_prompt-macos.md): beweist, dass der Racket-Eventspace-Pump
+; weiterläuft, während ein natives NSOpenPanel/NSSavePanel offen ist. Kein wx/qt-Code;
+; rein Racket-seitig, additiv, kein Effekt auf den eigentlichen Dialog-Wertpfad. Gated
+; hinter PLT_QT_DEBUG, damit ein normaler Probe-Lauf nicht dauerhaft alle 200ms loggt.
+(when (getenv "PLT_QT_DEBUG")
+  (define heartbeat-count 0)
+  (define heartbeat-msg
+    (new message% [parent frame] [label "heartbeat: 0"] [stretchable-width #t]))
+  (define heartbeat-timer
+    (new timer%
+         [notify-callback
+          (lambda ()
+            (set! heartbeat-count (add1 heartbeat-count))
+            (define text (format "heartbeat: ~a" heartbeat-count))
+            (printf "[file-dialog-probe] ~a\n" text)
+            (send heartbeat-msg set-label text))]))
+  (send heartbeat-timer start 200))
+
 (define (show-result who path)
   (define text (format "~a -> ~a" who (or path "#f (cancel)")))
   (printf "[file-dialog-probe] ~a\n" text)

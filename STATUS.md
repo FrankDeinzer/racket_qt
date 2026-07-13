@@ -5,6 +5,35 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-13 (macOS) — Nativ-Datei-Dialog-Matrix, Phase 4 (2026-07-13_prompt-macos)
+
+**Kontext:** `docs/2026-07-13_prompt-macos.md`. Voller Bericht:
+`docs/2026-07-13_report-macos.md`.
+
+- **Phase 0:** Sync bereits korrekt (gui @ `caef3e9c`, Umbrella-Zeiger passend, kein
+  Pull nötig), Shim aktuell, Light Mode bestätigt, Smoke 3/3.
+- **Kernfrage beantwortet (GO):** der native macOS-Dateidialog (NSOpenPanel/
+  NSSavePanel, `PLT_QT_NATIVE_FILE_DIALOG=1`) trägt denselben non-modalen
+  `open()`+`finished`-Signal+`shim_pump()`-Mechanismus wie der Qt-eigene und der native
+  Windows-Dialog — keine eigene Cocoa-Runloop. Beweis: 13/13 Dialog-Öffnungen lieferten
+  ihr Ergebnis korrekt zurück (unter ausgehungertem Pump unmöglich); ein additiver,
+  hinter `PLT_QT_DEBUG` gateter Heartbeat (`examples/file-dialog-probe.rkt`) tickte
+  117 Zyklen ununterbrochen weiter, während der native Dialog offen war. `cb`-Adresse
+  über alle Accept-Aufrufe und über `get`→`put`-Moduswechsel hinweg identisch
+  (Trampolin-Fix, §19 Fund 2, greift auch hier).
+- **Nebenbefund, dokumentiert, bewusst nicht gefixt (Nutzer-Entscheidung):** nativer
+  Save-Dialog hängt bei fehlender Endung ein literales `.*` an den Dateinamen
+  (`abc` → `abc.*`). Diskriminator-Test bestätigt: rein native-spezifisch, Qt-eigener
+  Dialog unbetroffen. Blockiert die Kernfrage nicht (native ist nicht der Standardpfad).
+- **Qt-eigen×nativ-Matrix (3×2) damit auf allen drei Plattformen komplett.**
+- Ein Umbrella-only-Commit (Heartbeat-Instrumentierung im Probe-Skript, gated hinter
+  `PLT_QT_DEBUG`) + Doku-Updates. Kein Submodul-Commit, kein Shim-Rebuild.
+- **Nächster Schritt:** Crash B (Teardown) + htdp-Rezidiv weiterhin zur Entscheidung
+  beim Nutzer; danach nächster Block: choice%/radio-box%/slider%/tab-panel% +
+  Preferences-Dialog.
+
+---
+
 ## Session 2026-07-12 (2, Linux) — Konsolidierung: Crash-A/B-Rückprüfung + Nativ-Matrix (2026-07-11-2_prompt)
 
 **Kontext:** `docs/2026-07-11-2_prompt.md` (Phase 2 + 3). Voller Bericht:

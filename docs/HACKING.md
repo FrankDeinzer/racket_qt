@@ -1143,13 +1143,36 @@ bestätigt. Der native Dialog trägt denselben non-modalen `open()`+Pump-Mechani
 konnte der Nutzer mangels Vergleichsreferenz nicht zuordnen — funktional aber eindeutig
 grün, keine eigene Runloop nötig.
 
-**Qt-eigen×nativ-Matrix-Stand (3 Plattformen × 2 Dialog-Typen):**
+**macOS-Nativ-Matrix (2026-07-13, `docs/2026-07-13_report-macos.md`):** Kernfrage
+(Läuft der Pump weiter, während NSOpenPanel/NSSavePanel offen ist, oder dreht Cocoa eine
+eigene Runloop?) eindeutig beantwortet: **nein, keine eigene Runloop.** Stärkster Beweis:
+**13/13 Dialog-Öffnungen** (6× Accept, 7× Cancel, Open/Save gemischt, inkl.
+Overwrite-Warnung) lieferten ihr Ergebnis korrekt an Racket zurück — unter einem
+ausgehungerten Pump unmöglich, da `finished` nur innerhalb eines `shim_pump()`-Aufrufs
+feuern kann. Ein additiver, hinter `PLT_QT_DEBUG` gateter Racket-`timer%`-Heartbeat (200 ms,
+`examples/file-dialog-probe.rkt`) korroboriert das direkt: tickte 117 Zyklen (~23 s)
+ununterbrochen weiter, während der native Dialog offen war, bis `finished` über einen
+ganz normalen Pump-Durchlauf zurückkam. `cb`-Adresse identisch über alle 6 Accept-Aufrufe
+**und über mehrfache `get`→`put`-Moduswechsel hinweg** (Trampolin-Fix, Fund 2, greift
+auch hier). Kein Crash, kein Hang, `native=1` durchgehend im Log.
+
+**Nebenbefund, dokumentiert, bewusst nicht gefixt (Nutzer-Entscheidung, analog Linux
+Crash A/B):** Beim **nativen** Save-Dialog hängt macOS ein literales `.*` an einen
+Dateinamen ohne Endung (`abc` → `abc.*`). Diskriminator-Test (identischer Code, nur
+`PLT_QT_NATIVE_FILE_DIALOG` weggelassen) zeigt: **rein native-spezifisch** — der
+Qt-eigene Dialog liefert `abc` unverändert. Keine Aussage über die genaue Ursache
+innerhalb von Qts Cocoa-Plugin (Quellcode nicht gelesen); vermutlich Interaktion des
+Wildcard-Namensfilters `"Any (*.*)"` mit NSSavePanels Endungs-Inferenz. Blockiert die
+Kernfrage nicht (native ist ohnehin nicht der Standardpfad dieses Backends) und
+rechtfertigt keinen Shared-Code-Fix in dieser Sitzung.
+
+**Qt-eigen×nativ-Matrix-Stand (3 Plattformen × 2 Dialog-Typen) — komplett:**
 
 | Plattform | Qt-eigen | Nativ |
 |---|---|---|
 | Windows | ✅ (7/7, Vorsession) | ✅ (7/7, Vorsession — Windows-Common-Dialog) |
 | Linux | ✅ (9/9, Vorsession) | ✅ (8/8, diese Session — Dialog-Typ nicht identifiziert, funktional grün) |
-| macOS | ✅ (7/7 + DrRacket, Vorsession) | ⬜ noch offen (Phase 4, eigene macOS-Session) |
+| macOS | ✅ (7/7 + DrRacket, Vorsession) | ✅ (13/13, 2026-07-13 — mit dokumentiertem, ungefixtem Save-Suffix-Fund) |
 
 Details, vollständige Logs und Diskriminator-Überlegungen: `docs/2026-07-11_report-linux.md`,
-`docs/2026-07-11-2_report-linux.md`.
+`docs/2026-07-11-2_report-linux.md`, `docs/2026-07-13_report-macos.md`.
