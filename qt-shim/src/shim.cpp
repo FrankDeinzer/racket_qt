@@ -10,6 +10,7 @@
 #include <QBoxLayout>
 #include <QVariant>
 #include <QSlider>
+#include <QTabBar>
 #include <QSignalBlocker>
 #include <QMenuBar>
 #include <QMenu>
@@ -1173,5 +1174,124 @@ void shim_file_dialog_create(void* parent_widget, int mode,
 
     dlg->open();
 }
+
+// ---- tab-panel (tab-panel%) ----------------------------------------------
+// A QTabBar (native tab strip) + a plain QWidget content area, both siblings
+// parented to a container QWidget -- NOT QTabWidget, which insists on owning
+// one content page per tab. Both gtk's and win32's tab-panel.rkt keep
+// exactly ONE wx-managed client area and let the native control supply only
+// tab selection + a changed callback; the tab-panel's actual children are
+// managed entirely by the shared mred/wx layer (Preferences swaps visible
+// panels itself via panel:single%'s active-child), so a single shared
+// content widget is the correct mirror of both oracles (docs/HACKING.md §21).
+//
+// Positioning of the tabbar/content is done explicitly by Racket (mirrors
+// win32's MoveWindow-based tab-panel.rkt) via the existing generic
+// shim_widget_set_geometry/shim_widget_get_size_hint calls on the widgets
+// returned by the getters below -- deliberately NOT a QVBoxLayout, so
+// get-client-size never has to guess whether a Qt layout has activated yet
+// (a real risk for the very first layout pass before a dialog's initial
+// show()).
+//
+// Per-instance state (tabbar + content widget) rides along as a
+// QVariant<void*> property on the container, same convention as
+// PltRadioBox above -- window%'s `handle` field stays single-purpose.
+
+struct PltTabPanel {
+    QTabBar* tabbar;
+    QWidget* content;
+};
+
+static PltTabPanel* plt_tab_panel_state(void* handle)
+{
+    auto* container = static_cast<QWidget*>(handle);
+    return static_cast<PltTabPanel*>(container->property("plt_tab_panel").value<void*>());
+}
+
+void* shim_tab_panel_create(void* parent_widget, shim_callback_t changed_cb, void* ud)
+{
+    auto* parent = static_cast<QWidget*>(parent_widget);
+    auto* container = new QWidget(parent);
+    auto* tabbar = new QTabBar(container);
+    auto* content = new QWidget(container);
+    tabbar->show();
+    content->show();
+
+    if (changed_cb) {
+        QObject::connect(tabbar, &QTabBar::currentChanged,
+                         [changed_cb, ud](int idx) {
+                             if (plt_qt_debug()) {
+                                 fprintf(stderr, "[PLT_QT_DEBUG] tab_panel currentChanged idx=%d\n", idx);
+                                 fflush(stderr);
+                             }
+                             changed_cb(ud);
+                         });
+    }
+
+    if (plt_qt_debug()) {
+        fprintf(stderr, "[PLT_QT_DEBUG] tab_panel_create container=%p tabbar=%p content=%p\n",
+                (void*)container, (void*)tabbar, (void*)content);
+        fflush(stderr);
+    }
+
+    auto* state = new PltTabPanel{tabbar, content};
+    container->setProperty("plt_tab_panel", QVariant::fromValue<void*>(state));
+    return container;
+}
+
+// Returns the QTabBar* -- Racket positions/queries it via the existing
+// generic shim_widget_set_geometry/shim_widget_get_size_hint calls.
+void* shim_tab_panel_get_tabbar_widget(void* handle)
+{
+    return plt_tab_panel_state(handle)->tabbar;
+}
+
+// Returns the QWidget* that tab-panel%'s children should use as their Qt
+// parent (get-content-hwnd) -- same role as shim_window_get_content_widget.
+void* shim_tab_panel_get_content_widget(void* handle)
+{
+    return plt_tab_panel_state(handle)->content;
+}
+
+// Blocks currentChanged for programmatic tab-list changes (same rationale as
+// shim_check_box_set_checked/shim_radio_box_set_selection above) -- QTabBar
+// auto-selects tab 0 when the first tab is added (index -1 -> 0), which must
+// not reach the Racket callback.
+void shim_tab_panel_append(void* handle, const char* label)
+{
+    auto* state = plt_tab_panel_state(handle);
+    QSignalBlocker blocker(state->tabbar);
+    state->tabbar->addTab(QString::fromUtf8(label));
+}
+
+void shim_tab_panel_delete(void* handle, int i)
+{
+    auto* state = plt_tab_panel_state(handle);
+    QSignalBlocker blocker(state->tabbar);
+    state->tabbar->removeTab(i);
+}
+
+void shim_tab_panel_set_label(void* handle, int i, const char* label)
+{
+    plt_tab_panel_state(handle)->tabbar->setTabText(i, QString::fromUtf8(label));
+}
+
+void shim_tab_panel_set_selection(void* handle, int i)
+{
+    auto* state = plt_tab_panel_state(handle);
+    QSignalBlocker blocker(state->tabbar);
+    state->tabbar->setCurrentIndex(i);
+}
+
+int shim_tab_panel_get_selection(void* handle)
+{
+    return plt_tab_panel_state(handle)->tabbar->currentIndex();
+}
+
+int shim_tab_panel_count(void* handle)
+{
+    return plt_tab_panel_state(handle)->tabbar->count();
+}
+
 
 } // extern "C"
