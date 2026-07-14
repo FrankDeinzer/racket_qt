@@ -11,6 +11,7 @@
 #include <QVariant>
 #include <QSlider>
 #include <QTabBar>
+#include <QGroupBox>
 #include <QSignalBlocker>
 #include <QMenuBar>
 #include <QMenu>
@@ -1293,5 +1294,59 @@ int shim_tab_panel_count(void* handle)
     return plt_tab_panel_state(handle)->tabbar->count();
 }
 
+// ---- group-panel (group-panel%) ------------------------------------------
+// A QGroupBox (native decorative frame + title) with a plain QWidget content
+// area as its child -- mirrors tab-panel%'s tabbar+content split and win32/
+// gtk's group-panel.rkt (native frame control, separate client area that
+// children actually parent to). Unlike tab-panel%'s QTabBar, QGroupBox is
+// already a QWidget container, so it doubles as the outer handle directly --
+// no extra wrapper container widget needed.
+
+struct PltGroupPanel {
+    QGroupBox* box;
+    QWidget* content;
+};
+
+static PltGroupPanel* plt_group_panel_state(void* handle)
+{
+    auto* box = static_cast<QGroupBox*>(handle);
+    return static_cast<PltGroupPanel*>(box->property("plt_group_panel").value<void*>());
+}
+
+void* shim_group_panel_create(void* parent_widget, const char* label)
+{
+    auto* parent = static_cast<QWidget*>(parent_widget);
+    auto* box = new QGroupBox(QString::fromUtf8(label), parent);
+    auto* content = new QWidget(box);
+
+    auto* state = new PltGroupPanel{box, content};
+    box->setProperty("plt_group_panel", QVariant::fromValue<void*>(state));
+    return box;
+}
+
+// Returns the QWidget* that group-panel%'s children should use as their Qt
+// parent (get-content-hwnd) -- same role as shim_tab_panel_get_content_widget.
+void* shim_group_panel_get_content_widget(void* handle)
+{
+    return plt_group_panel_state(handle)->content;
+}
+
+// QGroupBox::getContentsMargins() -- the space the native frame/title reserve
+// around the content area; Racket uses this to position the content widget
+// and to compute get-client-size (same "client delta" role as tab-panel%'s
+// tab-height, docs/HACKING.md §21/§22).
+void shim_group_panel_get_content_margins(void* handle, int* left, int* top, int* right, int* bottom)
+{
+    QMargins m = plt_group_panel_state(handle)->box->contentsMargins();
+    *left = m.left();
+    *top = m.top();
+    *right = m.right();
+    *bottom = m.bottom();
+}
+
+void shim_group_panel_set_label(void* handle, const char* label)
+{
+    plt_group_panel_state(handle)->box->setTitle(QString::fromUtf8(label));
+}
 
 } // extern "C"
