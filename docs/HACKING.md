@@ -1526,6 +1526,60 @@ fördern — jeder davon ist Kandidat für eine eigene, fokussierte Session (Mus
 genau wie `tab-panel%` selbst in dieser Session als Block-A-Nachfolger zu
 `canvas-panel%`/`group-panel%` führte).
 
+### 21.7 Resize/Reflow-Bug — Root Cause gefunden, Fix versucht und wieder zurückgerollt
+
+Noch in derselben Sitzung wurde Befund 1 aus §21.6 root-caused und ein Fix versucht,
+der aber ein neues, schlimmeres Problem aufdeckte — Rollback, kein Fix in dieser
+Sitzung.
+
+**Root Cause 1 (bestätigt):** `RacketWindow` (`shim.cpp`, `QMainWindow`-Subklasse)
+hatte **keinen** `resizeEvent`-Handler — native Resizes (Nutzer zieht am Fensterrand)
+wurden nie an Racket gemeldet. `window%`s `w`/`h`-Felder (`get-width`/`get-height`)
+sind reine Racket-seitige Caches, die sich nur über einen expliziten `set-size`-Aufruf
+ändern — anders als win32, wo `get-width`/`get-height` live per `GetWindowRect`
+abgefragt werden. Ohne Notification läuft `wxtop.rkt`s Relayout-Kette
+(`queue-on-size` → `resized`, die per `override*` bereits in unserer Platform-Klasse
+verdrahtet ist, s. `wx/qt/frame.rkt`s `(define/override (queue-on-size) (void))`) nie
+— Kind-Controls behalten ihre beim letzten `set-size` berechnete Position, unabhängig
+von der tatsächlichen neuen Fenstergröße. Win32s Gegenstück: `WM_SIZE`-Handler in
+`wx/win32/frame.rkt` ruft `queue-on-size`.
+
+**Fix-Versuch 1 (`shim_window_set_resize_cb` + `RacketWindow::resizeEvent`):** löste
+eine **Rückkopplungsschleife** aus. `wxtop.rkt`s `resized`/`correct-size` erzwingt bei
+nicht-stretchbarem Panel-Inhalt eine „Schrumpf-auf-Minimalgröße"-Korrektur
+(`wxtop.rkt:318/323`: `(and (> frame-w min-w) (not (child-info-x-stretch ...))) →
+min-w`) — diese Korrektur ruft ihrerseits `set-size`, was `shim_window_set_size`
+aufruft, was **erneut** ein natives `resizeEvent` auslöst → neuer `queue-on-size`-Zyklus.
+`resized`s eigener `already-trying?`-Schutz greift nicht, weil jeder Zyklus über die
+Racket-Eventqueue **asynchron** neu eintritt (nicht als synchrone Rekursion im selben
+Call-Stack, für die der Schutz gebaut ist).
+
+**Fix-Versuch 2** (`suppress_resize_cb`-Flag, `QSignalBlocker`-artig: `shim_window_
+set_size` setzt das Flag vor `resize()`, `resizeEvent` unterdrückt den Callback bei
+gesetztem Flag): behob die Endlosschleife nicht vollständig. Nutzer-Beobachtung:
+während des Ziehens bewegte sich nichts; nach Loslassen der Maus „replayten" sich
+mehrere Resize-Schritte selbständig, sehr schnell, bis das Programm terminiert wurde.
+
+**Root Cause 2 (plausibel, nicht abschließend verifiziert):** Windows' natives
+Fenster-Resize-per-Maus läuft in einer **eigenen modalen Nachrichtenschleife**
+(`WM_ENTERSIZEMOVE`/`WM_SIZING`), die den normalen Event-Loop blockiert — inklusive
+unseres `shim_pump`-Mechanismus. Jedes während des Ziehens gefeuerte `resizeEvent`
+queued einen `qt-queue-window-event`-Thunk, der aber erst verarbeitet werden kann,
+wenn die modale Schleife endet (Mausknopf loslassen) — alle aufgestauten Zwischen-
+Resize-Schritte werden dann in schneller Folge nachträglich abgespielt. Win32 löst
+genau dieses Problem explizit: sein `WM_SIZE`-Handler (`wx/win32/frame.rkt:340-345`)
+ruft nach `queue-on-size` zusätzlich `constrained-reply` mit einer synchronen
+`pre-event-sync`/`yield`-Schleife **direkt im nativen Message-Handler**, um Rackets
+Event-Queue während der modalen Schleife am Laufen zu halten. Unser Qt-Backend hat
+kein Äquivalent.
+
+**Entscheidung:** beide Fix-Versuche vollständig zurückgerollt (`shim.cpp`,
+`wx/qt/frame.rkt`, `wx/qt/utils.rkt` zurück auf den Stand nach den vier §21-Commits),
+Smoke 3/3 gegen den zurückgerollten Stand bestätigt. Ein belastbarer Fix bräuchte ein
+Qt-Äquivalent zu win32s synchronem Pump-Trick innerhalb von `resizeEvent` — mit realem
+Risiko für Reentrancy-Probleme im Event-Loop, daher **eigene, dedizierte künftige
+Session**, nicht im Rahmen dieser Sitzung fortgesetzt.
+
 **Commits (gui-Submodul, `qt-backend`, gepusht: nein zum Zeitpunkt dieses Abschnitts):**
 `ad33e36a` (`show()`-Fix), `084cf27b` (`tab-panel%`), `e478503f` (`canvas-panel%`),
 `f6f38474` (`group-panel%`) — getrennt pro logischer Einheit (Rollback-Punkte,

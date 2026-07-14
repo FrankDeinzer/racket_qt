@@ -50,9 +50,23 @@ Windows-only (macOS/Linux-Validierung separater Prompt nach Push, wie üblich). 
   (`group-panel%`) — vier separate Commits (Rollback-Punkte, Nutzer-Präferenz wie
   in §20. Umbrella (`main`, bereits committed): `5f6dfb4`/`7de2790`/`1ee3ed5`
   (Shim-Additions + Probe).
+- **Resize-Bug root-caused, Fix versucht + zurückgerollt (noch in dieser Sitzung):**
+  `RacketWindow` hatte keinen `resizeEvent`-Handler (Root Cause 1, bestätigt). Ein
+  erster Fix (`shim_window_set_resize_cb`) löste eine Rückkopplungsschleife aus
+  (`wxtop.rkt`s „Schrumpf-auf-Minimalgröße"-Korrektur re-triggert sich selbst über
+  jeden programmatischen `set-size`-Aufruf). Ein zweiter Fix (`suppress_resize_cb`-
+  Flag, `QSignalBlocker`-artig) behob die Schleife nicht: Windows' natives Resize-
+  Drag läuft in einer eigenen modalen Nachrichtenschleife, die unseren Event-Pump
+  blockiert — aufgestaute Zwischenschritte werden nach Loslassen der Maus schnell
+  nachträglich abgespielt (Root Cause 2, plausibel, nicht abschließend verifiziert;
+  win32 löst das via `constrained-reply`/`pre-event-sync` direkt im `WM_SIZE`-Handler,
+  kein Äquivalent in diesem Backend). Beide Versuche vollständig zurückgerollt
+  (`shim.cpp`/`wx/qt/frame.rkt`/`wx/qt/utils.rkt` zurück auf den 4-Commits-Stand),
+  Smoke 3/3 bestätigt. Details: `docs/HACKING.md` §21.7.
 - **Nächster Schritt:** Nutzer-Entscheidung zu Sync/Push noch ausstehend (Regel 7).
   Danach: macOS/Linux-Validierung (separater Prompt), sowie je eigene Session für
-  Resize-Bug, Editor-Scrollbars, Font-Size-Anzeige, Colors-Spalte/Rahmen, und die
+  Resize-Bug (braucht ein Qt-Äquivalent zu win32s synchronem Pump-Trick im
+  `resizeEvent`), Editor-Scrollbars, Font-Size-Anzeige, Colors-Spalte/Rahmen, und die
   restlichen Preferences-Kategorien.
 
 ---
