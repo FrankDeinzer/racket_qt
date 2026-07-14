@@ -5,6 +5,58 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-14 — `tab-panel%`/`canvas-panel%`/`group-panel%` echt + Preferences-Ende-zu-Ende (teilweise) (2026-07-13-3_prompt)
+
+**Kontext:** `docs/2026-07-13-3_prompt.md`. Voller Bericht: `docs/2026-07-13-3_report-win.md`.
+Windows-only (macOS/Linux-Validierung separater Prompt nach Push, wie üblich). Racket
+`v9.2 [cs]` gemessen, Submodul bereits synchron auf `3ba8fa75` (kein Pull nötig), Smoke
+3/3 vor Start.
+
+- **`tab-panel%` echt** (Hauptziel): QTabBar + separates Content-Widget, kein
+  QTabWidget — Orakel-Vergleich (gtk/win32) zeigt beide halten genau eine
+  wx-verwaltete Client-Fläche, natives Control liefert nur Auswahl+Callback.
+  Positionierung layout-frei/arithmetisch (Advisor-Review vor Implementierung riet
+  davon ab, ein Qt-Layout zu nutzen — Timing-Risiko vor dem ersten `show()`).
+  `examples/tab-panel-probe.rkt` neu, Nutzer-bestätigt (Tab-Wechsel, Non-Retrigger,
+  append/delete/set-item-label).
+- **Voraussetzungs-Fund:** `window%`s `show()` (`wx/qt/window.rkt`) reflektierte nur ein
+  Racket-Flag, nie das echte `QWidget`. Bricht `single-mixin`s `active-child`
+  (`framework/private/panel.rkt`, Preferences' `panel:single%`-Mechanismus) —
+  reproduziert zuerst in der isolierten Probe (alle 3 Tab-Inhalte gleichzeitig
+  sichtbar). Fix: `shim_widget_set_visible` + Verdrahtung in `show()`, nach
+  Nutzer-Rückfrage (Regel 7) im Basisklassen-Scope statt lokal in `panel.rkt`.
+- **Preferences-Dialog End-to-End-Versuch** deckte zwei weitere Stub-Blocker auf, beide
+  nach Nutzer-Rückfrage als Abstecher genehmigt:
+  - **`canvas-panel%`**: Absturz `send: no such method: set-scrollbars` beim Wechsel in
+    die Colors-Kategorie. Root Cause: `set-scrollbars` ist generisch
+    (`canvas-autoscroll-mixin`), unser `canvas-panel%` war noch Stub. Fix:
+    `(class (panel-mixin canvas%) ...)`, mirrored win32 (kein separates
+    Content-Sub-Widget nötig, alles bereits über `canvas%`s Mixins vorhanden).
+  - **`group-panel%`**: nach dem canvas-panel%-Fix rissen Netzwerk-Proxy-Controls
+    (Browser-Tab) als eigene Top-Level-Fenster aus (Stub-`get-content-hwnd` → `#f` →
+    Qt macht aus parentless Children Top-Level-Fenster). Fix: `QGroupBox` +
+    separates Content-Widget, analog `tab-panel%`.
+- **Preferences öffnet jetzt end-to-end** (ursprünglicher Block-A-Payoff aus §20
+  erreicht) und ist navigierbar — Tabs/Font/Colors/Browser vom Nutzer bestätigt.
+  Systematischer Kategorie-Vergleich gegen den Original-Dialog deckte 4 neue,
+  eigenständige, **nicht behobene** Befunde auf (Details `docs/HACKING.md` §21.6):
+  Resize/Reflow-Bug (bestätigt allgemein, nicht dialogspezifisch — reproduziert auch
+  in der isolierten Probe), fehlende Editor-Canvas-Scrollbars, fehlende Zahl am
+  Font-Size-Slider, Colors-Tab rechte Spalte + dunkle Rahmen fehlen. Verbleibende
+  Kategorien (Editing/Warnings/General/Profiling/Tools/Background Expansion) nicht
+  durchgesehen — vermutlich weitere Einzelbefunde, je eigene künftige Session.
+- **Commits (gui-Submodul, `qt-backend`, noch NICHT gepusht):** `ad33e36a`
+  (`show()`-Fix), `084cf27b` (`tab-panel%`), `e478503f` (`canvas-panel%`), `f6f38474`
+  (`group-panel%`) — vier separate Commits (Rollback-Punkte, Nutzer-Präferenz wie
+  in §20. Umbrella (`main`, bereits committed): `5f6dfb4`/`7de2790`/`1ee3ed5`
+  (Shim-Additions + Probe).
+- **Nächster Schritt:** Nutzer-Entscheidung zu Sync/Push noch ausstehend (Regel 7).
+  Danach: macOS/Linux-Validierung (separater Prompt), sowie je eigene Session für
+  Resize-Bug, Editor-Scrollbars, Font-Size-Anzeige, Colors-Spalte/Rahmen, und die
+  restlichen Preferences-Kategorien.
+
+---
+
 ## Session 2026-07-13 (2, macOS) — `choice%`/`radio-box%`/`slider%`: macOS-Validierung (2026-07-13-2_prompt)
 
 **Kontext:** `docs/2026-07-13-2_prompt.md`. Voller Bericht:

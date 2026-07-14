@@ -1317,3 +1317,218 @@ wie Windows/Linux — Callback feuert nur bei echten Nutzer-Interaktionen, nie b
 `set-*`-Aufruf via Code, auch nicht beim härtesten Fall (`radio-box%` `set-selection #f`
 in der 1-Button-Gruppe). Damit `choice%`/`radio-box%`/`slider%` auf allen drei
 Plattformen validiert.
+
+## 21. `tab-panel%`/`canvas-panel%`/`group-panel%` echt gemacht + Preferences-Ende-zu-Ende (teilweise) — Windows (2026-07-13-3_prompt)
+
+**Ziel der Session:** `tab-panel%` (letztes primitives Widget der Breite) + die
+Preferences-Ende-zu-Ende-Validierung, die seit dem Block-A-Befund (§20) strukturell
+blockiert war. Im Verlauf traten zwei weitere Stub-Blocker zutage (`canvas-panel%`,
+`group-panel%`), beide mit Nutzer-Rückfrage (Regel 7) als Abstecher genehmigt und
+ebenfalls fertiggestellt. Am Ende blieben vier neue, eigenständige Befunde offen (§21.6).
+
+### 21.1 Voraussetzung: `show()` reflektierte nur ein Racket-Flag, nie das echte Widget
+
+Bevor `tab-panel%` überhaupt sinnvoll getestet werden konnte, fiel auf: `window%`s
+generische `show`-Methode (`wx/qt/window.rkt`) setzte nur ein Racket-seitiges
+`shown?`-Flag — es gab **keinen** Shim-Aufruf, der `QWidget::setVisible()` wirklich
+umsetzt. Win32s `window%`-Basisklasse spiegelt `is-shown?`/`show` dagegen korrekt auf
+den echten Fensterzustand (`wx/win32/window.rkt`: `(define/public (is-shown?) shown?)`,
+real durchgereicht).
+
+Das wurde erst sichtbar, weil `framework/private/panel.rkt`s `single-mixin`
+(`active-child`, der Mechanismus hinter `panel:single%` — genau das, was der echte
+Preferences-Dialog für seine Kategorie-Inhalte nutzt) **alle** Kinder unbedingt
+positioniert (`place-children` in `single-mixin` layoutet jedes Kind, nicht nur das
+aktive) und sich **vollständig** auf natives Show/Hide verlässt, um die inaktiven
+Kinder unsichtbar zu machen: `(send x show #f)` für alle, dann `(send active show #t)`.
+Ohne echten Shim-Effekt blieben alle Kind-Panels dauerhaft sichtbar und übereinander
+gestapelt — reproduziert zuerst in einer eigenen Tab-Panel-Probe (drei Tab-Inhalte alle
+gleichzeitig sichtbar, unabhängig vom gewählten Tab), per Screenshot bestätigt.
+
+**Fix:** neue generische `shim_widget_set_visible(widget, visible)` (`QWidget::
+setVisible()`), verdrahtet in `window%`s `show`:
+```racket
+(define/public (show on?)
+  (set! shown? (and on? #t))
+  (when handle (shim_widget_set_visible handle (if on? 1 0))))
+```
+`_int`, nicht `_bool` — `#t`/`#f` direkt an einen `_int`-FFI-Parameter zu reichen
+schlägt mit „given value does not fit primitive C type" fehl; `(if on? 1 0)`.
+Betrifft **jedes** Widget mit einem echten Handle (Basisklasse), nicht nur
+`tab-panel%`/`panel%` — kein Bug, der sich auf ein einzelnes Widget eingrenzen ließ.
+
+### 21.2 `tab-panel%`: QTabBar + separates Content-Widget, NICHT QTabWidget
+
+**Orakel-Befund (gtk UND win32 gelesen):** beide halten genau **eine** wx-verwaltete
+Client-Fläche; das native Control liefert nur Auswahl + Callback, keine Pro-Tab-Inhalte.
+Gtk reparentiert `client-gtk` bei Tab-Wechsel zwischen leeren Notebook-Pages
+(`gtk_notebook_append_page` mit leeren Platzhalter-Bins); Win32 hat ein einziges
+`PLTTabPanel`-HWND, das unter der nativen Tab-Leiste positioniert wird
+(`MoveWindow` in `set-size`, Tab-Höhe manuell mitgeführt). Das entspricht **QTabBar**
+(nicht `QTabWidget`, das pro Tab einen eigenen Inhalt via `addTab(widget, ...)`
+erwartet und damit gegen das Ein-Client-Flächen-Modell beider Vorbilder verstößt).
+
+**Struktur:** Container-`QWidget*` (der einzige Handle, den Racket kennt) hält als
+Kinder ein `QTabBar*` (oben) und ein reines Inhalts-`QWidget*` (darunter) — **kein**
+`QVBoxLayout`. Positionierung ist manuell (`set-size` in `tab-panel.rkt`, mirrored
+win32s `MoveWindow`-Mathematik) über die schon vorhandenen generischen
+`shim_widget_set_geometry`/`shim_widget_get_size_hint`-Aufrufe auf zwei über den Shim
+exponierte Handles (Tabbar, Content) — bewusst **kein** Qt-Layout-Objekt, weil dessen
+Aktivierungs-Timing vor dem ersten `show()` eines Dialogs nicht garantiert synchron ist
+(Advisor-Review vor der Implementierung hat genau diesen Zeit-Bug antizipiert und die
+Layout-freie, arithmetische Variante empfohlen).
+
+`get-client-size` ist reine Arithmetik (`Breite`, `Höhe − Tab-Höhe`) — das ist exakt der
+Delta-Mechanismus, den `wxpanel.rkt`s generisches `do-graphical-size` sowieso schon für
+jeden Container nutzt (`delta-h = (get-height) - client-h`, dieselbe Idee wie gtks
+`infer-client-delta`): kein Sonderfall nötig, die Chrome-Höhe der Tableiste fällt aus
+dieser generischen Differenz automatisch heraus, sobald `get-client-size` sie korrekt
+berücksichtigt.
+
+**Kontrakt gegen gtk/win32 verifiziert:** `init parent x y w h style labels` (**kein**
+`cb`-Init-Arg — anders als `choice%`/`radio-box%`/`slider%`; der Callback wird über
+`set-callback` **nach** Konstruktion gesetzt, exakt wie gtk/win32).
+`append`(`(public [append* append])`-Rename-Trick wie bei `choice%`/`list-box%`,
+sonst shadowt `racket/list`s `append` die eigene Methode)/`delete`/`set`/`set-label i
+str`/`get-selection`/`set-selection`/`number`/`button-focus` (mappt wie gtk simpel auf
+get-/set-selection — QTabBar kennt keine Win32-artige Fokus-vs-Auswahl-Unterscheidung,
+kein Treiber braucht sie)/`on-choice-reorder`/`on-choice-close` (No-op-Pflichtmethoden,
+`wx-make-tab%` in `wxpanel.rkt` überschreibt sie via `override*` — müssen existieren,
+sonst „no method to override"; can-reorder/can-close selbst nicht implementiert, kein
+Treiber braucht es)/`set-callback`. Callback-Event-Typ `'tab-panel`.
+
+**Signal→Callback (mirrored button%/choice%/radio-box%):** `QTabBar::currentChanged`
+→ C++-Lambda ruft nur `cb(ud)`; Racket liest `get-selection` separat ab.
+`QSignalBlocker` in `shim_tab_panel_append`/`delete`/`set_selection` (QTabBar selektiert
+wie `QComboBox` automatisch Tab 0 beim allerersten `addTab` — dieser Sprung darf den
+Racket-Callback nicht erreichen).
+
+Preferences-Kategorie-Nav-Nutzung (`framework/private/preferences.rkt`, Zeile ~327):
+konstruiert `tab-panel%` mit `[choices null]`, hängt **einen** `panel:single%` als Kind
+direkt an `tab-panel%` (nicht an separate Pro-Tab-Container!) und schaltet dessen
+`active-child` im `'tab-panel`-Callback um — bestätigt die Ein-Client-Flächen-Annahme
+aus dem Orakel-Vergleich exakt: die Preferences-Kategorien sind NICHT mehrere
+QTabWidget-Seiten, sondern ein einziges wx-verwaltetes Panel, dessen sichtbares Kind
+`single-mixin` umschaltet (§21.1).
+
+**Verifikation:** `examples/tab-panel-probe.rkt` (drei + angehängte Tabs, Tab-Wechsel
+schaltet Kind-Panels um, `set-selection`/`append`/`delete`/`set-item-label` via Code
+lösen den eigenen Callback nicht aus), Nutzer-bestätigt nach dem `show()`-Fix (§21.1) —
+davor stapelten sich alle Tab-Inhalte sichtbar übereinander, exakt das durch §21.1
+behobene Symptom.
+
+### 21.3 `canvas-panel%`: `canvas%` + `panel-mixin`, kein neuer Shim-Code nötig
+
+Beim ersten End-zu-Ende-Versuch mit dem echten Preferences-Dialog: Absturz beim
+Wechsel in eine Kategorie mit scrollbarem Inhalt (`framework/private/color-prefs.rkt`s
+Farbschema-Panels, `[style '(hide-hscroll hide-vscroll)]`) — `send: no such method:
+set-scrollbars`, Klasse `wx-make-horizontal/vertical-panel%` (`wxpanel.rkt:784`).
+
+**Root Cause:** `set-scrollbars` ist **generisch** (`wx/common/canvas-mixin.rkt`s
+`canvas-autoscroll-mixin`) — jede Klasse, die diesen Mixin komponiert, bekommt es
+kostenlos. `wxpanel.rkt`s `panel-redraw` ruft es nur, wenn `hscroll?`/`vscroll?`-Style
+gesetzt ist; dafür routet `mrpanel.rkt`s Panel-Dispatcher (`as-canvas?`-Zweig) auf
+`wx-canvas-panel%` statt `wx-panel%` — und unser `canvas-panel%` war noch
+`(make-stub-class 'canvas-panel%)`, kennt also gar keine der Mixin-Methoden.
+
+**Fix — Kontrakt gegen win32 verifiziert (win32s `canvas-panel.rkt` existiert nicht
+separat; `canvas-panel%` steht direkt in `canvas.rkt`, Zeile 640):**
+```racket
+(define canvas-panel%
+  (class (panel-mixin canvas%)
+    (define/public (is-panel?) #t)
+    (super-new)))
+```
+Unser `canvas%` komponiert bereits `canvas-autoscroll-mixin` (`set-scrollbars`/
+`do-set-scrollbars`/`reset-dc-for-autoscroll`/`get-virtual-h-pos`/`get-virtual-v-pos`
+alle vorhanden, meist als No-op-Default) — das einzig Fehlende war `panel-mixin`s
+`adopt-child`/`register-child`/etc. Win32s `canvas-panel%` überschreibt zusätzlich
+`notify-child-extent` (win32-`window%`-internes Auto-Grow, wird von keinem geteilten
+Code aufgerufen — nicht repliziert, kein Bedarf) und `reset-dc-for-autoscroll`
+(verschiebt ein separates Content-HWND um den Scroll-Offset — unser `canvas%` hat kein
+separates Content-Sub-Widget, `get-content-hwnd` ist dasselbe `qt-handle` wie zum
+Malen). **Bewusst nicht implementiert:** echtes Verschieben von Kindern bei
+Scroll-Offset ≠ 0 — der geerbte No-op reicht, solange kein Treiber-Inhalt überläuft
+(Advisor-Review vor der Implementierung: „content likely fits → offset stays 0";
+gleiche Scoping-Entscheidung wie `list-box%`s Single-Column-Verzicht, §18.4).
+
+**Verifikation:** Colors-Kategorie im echten Preferences-Dialog rendert (Farbschema-
+Beispieltext, keine Absturz mehr), Nutzer-bestätigt per Screenshot.
+
+### 21.4 `group-panel%`: `QGroupBox` + separates Content-Widget
+
+Zweiter End-zu-Ende-Absturz-Nachfolger: nach dem `canvas-panel%`-Fix öffneten sich
+mehrere unabhängige Top-Level-Fenster statt eingebetteter Controls („Direct
+connection"/„Use proxy" + „Host"/„Port" — die Netzwerk-Proxy-Einstellungen im
+Browser-Tab). **Root Cause:** `group-panel%` war ebenfalls noch
+`(make-stub-class 'group-panel%)`; dessen `get-content-hwnd` erbt `window%`s Default
+(`handle`), und der Stub wird mit `[handle #f]` konstruiert. Kinder, die via
+`shim_xxx_create(#f, ...)` mit `nullptr` als Qt-Parent erzeugt werden, werden von Qt
+automatisch zu **Top-Level-Fenstern** (ein `QWidget` ohne Parent bekommt native
+Fenster-Dekoration) — daher die „Fenster-Flut".
+
+**Struktur — analog `tab-panel%` (§21.2), Kontrakt gegen gtk/win32 verifiziert:**
+beide halten ein natives Rahmen-Control (Win32: `BS_GROUPBOX`-Button; gtk:
+`gtk_frame_new`) + ein separates Content-Widget für Kinder, mit fixem Einzug für
+Rahmen/Titel. Für Qt: `QGroupBox` (bereits selbst ein `QWidget`-Container, **kein**
+extra Wrapper nötig wie bei `tab-panel%`s `QTabBar`) + ein Kind-`QWidget*` als
+Content-Fläche. Einzug über `QGroupBox::contentsMargins()` (Qt6 — `getContentsMargins
+(int*,int*,int*,int*)` wurde entfernt, `contentsMargins()` gibt ein `QMargins`-Objekt
+zurück; per MCP-Docs-Tool verifiziert statt angenommen, da Kompilierfehler
+„kein Member von QGroupBox"). `set-size`/`get-client-size` positionieren/berechnen
+exakt wie bei `tab-panel%` (§21.2) über den Einzug statt Tab-Höhe.
+
+**Kontrakt:** `init parent x y w h style label`. Nur `set-label` — kein Callback, kein
+Event-Typ (weder gtk noch win32 verdrahten hier ein Signal). `gets-focus?` → `#f`
+(gtk explizit; win32 lässt den Default durchfallen — hier explizit gemacht,
+konsistent mit gtk).
+
+**Verifikation:** Netzwerk-Proxy-Panel im Browser-Tab erscheint eingebettet statt als
+eigene Fenster, Nutzer-bestätigt.
+
+### 21.5 Preferences-Ende-zu-Ende: teilweise erreicht
+
+Der Preferences-Dialog öffnet jetzt end-to-end und ist durch mehrere Kategorien
+navigierbar (Tabs, Font, Colors, Browser bestätigt) — der ursprüngliche Block-A-Payoff
+(§20) ist erreicht. Systematischer Kategorie-für-Kategorie-Vergleich gegen den
+Original-Dialog (Nutzer-Test) deckte vier neue, eigenständige Befunde auf (§21.6),
+bevor die verbleibenden Kategorien (Editing/Warnings/General/Profiling/Tools/
+Background Expansion) durchgesehen wurden.
+
+### 21.6 Neue offene Befunde (nicht in dieser Session behoben)
+
+1. **Resize-/Reflow-Bug — bestätigt allgemein, nicht dialogspezifisch.** Wird ein
+   Fenster vergrößert, wandern Kind-Controls nicht mit; ein Button-Zeile am unteren
+   Rand hält ihre Position konstant unter dem darüberliegenden Widget, statt am
+   Fensterrand zu kleben (Original-Verhalten: alles reflowt beim Resize). Reproduziert
+   sowohl im Preferences-Dialog als auch in der isolierten `tab-panel-probe.rkt` — via
+   Advisor-empfohlener Disambiguierung als **allgemeiner** Bug bestätigt, nicht durch
+   `tab-panel%`/`canvas-panel%`/`group-panel%` verursacht. Root Cause nicht untersucht
+   (vermutlich Frame/Dialog-Resize → Relayout-Verdrahtung, `wxtop.rkt`/`wxpanel.rkt`s
+   `on-size`-Kette).
+2. **Editor-Canvas-Scrollbars fehlen.** `canvas:color%` (Farbschema-Beispieltext im
+   Font-Tab) zeigt im Original zwei Scrollbars, hier keine — bewusst offen seit
+   Checkpoint C (`wx/qt/canvas.rkt`s eigener Kommentar: „Scroll stubs — no scrollbars
+   in the spike").
+3. **Font-Size-Slider zeigt keine Zahl.** Im Original: horizontal zentrierter, vertikal
+   zwischen Slider und den beiden Buttons positionierter Zahlen-Text; hier fehlt die
+   Anzeige komplett. Vermutlich ein separates `message%`/Text-Anzeige-Problem, nicht
+   untersucht.
+4. **Colors-Tab: rechte Spalte fehlt + generell fehlende dunkle Rahmen.** Pro Stil
+   sollte ein Button+Checkbox („Revert...") in einer rechten Spalte stehen — fehlt
+   komplett. Zusätzlich fehlen bei vielen Controls sichtbare (dunkle) Rahmen. Nicht
+   untersucht, vermutlich ein weiterer fehlender Content-Pfad plus `'border`-Style-
+   Zeichnung.
+
+Die noch nicht durchgesehenen Kategorien (Editing/Warnings/General/Profiling/Tools/
+Background Expansion) werden vermutlich weitere, ähnlich eigenständige Befunde zutage
+fördern — jeder davon ist Kandidat für eine eigene, fokussierte Session (Musterbeispiel:
+genau wie `tab-panel%` selbst in dieser Session als Block-A-Nachfolger zu
+`canvas-panel%`/`group-panel%` führte).
+
+**Commits (gui-Submodul, `qt-backend`, gepusht: nein zum Zeitpunkt dieses Abschnitts):**
+`ad33e36a` (`show()`-Fix), `084cf27b` (`tab-panel%`), `e478503f` (`canvas-panel%`),
+`f6f38474` (`group-panel%`) — getrennt pro logischer Einheit (Rollback-Punkte,
+Nutzer-Präferenz wie in §20). Shim-Additions (Umbrella, `main`):
+`5f6dfb4` (`shim_widget_set_visible`), `7de2790` (Tab-Panel-Shim + Probe),
+`1ee3ed5` (Group-Panel-Shim) — `canvas-panel%` brauchte keinen neuen Shim-Code.
