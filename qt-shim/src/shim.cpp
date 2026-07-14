@@ -414,6 +414,19 @@ void shim_widget_set_enabled(void* widget, int enabled)
     static_cast<QWidget*>(widget)->setEnabled(enabled != 0);
 }
 
+// QWidget::setVisible() -- toggles the actual native widget's visibility.
+// window%'s generic `show` method only tracked a Racket-side flag before
+// this (docs/HACKING.md §21): single-mixin's active-child (framework/
+// private/panel.rkt, used by both the real Preferences dialog's
+// panel:single% and any other show-based "only one child visible" pattern)
+// positions every child unconditionally and relies entirely on native
+// show/hide to make the inactive ones disappear -- win32/gtk's window base
+// classes already reflect real visibility here, this backend's did not.
+void shim_widget_set_visible(void* widget, int visible)
+{
+    static_cast<QWidget*>(widget)->setVisible(visible != 0);
+}
+
 // Translates a point in widget-local coordinates to global screen coordinates
 // (QWidget::mapToGlobal). Used by window%'s client-to-screen so popup-menu and
 // context menus land at the true screen position instead of the raw local
