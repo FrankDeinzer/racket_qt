@@ -108,8 +108,8 @@ referenziert).
 | E – Panel-Sizing-Fix + Modalitäts-Fix | ✅ 2026-07-10, alle 3 Plattformen (§18.2/§18.3) |
 | E – `file-selector` (get-file/put-file, Qt-eigener Dialog) | ✅ 2026-07-12, alle 3 Plattformen; Qt-eigen×nativ-Matrix (3×2) komplett 2026-07-13 (§19) |
 | E – `choice%`/`radio-box%`/`slider%` echt | ✅ 2026-07-13, alle 3 Plattformen (§20) |
-| E – `tab-panel%`/`canvas-panel%`/`group-panel%` echt (Widget-Breite abgeschlossen) | ✅ 2026-07-14, Windows (§21) |
-| E – Preferences Ende-zu-Ende | 🟡 teilweise: Dialog öffnet + navigiert (Tabs/Font/Colors/Browser bestätigt), 4 neue Einzelbefunde offen (§21.6), restliche Kategorien nicht durchgesehen |
+| E – `tab-panel%`/`canvas-panel%`/`group-panel%` echt (Widget-Breite abgeschlossen) | ✅ 2026-07-14, Windows + Linux (§21); macOS-Validierung offen |
+| E – Preferences Ende-zu-Ende | 🟡 teilweise, Windows + Linux: Dialog öffnet + navigiert (Tabs/Font/Colors/Browser bestätigt), 4 neue Einzelbefunde offen (§21.6, auf Linux identisch reproduziert), restliche Kategorien nicht durchgesehen |
 
 **Offene Nebenbefunde, je eigene Session:** macOS-Menüleiste zeigt teils 8 statt 9
 Einträge (`Windows`-Menü fehlt manchmal, Ursache offen); Linux Resize/Minimieren unter
@@ -123,7 +123,8 @@ auf Linux bereits bei nur einem offenen Tab (Auslöser weiter gefasst als urspr�
 angenommen), nicht root-caused (§19); nativer macOS-Save-Dialog hängt bei fehlender
 Endung ein literales `.*` an den Dateinamen an (nur nativer Pfad, Qt-eigener Dialog
 unbetroffen — Diskriminator bestätigt, §19), bewusst nicht gefixt, da native Pfad ohnehin
-nicht der Standard ist. Neu seit 2026-07-14 (§21.6, alle Windows, nicht root-caused):
+nicht der Standard ist. Neu seit 2026-07-14 (§21.6, nicht root-caused; auf Linux
+identisch reproduziert, s. u. — backend-generisch, nicht Windows-spezifisch):
 Resize/Reflow-Bug (Kind-Controls wandern beim Fenster-Vergrößern nicht mit, bestätigt
 allgemein — reproduziert sowohl im Preferences-Dialog als auch in einer isolierten
 Probe, nicht spezifisch für `tab-panel%`/`canvas-panel%`/`group-panel%`); Editor-Canvas-

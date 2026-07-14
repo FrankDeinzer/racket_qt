@@ -1586,3 +1586,22 @@ Session**, nicht im Rahmen dieser Sitzung fortgesetzt.
 Nutzer-Präferenz wie in §20). Shim-Additions (Umbrella, `main`):
 `5f6dfb4` (`shim_widget_set_visible`), `7de2790` (Tab-Panel-Shim + Probe),
 `1ee3ed5` (Group-Panel-Shim) — `canvas-panel%` brauchte keinen neuen Shim-Code.
+
+**Linux-Validierung (2026-07-13-3_report-linux, nach Push):** kein neuer Code — reiner
+Sync (lokaler gui-Submodul-Checkout war stale auf `3ba8fa75`, 4 Commits zurück; Umbrella
+`main` zeigte bereits korrekt auf `f6f38474`; nach Nutzer-Bestätigung, Regel 7,
+Fast-Forward auf `f6f38474`, bereits `origin/qt-backend`, kein Netzwerk-Push nötig) +
+Shim-Rebuild (stale-Shim-Falle, `shim.cpp` neuer als `libracketqtshim.so`) + doppelte
+Validierung. `examples/tab-panel-probe.rkt` Nutzer-bestätigt, Konsolen-Log vollständig
+eingefangen (flushte, wie schon unter Windows/macOS beobachtet, erst beim `kill
+-TERM`-Exit, nicht laufend) und bestätigt exakt dasselbe Muster wie Windows: Callback
+feuert nur bei echten Tab-Klicks, nie bei `set-selection`/`set-item-label`/`append`/
+`delete` via Code. Echter DrRacket-Preferences-Dialog öffnet end-to-end (Kategorie-Nav
+über `tab-panel%`), Nutzer hat Tabs/Font/Colors/Browser durchgeklickt und bestätigt —
+kein Absturz beim Wechsel in Colors (`canvas-panel%`) oder Browser (`group-panel%`).
+Die vier §21.6-Befunde (Resize/Reflow, fehlende Editor-Scrollbars, fehlende
+Font-Size-Zahl, Colors-Tab rechte Spalte/Rahmen) wurden gezielt gegengeprüft und sind
+auf Linux **identisch reproduzierbar** — stützt die Einschätzung, dass es sich um
+backend-generische, nicht Windows-spezifische Befunde handelt. Damit
+`tab-panel%`/`canvas-panel%`/`group-panel%` + Preferences-Ende-zu-Ende auf Windows
+**und** Linux validiert; macOS bleibt offen (separater Prompt).

@@ -5,6 +5,38 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-14 (Linux) — `tab-panel%`/`canvas-panel%`/`group-panel%`: Linux-Validierung (2026-07-13-3_prompt)
+
+**Kontext:** `docs/2026-07-13-3_prompt.md`. Voller Bericht:
+`docs/2026-07-13-3_report-linux.md`. Fortsetzung der Windows-Session — kein neuer
+Widget-Code, reine Cross-Platform-Validierung nach Push. Racket `v9.2 [cs]` gemessen.
+
+- **Sync:** lokaler gui-Submodul-Checkout war stale auf `3ba8fa75` (4 Commits hinter
+  `origin/qt-backend`, bereits gefetcht); Umbrella-`main` zeigte bereits korrekt auf
+  `f6f38474`. Nutzer-Bestätigung (Regel 7) → Fast-Forward, keine Netzwerk-Schreibaktion.
+  Shim war stale (`shim.cpp` neuer als `.so`) → Rebuild.
+- **`examples/tab-panel-probe.rkt`** Nutzer-bestätigt, Konsolen-Log vollständig
+  eingefangen: Callback feuert nur bei echten Tab-Klicks, nie bei
+  `set-selection`/`set-item-label`/`append`/`delete` via Code — bestätigt den
+  `QSignalBlocker`-Schutz (§21) auch auf Linux.
+- **Echter DrRacket-Preferences-Dialog** öffnet end-to-end (Kategorie-Nav über
+  `tab-panel%`), Nutzer hat Tabs/Font/Colors/Browser durchgeklickt und bestätigt —
+  kein Absturz beim Wechsel in Colors (`canvas-panel%`) oder Browser
+  (`group-panel%`).
+- **Cross-Check der vier §21.6-Befunde:** Resize/Reflow-Bug, fehlende
+  Editor-Canvas-Scrollbars, fehlende Font-Size-Zahl, Colors-Tab rechte
+  Spalte/Rahmen — alle vier auf Linux **identisch reproduzierbar**. Stützt die
+  Einschätzung: backend-generische Befunde, nicht Windows-spezifisch.
+- Smoke 3/3 vor und nach der Validierung. Keine neuen Commits (reine Validierung);
+  Doku-Updates (`STATUS.md`, `docs/HACKING.md` §21-Addendum,
+  `CLAUDE.md`-Checkpoint-Tabelle).
+- **Nächster Schritt:** macOS-Validierung dieser drei Widgets + Preferences-Ende-zu-
+  Ende bleibt offen (separater Prompt). Je eigene künftige Session für: Resize-Bug,
+  Editor-Scrollbars, Font-Size-Anzeige, Colors-Spalte/Rahmen, restliche
+  Preferences-Kategorien.
+
+---
+
 ## Session 2026-07-14 — `tab-panel%`/`canvas-panel%`/`group-panel%` echt + Preferences-Ende-zu-Ende (teilweise) (2026-07-13-3_prompt)
 
 **Kontext:** `docs/2026-07-13-3_prompt.md`. Voller Bericht: `docs/2026-07-13-3_report-win.md`.
