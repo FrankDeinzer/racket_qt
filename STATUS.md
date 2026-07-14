@@ -5,6 +5,47 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-14 (macOS) — `tab-panel%`/`canvas-panel%`/`group-panel%`: macOS-Validierung + neuer Menü-Bug gefunden (2026-07-13-3_prompt)
+
+**Kontext:** `docs/2026-07-13-3_prompt.md`. Voller Bericht:
+`docs/2026-07-13-3_report-macos.md`. Fortsetzung der Windows/Linux-Sessions — kein
+neuer Widget-Code, reine Cross-Platform-Validierung. Racket `v9.2 [cs]` gemessen.
+
+- **Sync:** lokaler gui-Submodul-Checkout war stale auf `3ba8fa75` (4 Commits hinter
+  `origin/qt-backend`, bereits gefetcht); Umbrella-`main` zeigte bereits korrekt auf
+  `f6f38474`. Nutzer-Bestätigung (Regel 7) → Fast-Forward, kein Netzwerk-Push. Shim
+  neu gebaut (`shim.cpp` neuer als `libracketqtshim.dylib`). Re-Smoke 3/3 grün.
+- **`tab-panel%`:** `examples/tab-panel-probe.rkt` Nutzer-bestätigt, identisches
+  Callback-Verhalten wie Windows/Linux (kein Retrigger bei Code-Mutationen).
+- **Preferences-E2E blockiert durch neuen, unabhängigen macOS-Menü-Bug:** Klick auf den
+  App-Menü-Eintrag an der „Preferences"-Stelle löst den falschen Callback aus (DrRackets
+  Help-Menü-Punkt „Configure Command Line for Racket…" statt `preferences:show-dialog`,
+  inkl. dessen `authopen`-Sudo-Abfrage). Root-Cause vollständig geklärt (Doppelursache:
+  fehlendes Qt-Äquivalent zu `wx/cocoa`s nativem Preferences-Hook + Qt's macOS-Text-
+  Heuristik ordnet die falsche Action automatisch ins App-Menü ein), **nicht gefixt**
+  (zu groß/grundlegend für diese Session, eigene künftige Session, Muster wie
+  Resize-Bug). Details: `docs/HACKING.md` §22.
+- **Fallback für `canvas-panel%`/`group-panel%`:** da der Dialog-Pfad blockiert war,
+  zwei neue isolierte Proben geschrieben (`examples/canvas-panel-probe.rkt`,
+  `examples/group-panel-probe.rkt`), beide Nutzer-bestätigt, kein Absturz. Direkter
+  `(preferences:show-dialog)`-Aufruf im DrRacket-Interactions-Fenster bestätigt zusätzlich:
+  der Dialog selbst ist intakt (öffnet, leer mangels registrierter Kategorien in der
+  isolierten Modul-Instanz) — der Bug liegt rein im Menü-Dispatch, nicht in den drei
+  Widgets.
+- **Damit:** `tab-panel%`/`canvas-panel%`/`group-panel%` (Checkpoint E, Widget-Breite)
+  auf allen drei Plattformen validiert. Preferences-Ende-zu-Ende bleibt auf macOS offen
+  (Menü-Bug §22), auf Windows/Linux strukturell erreicht (Restbefunde §21.6).
+- **Commits:** keine gui-Submodul-Commits (reiner Fast-Forward). Umbrella: zwei neue
+  Beispiel-Probes + Doku-Updates (`docs/HACKING.md` §21.8/§22, `CLAUDE.md`-Checkpoint,
+  dieser Eintrag, `docs/2026-07-13-3_report-macos.md`).
+- **Nächster Schritt:** Push/Sync-Entscheidung (Regel 7) noch offen. Je eigene künftige
+  Session für: macOS-Preferences-Menü-Bug (§22), Resize/Reflow-Bug (§21.7),
+  Editor-Canvas-Scrollbars, Font-Size-Zahlen-Anzeige, Colors-Tab rechte Spalte/Rahmen,
+  restliche Preferences-Kategorien, mögliche Verbindung zum älteren „8 statt 9
+  Menüs"-Befund (s. u.) klären.
+
+---
+
 ## Session 2026-07-14 (Linux) — `tab-panel%`/`canvas-panel%`/`group-panel%`: Linux-Validierung (2026-07-13-3_prompt)
 
 **Kontext:** `docs/2026-07-13-3_prompt.md`. Voller Bericht:

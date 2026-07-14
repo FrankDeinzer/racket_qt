@@ -108,11 +108,17 @@ referenziert).
 | E – Panel-Sizing-Fix + Modalitäts-Fix | ✅ 2026-07-10, alle 3 Plattformen (§18.2/§18.3) |
 | E – `file-selector` (get-file/put-file, Qt-eigener Dialog) | ✅ 2026-07-12, alle 3 Plattformen; Qt-eigen×nativ-Matrix (3×2) komplett 2026-07-13 (§19) |
 | E – `choice%`/`radio-box%`/`slider%` echt | ✅ 2026-07-13, alle 3 Plattformen (§20) |
-| E – `tab-panel%`/`canvas-panel%`/`group-panel%` echt (Widget-Breite abgeschlossen) | ✅ 2026-07-14, Windows + Linux (§21); macOS-Validierung offen |
-| E – Preferences Ende-zu-Ende | 🟡 teilweise, Windows + Linux: Dialog öffnet + navigiert (Tabs/Font/Colors/Browser bestätigt), 4 neue Einzelbefunde offen (§21.6, auf Linux identisch reproduziert), restliche Kategorien nicht durchgesehen |
+| E – `tab-panel%`/`canvas-panel%`/`group-panel%` echt (Widget-Breite abgeschlossen) | ✅ 2026-07-14, alle 3 Plattformen (§21; macOS via `tab-panel%` real + isolierter Proben für `canvas-panel%`/`group-panel%`, §21.8) |
+| E – Preferences Ende-zu-Ende | 🟡 Windows + Linux: Dialog öffnet + navigiert (Tabs/Font/Colors/Browser bestätigt), 4 neue Einzelbefunde offen (§21.6, auf Linux identisch reproduziert), restliche Kategorien nicht durchgesehen. **macOS: blockiert** durch neuen, unabhängigen Menü-Bug (§22) — Dialog selbst intakt (per direktem `(preferences:show-dialog)` bestätigt), aber der Menüzugang ist kaputt |
 
 **Offene Nebenbefunde, je eigene Session:** macOS-Menüleiste zeigt teils 8 statt 9
-Einträge (`Windows`-Menü fehlt manchmal, Ursache offen); Linux Resize/Minimieren unter
+Einträge (`Windows`-Menü fehlt manchmal, Ursache offen — evtl. verwandt mit §22, nicht
+bestätigt); **neu 2026-07-14 (§22, nicht gefixt):** macOS-App-Menü-Eintrag an der
+„Preferences"-Stelle löst den falschen Callback aus (DrRackets Help-Menü-Punkt
+„Configure Command Line for Racket…" statt `preferences:show-dialog`) — Doppelursache:
+unser Qt-Backend hat kein Äquivalent zu `wx/cocoa`s nativem Preferences-Menü-Hook, UND
+Qt's macOS-Text-Heuristik ordnet die falsche Action automatisch ins App-Menü ein; Linux
+Resize/Minimieren unter
 KWin nicht validiert; Windows Toolbar-Save-Icon-Timing (`wx/qt/button.rkt`); Linux Crash A
 („arity mismatch") nach den macOS-Menü-Dispatch-Fixes (§19) in 4 Versuchen nicht mehr
 reproduziert — plausibel behoben, nicht absolut bewiesen (Original war

@@ -1605,3 +1605,94 @@ auf Linux **identisch reproduzierbar** — stützt die Einschätzung, dass es si
 backend-generische, nicht Windows-spezifische Befunde handelt. Damit
 `tab-panel%`/`canvas-panel%`/`group-panel%` + Preferences-Ende-zu-Ende auf Windows
 **und** Linux validiert; macOS bleibt offen (separater Prompt).
+
+### 21.8 macOS-Validierung (2026-07-14, `2026-07-13-3_report-macos`) — Widgets bestätigt, Preferences-E2E blockiert durch neuen, unabhängigen Menü-Bug
+
+Kein neuer `wx/qt/`-/`shim.cpp`-Code — reiner Sync (lokaler gui-Submodul-Checkout war
+stale auf `3ba8fa75`, nach Nutzer-Bestätigung Fast-Forward auf `f6f38474`, bereits
+`origin/qt-backend`) + Shim-Rebuild (stale-Shim-Falle, `shim.cpp` neuer als
+`libracketqtshim.dylib`) + Validierung.
+
+- **`tab-panel%`:** `examples/tab-panel-probe.rkt` Nutzer-bestätigt, Konsolen-Log
+  bestätigt dasselbe Muster wie Windows/Linux (Callback nur bei echten Tab-Klicks, kein
+  Retrigger bei `set-selection`/`set-item-label`/`append`/`delete`).
+- **`canvas-panel%`/`group-panel%`:** der reguläre Weg über den echten Preferences-
+  Dialog war blockiert (§22 — neuer, unabhängiger macOS-Menü-Bug). Daher zwei neue
+  isolierte Proben, analog `tab-panel-probe.rkt` (Nutzer-bestätigt):
+  - `examples/canvas-panel-probe.rkt`: `editor-canvas%` mit `hide-hscroll`/
+    `hide-vscroll`-Stil (exakt die Konfiguration aus `color-prefs.rkt`s
+    `canvas:color%`); Oversized-Inhalt triggert `canvas-autoscroll-mixin`s interne
+    `set-scrollbars`-Neuberechnung (der Aufruf, der auf dem Windows-Stub crashte) ohne
+    Absturz.
+  - `examples/group-panel-probe.rkt`: `group-box-panel%` mit Radio-Box/Textfeld/Button
+    als Kinder — alle bleiben innerhalb des Rahmens (kein ausreißendes Top-Level-
+    Fenster, der Windows-Stub-Fehlermodus), `set-label` ändert den Rahmentitel korrekt.
+
+Damit sind alle drei Widgets auf allen drei Plattformen bestätigt (Windows/Linux via
+echtem Preferences-Dialog, macOS via `tab-panel%` real + isolierter Proben für
+`canvas-panel%`/`group-panel%`). **Preferences-Ende-zu-Ende bleibt auf macOS
+spezifisch blockiert** — nicht durch diese drei Widgets, sondern durch einen davon
+unabhängigen, neu entdeckten Menü-Bug, s. §22.
+
+## 22. macOS: Qt reißt einen Help-Menü-Eintrag fälschlich als „Preferences" ins App-Menü (offen, nicht gefixt)
+
+**Symptom (reproduzierbar, 2/2):** Auf macOS existiert unter Edit **kein**
+„Preferences…"-Eintrag (erwartet — s. Root Cause A unten). Im App-Menü („racket") gibt
+es einen Eintrag an der für „Preferences" konventionellen Stelle; ein Klick darauf
+löst **nicht** `preferences:show-dialog` aus, sondern den Callback von DrRackets
+Help-Menü-Eintrag „Configure Command Line for Racket…"
+(`drracket-core-lib/drracket/private/frame.rkt`s `add-menu-macosx-path-item`, via
+`string-constant add-racket/bin-to-path`) — inklusive dessen `authopen`-Sudo-Passwort-
+Abfrage und dem abschließenden „PATH has been configured…"-Infofenster. Verifiziert per
+Nutzer-Retest (frischer DrRacket-Start, direkter Klick, kein anderer Menüpunkt vorher
+berührt) und per direktem `(preferences:show-dialog)`-Aufruf im Interactions-Fenster
+(öffnet den echten, aber wegen isolierter Modul-Instanz leeren Preferences-Dialog —
+bestätigt, dass die Dialog-Klasse selbst intakt ist und der Bug rein im Menü-Dispatch
+liegt).
+
+**Root Cause A (bestätigt durch Code-Lektüre) — zwei unabhängige, sich addierende
+Ursachen:**
+
+1. `mred/private/app.rkt`s `current-eventspace-has-standard-menus?` entscheidet rein
+   über `(eq? (system-type) 'macosx)` — unabhängig vom aktiven wx-Backend. Auf Cocoa
+   ist das korrekt: `wx/cocoa/menu-bar.rkt` registriert beim Modul-Load eine eigene,
+   native `NSMenuItem "Preferences…"` mit Handler `openPreferences:`
+   (`wx/cocoa/queue.rkt`), komplett unabhängig von der normalen `menu%`/`menu-item%`-
+   Maschinerie. `framework/private/standard-menus-items.rkt:427-436` nutzt genau dieses
+   Prädikat, um den normalen Edit→Preferences-Menüpunkt **zu unterdrücken**, weil Cocoa
+   ihn ohnehin bereits nativ bereitstellt. Unser Qt-Backend hat **kein** Äquivalent zu
+   `wx/cocoa/menu-bar.rkt`s Preferences-Hook — Ergebnis: der Menüpunkt existiert auf
+   macOS mit unserem Backend **nirgends** regulär.
+2. Qt's macOS-Cocoa-Integration weist jedem `QAction` automatisch eine `MenuRole` per
+   Text-Heuristik zu (Default `TextHeuristicRole`), unabhängig davon, in welchem Menü
+   die Action steht — Actions mit als „Preferences"-artig erkanntem Text (u. a. Wörter
+   wie „config"/„settings"/„preferences"/„options") werden automatisch ins App-Menü
+   verschoben. `shim_action_create` (`qt-shim/src/shim.cpp`) setzt nirgends
+   `QAction::setMenuRole(...)` — jede Action bleibt auf der Qt-Default-Heuristik. Der
+   Text „**Configure** Command Line for Racket…" matched dieses Muster und wird
+   fälschlich als die (mangels Punkt 1 ohnehin einzige verfügbare) App-Menü-„Preferences"-
+   Aktion einsortiert.
+
+**Nicht gefixt, mit Begründung:** ein einzeiliger `setMenuRole(NoRole)`-Fix in
+`shim_action_create` behebt nur Ursache 2, würde aber weiterhin **keinen** funktionieren-
+den Preferences-Zugang auf macOS schaffen, weil Ursache 1 den Menüpunkt gar nicht erst
+erzeugt — der eigentliche Fix bräuchte ein Qt-Äquivalent zu `wx/cocoa/queue.rkt`s
+`openPreferences:`-Hook (oder eine Anpassung von `current-eventspace-has-standard-
+menus?`, das aber `wx/common`/`mred`-Kerncode ist, nicht `wx/qt/`). Zu groß und
+grundlegend für eine Nebenbei-Reparatur innerhalb der Widget-Validierungssession — nach
+Advisor-Rücksprache als **eigene, dedizierte künftige Session** zurückgestellt (Muster
+wie beim Resize-Bug, §21.7).
+
+**Vermuteter, aber NICHT verifizierter Zusammenhang:** die bereits bekannte, ältere
+macOS-Anomalie „Menüleiste zeigt 8 statt 9 Einträge, `Windows`-Menü fehlt manchmal"
+(`STATUS.md`, Session 2026-07-09) könnte derselben Bug-Klasse (Qt's automatische
+macOS-Menü-Reorganisation kollidiert mit Racket/Cocoa-spezifischen Annahmen) angehören
+— aber nicht bestätigt, ob dort ebenfalls Text-Heuristik oder ein anderer Mechanismus
+(z. B. die separate `WindowsMenuRole`-Erkennung für ein Menü namens „Window") die
+Ursache ist. Als Hypothese für die künftige Fix-Session festgehalten, nicht als
+bewiesen.
+
+**Kein Blocker für diese Session:** die drei Widgets aus §21 wurden via isolierter
+Proben validiert (§21.8) — der Preferences-Dialog selbst ist strukturell intakt
+(bestätigt per direktem `(preferences:show-dialog)`-Aufruf); nur der reguläre
+Menü-Zugangsweg auf macOS ist kaputt.
