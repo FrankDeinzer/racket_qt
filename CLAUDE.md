@@ -109,16 +109,20 @@ referenziert).
 | E – `file-selector` (get-file/put-file, Qt-eigener Dialog) | ✅ 2026-07-12, alle 3 Plattformen; Qt-eigen×nativ-Matrix (3×2) komplett 2026-07-13 (§19) |
 | E – `choice%`/`radio-box%`/`slider%` echt | ✅ 2026-07-13, alle 3 Plattformen (§20) |
 | E – `tab-panel%`/`canvas-panel%`/`group-panel%` echt (Widget-Breite abgeschlossen) | ✅ 2026-07-14, alle 3 Plattformen (§21; macOS via `tab-panel%` real + isolierter Proben für `canvas-panel%`/`group-panel%`, §21.8) |
-| E – Preferences Ende-zu-Ende | 🟡 Windows + Linux: Dialog öffnet + navigiert (Tabs/Font/Colors/Browser bestätigt), 4 neue Einzelbefunde offen (§21.6, auf Linux identisch reproduziert), restliche Kategorien nicht durchgesehen. **macOS: blockiert** durch neuen, unabhängigen Menü-Bug (§22) — Dialog selbst intakt (per direktem `(preferences:show-dialog)` bestätigt), aber der Menüzugang ist kaputt |
+| E – Preferences Ende-zu-Ende | 🟡 Windows + Linux: Dialog öffnet + navigiert (Tabs/Font/Colors/Browser bestätigt), 4 neue Einzelbefunde offen (§21.6, auf Linux identisch reproduziert), restliche Kategorien nicht durchgesehen. **macOS: Menüzugang gefixt** (§22, 2026-07-14) — Preferences erscheint jetzt im Edit-Menü und öffnet den echten Dialog; Restbefunde §21.6 vermutlich auch hier relevant, nicht erneut durchgesehen |
 
 **Offene Nebenbefunde, je eigene Session:** macOS-Menüleiste zeigt teils 8 statt 9
 Einträge (`Windows`-Menü fehlt manchmal, Ursache offen — evtl. verwandt mit §22, nicht
-bestätigt); **neu 2026-07-14 (§22, nicht gefixt):** macOS-App-Menü-Eintrag an der
-„Preferences"-Stelle löst den falschen Callback aus (DrRackets Help-Menü-Punkt
-„Configure Command Line for Racket…" statt `preferences:show-dialog`) — Doppelursache:
-unser Qt-Backend hat kein Äquivalent zu `wx/cocoa`s nativem Preferences-Menü-Hook, UND
-Qt's macOS-Text-Heuristik ordnet die falsche Action automatisch ins App-Menü ein; Linux
-Resize/Minimieren unter
+bestätigt, durch den §22-Fix nicht berührt); **gefixt 2026-07-14 (§22):**
+macOS-App-Menü-Eintrag an der „Preferences"-Stelle löste den falschen Callback aus
+(DrRackets Help-Menü-Punkt „Configure Command Line for Racket…" statt
+`preferences:show-dialog`) — behoben durch `setMenuRole(NoRole)` in `shim.cpp` +
+PLT_QT-gated `current-eventspace-has-standard-menus?` in `mred/private/app.rkt` (unser
+Fork). **Neuer, ungeklärter Nebenbefund aus demselben Fix:** die erhoffte
+Exit-Bestätigung + tatsächliche Prozessbeendigung beim Schließen des letzten Fensters
+trat NICHT ein (Prozess läuft weiter, kein Crash) — nicht root-caused, zwei Hypothesen
+(DrRacket-eigene Close-Logik vs. Qt-Pump-Loop-Bug bei `queue-callback`), eigene künftige
+Session. Linux Resize/Minimieren unter
 KWin nicht validiert; Windows Toolbar-Save-Icon-Timing (`wx/qt/button.rkt`); Linux Crash A
 („arity mismatch") nach den macOS-Menü-Dispatch-Fixes (§19) in 4 Versuchen nicht mehr
 reproduziert — plausibel behoben, nicht absolut bewiesen (Original war

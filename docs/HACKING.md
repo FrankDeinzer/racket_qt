@@ -1634,7 +1634,7 @@ echtem Preferences-Dialog, macOS via `tab-panel%` real + isolierter Proben für
 spezifisch blockiert** — nicht durch diese drei Widgets, sondern durch einen davon
 unabhängigen, neu entdeckten Menü-Bug, s. §22.
 
-## 22. macOS: Qt reißt einen Help-Menü-Eintrag fälschlich als „Preferences" ins App-Menü (offen, nicht gefixt)
+## 22. macOS: Qt reißt einen Help-Menü-Eintrag fälschlich als „Preferences" ins App-Menü (gefixt, 2026-07-14)
 
 **Symptom (reproduzierbar, 2/2):** Auf macOS existiert unter Edit **kein**
 „Preferences…"-Eintrag (erwartet — s. Root Cause A unten). Im App-Menü („racket") gibt
@@ -1673,15 +1673,56 @@ Ursachen:**
    fälschlich als die (mangels Punkt 1 ohnehin einzige verfügbare) App-Menü-„Preferences"-
    Aktion einsortiert.
 
-**Nicht gefixt, mit Begründung:** ein einzeiliger `setMenuRole(NoRole)`-Fix in
-`shim_action_create` behebt nur Ursache 2, würde aber weiterhin **keinen** funktionieren-
-den Preferences-Zugang auf macOS schaffen, weil Ursache 1 den Menüpunkt gar nicht erst
-erzeugt — der eigentliche Fix bräuchte ein Qt-Äquivalent zu `wx/cocoa/queue.rkt`s
-`openPreferences:`-Hook (oder eine Anpassung von `current-eventspace-has-standard-
-menus?`, das aber `wx/common`/`mred`-Kerncode ist, nicht `wx/qt/`). Zu groß und
-grundlegend für eine Nebenbei-Reparatur innerhalb der Widget-Validierungssession — nach
-Advisor-Rücksprache als **eigene, dedizierte künftige Session** zurückgestellt (Muster
-wie beim Resize-Bug, §21.7).
+**Ursprünglich zurückgestellt, dann doch in derselben Session gefixt (2026-07-14,
+Nutzer-Wunsch nach dem ersten Bericht):** ein einzeiliger `setMenuRole(NoRole)`-Fix in
+`shim_action_create` allein hätte nur Ursache 2 behoben, aber weiterhin **keinen**
+funktionierenden Preferences-Zugang auf macOS geschaffen, weil Ursache 1 den Menüpunkt
+gar nicht erst erzeugt. Beide Ursachen zusammen gefixt, vollständig innerhalb unseres
+eigenen Forks (`third_party/gui`, Remote `FrankDeinzer/racket_gui.git`, kein Zugriff auf
+die separat installierte Racket-Distribution nötig):
+
+**Fix Teil A (`qt-shim/src/shim.cpp`):** `QAction::setMenuRole(QAction::NoRole)` auf
+allen vier QAction-Erzeugungs-/Rückgabestellen (`shim_action_create`,
+`shim_menu_add_submenu`, `shim_menu_add_separator`, `shim_menubar_add_menu` — letztere
+gab den Rückgabewert bisher verworfen zurück, jetzt abgefangen). Schaltet Qt's
+automatische macOS-Text-Heuristik komplett ab (Ursache 2).
+
+**Fix Teil B (`mred/private/app.rkt`, unser Fork, PLT_QT-gated):**
+```racket
+(define (current-eventspace-has-standard-menus?)
+  (and (eq? 'macosx (system-type))
+       (not (getenv "PLT_QT"))
+       (wx:main-eventspace? (wx:current-eventspace))))
+```
+Additiv, nur unter `PLT_QT=1` wirksam — für Cocoa/GTK/Win32 byte-identisch
+unverändert. Behebt Ursache 1: das Framework erzeugt jetzt auch auf Qt/macOS den
+normalen Edit→Preferences-Menüpunkt (matcht Windows/Linux-Platzierung — landet unter
+Edit, nicht im App-Menü wie bei echten Mac-Apps üblich, da wir keinen echten
+Cocoa-Preferences-Hook nachbilden, sondern nur die Unterdrückung aufheben).
+
+**Nebeneffekt, bewusst mitgezogen (Nutzer-Entscheidung für das volle Gating statt
+eines schmaleren Einzeiler-Patches):** dieselbe Prädikat-Änderung wirkt auch in
+`framework/private/group.rkt`s `can-close-check`/`on-close-action` (verdrahtet über
+`register-group-mixin`, jedes Framework-Frame). Erwartung: Schließen des letzten
+Fensters sollte künftig eine Exit-Bestätigung zeigen und den Prozess danach wirklich
+beenden (statt eines vermuteten Zombie-Prozesses ohne jede UI). **Beim Test NICHT
+eingetreten:** nach Schließen von Hauptfenster + Preferences-Dialog kein
+Bestätigungsdialog, Prozess lief weiter im Hintergrund (per `SIGTERM` beendet, kein
+Crash, keine Fehlermeldung). Nicht root-caused — zwei Hypothesen, keine verifiziert:
+(a) DrRackets eigener Frame (`drracket-core-lib`, außerhalb unseres Forks) hat
+möglicherweise eine eigene Close/Exit-Logik, die gar nicht über
+`framework/private/group.rkt`s generischen Mechanismus läuft; (b) der Qt-Pump-Loop
+könnte den intern per `queue-callback` eingereihten `(exit)`-Aufruf nicht mehr
+abarbeiten, sobald keine Fenster mehr sichtbar sind (eigenständiger, potenziell echter
+`wx/qt`-Bug). **Keine Regression** — das Verhalten ist nicht schlechter als vorher
+(kein Crash), nur der erhoffte Bonus-Effekt blieb aus. Separates offenes Thema für eine
+künftige Session, nicht Teil dieses Fixes.
+
+Verifiziert (Nutzer-bestätigt, macOS): Preferences erscheint jetzt im Edit-Menü und
+öffnet den echten Dialog mit allen Kategorien (identische Einschränkungen wie auf den
+anderen Plattformen). „Configure Command Line for Racket…" bleibt korrekt im
+Help-Menü und löst weiterhin den `authopen`-Sudo-Flow aus (durch den `setMenuRole`-Fix
+nicht kaputt gemacht). Smoke 3/3 grün vor und nach dem Fix.
 
 **Vermuteter, aber NICHT verifizierter Zusammenhang:** die bereits bekannte, ältere
 macOS-Anomalie „Menüleiste zeigt 8 statt 9 Einträge, `Windows`-Menü fehlt manchmal"

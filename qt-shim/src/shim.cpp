@@ -629,8 +629,12 @@ void* shim_menu_create(const char* title)
 
 void shim_menubar_add_menu(void* menubar, void* menu)
 {
-    static_cast<QMenuBar*>(menubar)->addMenu(
+    QAction* a = static_cast<QMenuBar*>(menubar)->addMenu(
         static_cast<QMenu*>(menu));
+    // Opt out of Qt's macOS text-heuristic MenuRole detection (§22): without
+    // this, a top-level bar action can be silently reclassified/relocated by
+    // Qt's Cocoa integration based on its title text alone.
+    a->setMenuRole(QAction::NoRole);
 }
 
 // Sets a menu's title. Needed for top-level bar menus: QMenuBar::addMenu(QMenu*)
@@ -647,12 +651,16 @@ void* shim_menu_add_submenu(void* menu, const char* title, void* submenu)
     QMenu* m = static_cast<QMenu*>(menu);
     QMenu* sub = static_cast<QMenu*>(submenu);
     sub->setTitle(QString::fromUtf8(title));
-    return m->addMenu(sub);
+    QAction* a = m->addMenu(sub);
+    a->setMenuRole(QAction::NoRole); // §22: opt out of macOS auto-role heuristic
+    return a;
 }
 
 void* shim_menu_add_separator(void* menu)
 {
-    return static_cast<QMenu*>(menu)->addSeparator();
+    QAction* a = static_cast<QMenu*>(menu)->addSeparator();
+    a->setMenuRole(QAction::NoRole); // §22: opt out of macOS auto-role heuristic
+    return a;
 }
 
 void shim_menu_remove_action(void* menu, void* action)
@@ -698,6 +706,7 @@ void* shim_action_create(void* menu, const char* label, int checkable,
 {
     QMenu* m = static_cast<QMenu*>(menu);
     auto* a = new QAction(QString::fromUtf8(label), m);
+    a->setMenuRole(QAction::NoRole); // §22: opt out of macOS auto-role heuristic
     a->setCheckable(checkable != 0);
     if (cb) {
         QObject::connect(a, &QAction::triggered,

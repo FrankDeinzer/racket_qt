@@ -5,6 +5,47 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-14 (macOS, Fortsetzung) — macOS-Preferences-Menü-Bug gefixt (§22)
+
+**Kontext:** direkte Fortsetzung derselben Sitzung (s. u.), Nutzer bat nach dem
+ersten Bericht darum, den in §22 root-gecausten Menü-Bug direkt zu fixen statt
+zurückzustellen. Vollständig in unserem eigenen Fork (`third_party/gui`, Remote
+`FrankDeinzer/racket_gui.git`), keine Änderung an der separat installierten
+Racket-Distribution — vom Nutzer explizit erfragt und bestätigt.
+
+- **Fix Teil A** (`qt-shim/src/shim.cpp`): `QAction::setMenuRole(QAction::NoRole)`
+  auf allen vier QAction-Erzeugungsstellen (`shim_action_create`,
+  `shim_menu_add_submenu`, `shim_menu_add_separator`, `shim_menubar_add_menu`) —
+  schaltet Qt's automatische macOS-Text-Heuristik ab.
+- **Fix Teil B** (`mred/private/app.rkt`, unser Fork): `current-eventspace-has-
+  standard-menus?` um `(not (getenv "PLT_QT"))` ergänzt — additiv, nur unter
+  `PLT_QT=1` wirksam, Cocoa/GTK/Win32 unverändert. Nutzer wählte bewusst das
+  **volle Gating** (nicht den schmaleren Einzeiler-Patch), da es einen
+  vermuteten Zombie-Prozess-Bug beim Schließen des letzten Fensters mit
+  beheben sollte.
+- **Verifiziert (Nutzer-bestätigt):** Preferences erscheint jetzt im Edit-Menü,
+  öffnet den echten Dialog mit allen Kategorien. „Configure Command Line for
+  Racket…" bleibt korrekt im Help-Menü, altes Verhalten (`authopen`-Sudo-Flow)
+  unverändert. Smoke 3/3 grün vor und nach dem Fix.
+- **Nebeneffekt NICHT eingetreten:** die erhoffte Exit-Bestätigung + tatsächliche
+  Prozessbeendigung beim Schließen des letzten Fensters (Bonus-Effekt des vollen
+  Gatings über `group.rkt`) blieb aus — Hauptfenster + Preferences-Dialog
+  geschlossen, kein Dialog, Prozess lief weiter (per `SIGTERM` beendet, kein
+  Crash). Nicht root-caused, zwei Hypothesen (DrRacket-eigene Close-Logik
+  außerhalb unseres Forks vs. Qt-Pump-Loop verarbeitet den intern eingereihten
+  `(exit)`-Aufruf nicht mehr, sobald keine Fenster mehr sichtbar sind). Keine
+  Regression, nur unerfüllter Bonus — eigene künftige Session.
+- **Commits:** gui-Submodul (`app.rkt`) und Umbrella (`shim.cpp` + Doku) noch
+  ausstehend zum Zeitpunkt dieses Eintrags — Push/Sync-Entscheidung (Regel 7)
+  vor jedem Schritt.
+- **Nächster Schritt:** Push/Sync-Entscheidung. Neue eigene Session für: Exit-
+  auf-letztem-Fenster-Verhalten (s. o.), vermuteter Zusammenhang mit dem älteren
+  „8 statt 9 Menüs"-Befund (weiterhin unbestätigt, durch diesen Fix nicht
+  berührt), plus die bereits bekannten offenen Punkte aus der vorherigen Sitzung
+  (s. u.).
+
+---
+
 ## Session 2026-07-14 (macOS) — `tab-panel%`/`canvas-panel%`/`group-panel%`: macOS-Validierung + neuer Menü-Bug gefunden (2026-07-13-3_prompt)
 
 **Kontext:** `docs/2026-07-13-3_prompt.md`. Voller Bericht:
