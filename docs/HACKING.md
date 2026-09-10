@@ -1999,3 +1999,64 @@ Installationsverzeichnisse + `pkgs.rktd` nach `~/racket-link-backup-2026-07-14/`
 eine Fenster — bei DrRackets Stepper-Fenster (selber Prozess wie das Hauptfenster) riss
 das die komplette Session ab. Für Hilfsfenster `key Return`/`Escape` oder den regulären
 Schließen-Button verwenden, nicht `windowkill`.
+
+### 23.2 macOS-Validierung (Sitzung 2026-09-10) — Reklassifizierung auf allen drei
+Plattformen bestätigt; Racket-Versionsabweichung v9.2→v9.3
+
+**Kontext:** `docs/2026-09-10_report-macos.md`, Abschluss der Drei-Plattform-Validierung
+nach §23 (Windows, 2026-07-14) und §23.1 (Linux, 2026-07-14). Die macOS-Session selbst
+fand am 2026-09-10 statt (separater, späterer Prompt, wie in §23/§23.1 vorgesehen).
+
+**Umgebungsabweichung (neu):** Homebrew hatte den `racket`-Cask auf dieser Maschine am
+2026-08-19 automatisch von v9.2 auf **v9.3** aktualisiert (v9.2 nicht mehr installiert,
+kein Homebrew-Downgrade-Pfad). Nutzer-Rückfrage (Regel 7) → mit v9.3 fortgefahren. Fork
+(`gui-lib`/`draw-lib`, weiterhin per `-S`-Override, nicht verlinkt) war gegen v9.2
+kompiliert (`version mismatch`) → `compiled/`-Verzeichnisse gelöscht, `raco make`
+(draw-lib, dann mit `PLT_QT=1` gui-lib/mred) lief fehlerfrei durch. Re-Smoke 3/3 auf v9.3
+bestätigt. Diese Abweichung ist für den `test-dock-size`-Befund irrelevant (nativer
+Cocoa-Pfad bleibt unter v9.3 3/3 sauber), aber `CLAUDE.md`s Umgebungstabelle wurde
+entsprechend aktualisiert.
+
+**Facette 3 — kontrollierte 1→2-Tab-Sequenz, n=3 je Bedingung, „Run" vor dem Öffnen des
+zweiten Tabs für jeden der 6 Läufe per Screenshot bestätigt (nicht nur versucht):**
+
+| Sequenz | Qt (`PLT_QT=1`) | Nativ (Cocoa) |
+|---|---|---|
+| 1 Tab (Run bestätigt) → `File → Open` 2. Tab | **3/3 Absturz** | **3/3 sauber** |
+
+Byte-identischer Fehler zu Windows/Linux (`test-engine:test-dock-size`, `given: '(1)`,
+`test-panel%::remove` ← `undock-tests` ← `on-tab-change`). Backend je Lauf bestätigt über
+den Dateidialog-Typ (Qt-eigener „Select a file"-Dialog vs. Cocoa-`NSOpenPanel`,
+screenshot-sichtbar) sowie stichprobenartig via `lsof -p <pid> | grep racketqtshim`.
+**Kombiniert über alle drei Plattformen: 10/10 Crash unter Qt, 0/10 nativ** bei dieser
+Sequenz — die Windows/Linux-Reklassifizierung (echte `wx/qt`-Timing-Lücke, kein
+htdp-lib-Bug) ist damit auf allen drei Zielplattformen verifiziert.
+
+**Zusätzlicher, unkontrollierter Beleg vor der eigentlichen Messung (mit Einschränkung):**
+der allererste Qt-Lauf dieser Session crashte bereits vor der n=3-Messung, in einem
+Fenster, dessen UI-Zustand nach vorangegangenen fehlgeleiteten Tastatureingaben nicht mehr
+zweifelsfrei rekonstruierbar war (offene Find-Toolbar mit unklarem Inhalt). Ein per
+Accessibility gefundener „Hide"-Button löste beim Klick denselben Absturz aus — die
+Introspektion war bei wiederholten Abfragen aber instabil (wechselnde Button-Listen, ein
+Aufruf hing 120s). **Aus diesem Einzelfall wird kein Mechanismus abgeleitet** (insbesondere
+keine Aussage, dass die Test-Dock-Infrastruktur immer angelegt wird) — festgehalten nur
+als zusätzlicher Beleg, dass ein Absturz mit identischer Signatur auch außerhalb der genau
+kontrollierten 1→2-Tab-Sequenz auftreten kann.
+
+**Facette 1 (`2htdp/image`):** einwandfrei, alle 5 Bilder sofort korrekt — deckt sich mit
+Windows, nicht mit dem auf Linux beobachteten „nur 4 von 5 Werten rendern"-Defekt (§23.1),
+der auf macOS nicht auftrat.
+
+**Facette 2 (big-bang):** einwandfrei über echtes DrRacket, **ohne** den auf Linux vor
+dessen Link-Fix beobachteten Errortrace-/Namespace-Mismatch — obwohl macOS weiterhin
+`-S`-Override (nicht Link) nutzt. Tick-Loop, Redraw und `on-key`-Reset bestätigt sauber.
+
+**Methodik-Notiz (macOS-spezifisch, kein Produktbug):** `osascript`/System-Events-
+Automatisierung erforderte eine einmalige Bedienungshilfen-Freigabe für den Terminal-Host
+(iTerm2) unter Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen, plus
+einen iTerm2-Neustart, damit die Freigabe griff. Auch danach blieben einzelne
+`osascript`-Aufrufe intermittierend mit `-1719`/`-1728` fehlschlagend (kein erkennbares
+Muster) — Workaround: Aufruf bei Fehlschlag 1–2× wiederholen. Ein dabei entstandenes
+Automatisierungsartefakt (eine fehlgeleitete Tastatureingabe fügte eine Leerzeile in
+`examples/htdp-tests-probe.rkt` ein) wurde bemerkt und vor jedem Commit per `git checkout`
+zurückgesetzt.

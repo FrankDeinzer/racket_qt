@@ -5,6 +5,54 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-10 (macOS) — htdp-Lackmustest: `test-dock-size`-Befund auf macOS bestätigt, Drei-Plattform-Validierung abgeschlossen (§23.2)
+
+**Kontext:** `docs/2026-07-14_prompt.md` (Windows/Linux-Sessions liefen 2026-07-14, diese
+macOS-Session am 2026-09-10), Abschluss der Windows-(§23)/Linux-(§23.1)-Validierung.
+Voller Bericht: `docs/2026-09-10_report-macos.md`. Racket **v9.3 [cs]** gemessen
+(Abweichung, s. u.).
+
+- **Umgebungsabweichung:** Homebrew hatte den `racket`-Cask am 2026-08-19 automatisch von
+  v9.2 auf v9.3 aktualisiert (kein Downgrade-Pfad über Homebrew mehr verfügbar).
+  Nutzer-Rückfrage (Regel 7) → mit v9.3 fortgefahren. Fork (`-S`-Override, weiterhin nicht
+  verlinkt) war gegen v9.2 kompiliert → `compiled/`-Verzeichnisse gelöscht, `raco make`
+  für draw-lib und (mit `PLT_QT=1`) gui-lib/mred lief fehlerfrei durch, Re-Smoke 3/3.
+  `CLAUDE.md`-Umgebungstabelle aktualisiert.
+- **Facette 3 (Kernergebnis, n=3 je Bedingung, kontrollierte 1→2-Tab-Sequenz, „Run" vor
+  dem zweiten Tab für jeden der 6 Läufe per Screenshot bestätigt):** **3/3 Absturz unter
+  Qt, 3/3 sauber nativ** — byte-identischer Fehler zu Windows/Linux
+  (`test-engine:test-dock-size`-Contract, `on-tab-change`/`undock-tests`). Backend je Lauf
+  über Dateidialog-Typ (Qt-eigen vs. Cocoa-`NSOpenPanel`) + stichprobenartig `lsof`
+  bestätigt. **Kombiniert über alle drei Plattformen: 10/10 Qt-Crash, 0/10 nativ — die
+  Windows/Linux-Reklassifizierung (echte `wx/qt`-Timing-Lücke, kein htdp-lib-Bug) ist
+  damit auf allen drei Zielplattformen verifiziert.** Zusätzlicher, unkontrollierter Beleg
+  vor der eigentlichen Messung (mit Einschränkung, UI-Zustand nach fehlgeleiteten
+  Tastatureingaben nicht zweifelsfrei rekonstruierbar, Introspektion instabil): derselbe
+  Absturz trat auch außerhalb der kontrollierten Tab-Sequenz auf — kein Mechanismus
+  daraus abgeleitet, nur als zusätzlicher Beleg festgehalten.
+- **Facette 1 (`2htdp/image`):** einwandfrei, alle 5 Bilder sofort korrekt — deckt sich
+  mit Windows, nicht mit dem auf Linux beobachteten „nur 4 von 5 rendern"-Defekt (§23.1),
+  der auf macOS nicht auftrat.
+- **Facette 2 (big-bang):** einwandfrei über echtes DrRacket, **ohne** den auf Linux vor
+  dessen Link-Fix beobachteten Errortrace-/Namespace-Mismatch, obwohl macOS weiterhin
+  `-S`-Override nutzt. Tick-Loop, Redraw, `on-key`-Reset bestätigt sauber — Kern-Wette
+  „Racket treibt, Pump blockiert nie" auf allen drei Plattformen bestätigt.
+- **Methodik-Notiz:** `osascript`/System-Events-Automatisierung brauchte eine einmalige
+  Bedienungshilfen-Freigabe für iTerm2 + einen iTerm2-Neustart; auch danach blieben
+  einzelne Aufrufe intermittierend mit `-1719`/`-1728` fehlschlagend (Workaround:
+  1–2× wiederholen). Ein dabei entstandenes Automatisierungsartefakt (Leerzeile in
+  `examples/htdp-tests-probe.rkt`) wurde vor jedem Commit per `git checkout`
+  zurückgesetzt.
+- **Commits:** keine gui-lib-Submodul-Änderungen (reine Diagnose, kein Fix). Umbrella:
+  `docs/2026-09-10_report-macos.md`, `docs/HACKING.md` §23.2, `CLAUDE.md` (Checkpoint +
+  Umgebungstabelle), dieser Eintrag.
+- **Nächster Schritt:** `test-dock-size`-Fix bleibt eigene künftige Session (Startpunkt
+  weiterhin `wx/qt/queue.rkt`-Pump-Modell, jetzt auf allen drei Plattformen bestätigt).
+  htdp-Lackmustest als Ganzes: **DrRacket-auf-
+  Qt trägt htdp** — Meilenstein erreicht, Drei-Plattform-Validierung abgeschlossen.
+
+---
+
 ## Session 2026-07-14 (Linux) — htdp-Lackmustest: `test-dock-size`-Befund auf Linux bestätigt + generalisiert (§23.1)
 
 **Kontext:** `docs/2026-07-14_prompt.md`, Fortsetzung der Windows-Session (s. u.). Voller

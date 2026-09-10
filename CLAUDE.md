@@ -28,7 +28,7 @@ Qt Widgets backend ("wx/qt/") für `racket/gui`. Additiver Spike: aktiviert via 
 
 | | |
 |---|---|
-| Racket | v9.2 [cs], arm64 (Homebrew) |
+| Racket | v9.3 [cs], arm64 (Homebrew) — seit 2026-08-19 automatisch von v9.2 aktualisiert (Cask hält keine ältere Version vor, s. `docs/HACKING.md` §23.2) |
 | Qt | 6.11.0, `~/Qt/6.11.0/macos` |
 | CMake | Ninja, Generator "Ninja" |
 | Preset | `macos-arm64` → `qt-shim/build/macos-arm64` |
@@ -136,7 +136,7 @@ referenziert).
 | E – `choice%`/`radio-box%`/`slider%` echt | ✅ 2026-07-13, alle 3 Plattformen (§20) |
 | E – `tab-panel%`/`canvas-panel%`/`group-panel%` echt (Widget-Breite abgeschlossen) | ✅ 2026-07-14, alle 3 Plattformen (§21; macOS via `tab-panel%` real + isolierter Proben für `canvas-panel%`/`group-panel%`, §21.8) |
 | E – Preferences Ende-zu-Ende | 🟡 Windows + Linux: Dialog öffnet + navigiert (Tabs/Font/Colors/Browser bestätigt), 4 neue Einzelbefunde offen (§21.6, auf Linux identisch reproduziert), restliche Kategorien nicht durchgesehen. **macOS: Menüzugang gefixt** (§22, 2026-07-14) — Preferences erscheint jetzt im Edit-Menü und öffnet den echten Dialog; Restbefunde §21.6 vermutlich auch hier relevant, nicht erneut durchgesehen |
-| htdp-Lackmustest (`2htdp/image`, big-bang, `test-engine`) | 🟡 Windows + Linux, 2026-07-14 (§23): `test-engine`-Dock-Crash (`test-dock-size`) reproduziert bei 1→2-Tab-Sequenz **7/7 unter Qt, 0/7 nativ** (Windows 4/4+3/3, Linux 3/3+3/3) — **kein htdp-lib-Bug, sondern echte `wx/qt`-Lücke**, auf Linux vollständig bestätigt/generalisiert (§23.1). Root-Cause bis `on-tab-change`-Dispatch eingegrenzt, bester Fix-Ansatzpunkt `wx/qt/queue.rkt`s 50ms-Poll-Pump (kein echtes OS-Wakeup, `docs/ARCHITECTURE.md` §3). `2htdp/universe` big-bang: Kern-Wette „Racket treibt, Pump blockiert nie" auf beiden Plattformen bestätigt. Auf Linux zunächst nur über `racket` direkt möglich (DrRacket-Pfad durch ein `-S`/errortrace-Package-Problem blockiert, kein Qt-Bezug) — nach dem Linux-DrRacket-Link (s. o.) läuft big-bang auch über echtes DrRacket unter Qt sauber, Problem strukturell gelöst. `2htdp/image`: Windows einwandfrei; Linux Interactions-REPL rendert reproduzierbar (3/3) nur die ersten 4 Top-Level-Bildwerte einer `Run`-Sitzung, danach dauerhaft nichts mehr — Pump-Hypothese widerlegt (Poll läuft unbedingt alle 50ms, erklärt keine Mehrminuten-Hänger), kein Scroll-/Compute-/Deadlock-Problem, vermutlich `framework`-Interactions-Insert-Pfad oder Qt-Canvas-Kapazitätsgrenze (§23.1). Fix offen für künftige Session (ggf. Shared-Code-Scope, vor Fix-Versuch Rückfrage). macOS-Validierung separater Prompt |
+| htdp-Lackmustest (`2htdp/image`, big-bang, `test-engine`) | ✅ **DrRacket-auf-Qt trägt htdp** — auf allen drei Plattformen validiert (Windows/Linux 2026-07-14, macOS 2026-09-10, §23/§23.1/§23.2). `test-engine`-Dock-Crash (`test-dock-size`) reproduziert bei 1→2-Tab-Sequenz **10/10 unter Qt, 0/10 nativ** (Windows 4/4+3/3, Linux 3/3+3/3, macOS 3/3+3/3) — **kein htdp-lib-Bug, sondern echte `wx/qt`-Lücke**, auf allen drei Plattformen bestätigt/generalisiert. Root-Cause bis `on-tab-change`-Dispatch eingegrenzt, bester Fix-Ansatzpunkt `wx/qt/queue.rkt`s 50ms-Poll-Pump (kein echtes OS-Wakeup, `docs/ARCHITECTURE.md` §3) — **Fix selbst bleibt offen, eigene künftige Session**. `2htdp/universe` big-bang: Kern-Wette „Racket treibt, Pump blockiert nie" auf allen drei Plattformen bestätigt. Auf Linux zunächst nur über `racket` direkt möglich (DrRacket-Pfad durch ein `-S`/errortrace-Package-Problem blockiert, kein Qt-Bezug) — nach dem Linux-DrRacket-Link läuft big-bang auch über echtes DrRacket unter Qt sauber; auf macOS trat dieses Problem trotz weiterhin genutztem `-S`-Rezept gar nicht erst auf. `2htdp/image`: Windows + macOS einwandfrei (alle 5 Bilder sofort korrekt); Linux Interactions-REPL rendert reproduzierbar (3/3) nur die ersten 4 Top-Level-Bildwerte einer `Run`-Sitzung, danach dauerhaft nichts mehr — Pump-Hypothese widerlegt (Poll läuft unbedingt alle 50ms, erklärt keine Mehrminuten-Hänger), kein Scroll-/Compute-/Deadlock-Problem, vermutlich `framework`-Interactions-Insert-Pfad oder Qt-Canvas-Kapazitätsgrenze (§23.1), auf macOS nicht reproduziert — Fix offen für künftige Session (ggf. Shared-Code-Scope, vor Fix-Versuch Rückfrage). macOS lief auf Racket **v9.3** statt v9.2 (Homebrew-Auto-Update 2026-08-19, s. Umgebungstabelle + §23.2) — Fork neu kompiliert, Ergebnis unverändert. |
 
 **Offene Nebenbefunde, je eigene Session:** macOS-Menüleiste zeigt teils 8 statt 9
 Einträge (`Windows`-Menü fehlt manchmal, Ursache offen — evtl. verwandt mit §22, nicht
@@ -156,10 +156,11 @@ reproduziert — plausibel behoben, nicht absolut bewiesen (Original war
 n=1-intermittierend); Linux Crash B (Teardown, „invalid memory reference") 1/1
 unverändert reproduziert, bleibt offen, andere Ursache als die Menü-Fixe; `test-dock-
 size`-Crash (früher hier als `htdp-lib`-Contract-Bug geführt) **reklassifiziert 2026-07-14
-(§23/§23.1): echte `wx/qt`-Lücke, kein htdp-lib-Bug** — Windows+Linux je 1→2-Tab-Sequenz
-7/7 Qt-Crash, 0/7 nativ; die frühere Linux-Beobachtung „reicht schon 1 Tab" hat sich in
-der §23.1-Session nicht reproduziert (3/3 sauber bei nur einem Tab, beide Backends),
-Root-Cause bis `on-tab-change`/`wx/qt/queue.rkt`-Pump eingegrenzt, Fix offen; nativer
+(§23/§23.1/§23.2): echte `wx/qt`-Lücke, kein htdp-lib-Bug, auf allen drei Plattformen
+bestätigt** — Windows+Linux+macOS je 1→2-Tab-Sequenz 10/10 Qt-Crash, 0/10 nativ; die
+frühere Linux-Beobachtung „reicht schon 1 Tab" hat sich in der §23.1-Session nicht
+reproduziert (3/3 sauber bei nur einem Tab, beide Backends), Root-Cause bis
+`on-tab-change`/`wx/qt/queue.rkt`-Pump eingegrenzt, Fix offen; nativer
 macOS-Save-Dialog hängt bei fehlender
 Endung ein literales `.*` an den Dateinamen an (nur nativer Pfad, Qt-eigener Dialog
 unbetroffen — Diskriminator bestätigt, §19), bewusst nicht gefixt, da native Pfad ohnehin
