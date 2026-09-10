@@ -31,19 +31,34 @@ Bericht: `docs/2026-07-14_report-linux.md`. Racket `v9.2 [cs]` gemessen.
   und „Erstlauf kompiliert langsam" als Erklärung geprüft und verworfen. Arbeitshypothese:
   derselbe Pump-Schwachpunkt wie Facette 3 (`wx/qt/queue.rkt` 50ms-Poll statt OS-Wakeup) —
   neues, unabhängiges Symptom, nicht root-gecausert, eigene künftige Session.
-- **Facette 2 (big-bang):** DrRacket-Pfad blockiert durch ein deterministisches (2/2 Qt,
-  1/1 nativ identisch) `-S`-Override-Package-Problem (`errortrace-lib`/`drracket-core-lib`
-  kollidieren mit `2htdp/universe`s Require-Graph) — **kein Qt-Bezug**, Environment-Gap.
-  Workaround über `racket` direkt (ohne DrRacket/Errortrace) unter `PLT_QT=1`: Tick-Loop,
-  Redraw und `on-key`-Reset laufen sauber — Kern-Wette „Racket treibt, Pump blockiert nie"
-  bestätigt.
+- **Facette 2 (big-bang):** DrRacket-Pfad zunächst blockiert durch ein deterministisches
+  (2/2 Qt, 1/1 nativ identisch) `-S`-Override-Package-Problem (`errortrace-lib`/
+  `drracket-core-lib` kollidieren mit `2htdp/universe`s Require-Graph) — **kein
+  Qt-Bezug**, Environment-Gap. Workaround über `racket` direkt (ohne DrRacket/
+  Errortrace) unter `PLT_QT=1`: Tick-Loop, Redraw und `on-key`-Reset laufen sauber —
+  Kern-Wette „Racket treibt, Pump blockiert nie" bestätigt. **Danach strukturell
+  gefixt** (s. u.), Root-Cause war die `-S`-Methode selbst, nicht eine Package-Version.
+- **Nachtrag (selbe Sitzung, Nutzer bat um Fix statt nur Dokumentation):** gui-lib/
+  draw-lib auf dieser Maschine wie unter Windows als Installation-scope-Link aktiviert
+  (`raco pkg update --link` für beide, kein `sudo` nötig — `~/racket` user-owned;
+  löst automatisch volle `raco setup`-Neukompilierung aus, je ~10 Min). Vorher Backup
+  der bisherigen Installation nach `~/racket-link-backup-2026-07-14/`. **Ergebnis:**
+  Gate-Test (nativ ohne `PLT_QT`) grün, Qt-Smoke weiterhin 3/3 (jetzt ohne `-S`),
+  `htdp-bigbang-probe.rkt` läuft jetzt über echtes DrRacket unter Qt ohne den
+  Errortrace-Fehler — Facette-2-Problem strukturell gelöst. Facette 3
+  (`test-dock-size`) mit dem Link erneut geprüft (1 Durchlauf): Crash tritt
+  **identisch** weiterhin auf — bestätigt, dass der Kernbefund ein echter `wx/qt`-Bug
+  ist, kein `-S`-Artefakt. Linux-Laufrezept jetzt strukturell an Windows angeglichen
+  (`racket -l drracket`, kein `-S` mehr), `CLAUDE.md` (Umgebung + Run-Rezept + neue
+  Checkpoint-Zeile) und `docs/HACKING.md` §23.1 aktualisiert.
 - **Methodik-Notiz:** `xdotool`/`ydotool`/`wtype` vom Nutzer mitten in der Session
   nachinstalliert, danach deutlich zuverlässigere GUI-Automatisierung als die zuvor
   genutzten rohen X11-`ctypes`-Events. Gotcha: `xdotool windowkill` beendet die komplette
   X11-Verbindung des Ziel-Prozesses (alle seine Fenster), nicht nur das eine Fenster — bei
   DrRackets Stepper-Fenster riss das die ganze Session ab.
-- **Commits:** keine gui-lib-Submodul-Änderungen (reine Diagnose/Validierung). Umbrella:
-  `docs/2026-07-14_report-linux.md`, `docs/HACKING.md` §23.1, `CLAUDE.md`-Checkpoint,
+- **Commits:** keine gui-lib-Submodul-Änderungen (reine Diagnose/Validierung + eine
+  lokale Installations-Umstellung, kein Code). Umbrella: `docs/2026-07-14_report-linux.md`,
+  `docs/HACKING.md` §23.1 (+Nachtrag), `CLAUDE.md` (Checkpoint + Umgebung + Run-Rezept),
   dieser Eintrag.
 - **Nächster Schritt:** Push/Sync-Entscheidung (Regel 7) offen. `test-dock-size`-Fix,
   Facette-1-Repaint-Befund und das Facette-2-Package-Problem sind je eigene künftige

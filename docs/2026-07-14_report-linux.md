@@ -181,7 +181,7 @@ denselben architektonischen Schwachpunkt zeigen.
 | Facette | Ergebnis |
 |---|---|
 | `2htdp/image` | 🟡 4/5 sofort sauber; 5. Bild (`text`+`above/align`) zeigt in einem Lauf einen 8+ Min. Repaint-Hänger, in späteren Läufen unauffällig — nicht root-gecausert, Arbeitshypothese: derselbe Pump-Schwachpunkt wie Facette 3 |
-| `2htdp/universe` big-bang | ✅ Kern-Wette bestätigt (Tick/Redraw/`on-key` sauber unter Qt) — DrRacket-Pfad durch unabhängiges `-S`/errortrace-Package-Problem blockiert (kein Qt-Bezug), Workaround über `racket` direkt |
+| `2htdp/universe` big-bang | ✅ Kern-Wette bestätigt (Tick/Redraw/`on-key` sauber unter Qt); ursprünglich blockierter DrRacket-Pfad (unabhängiges `-S`/errortrace-Problem) im Nachtrag strukturell gefixt (Fork-Link, s. u.) |
 | `test-engine`/`check-expect` (`test-dock-size`) | 🔴 **3/3 Absturz** bei 1→2-Tab-Sequenz unter Qt, **0/3** nativ; 3/3 sauber bei nur 1 Tab auf beiden Seiten — bestätigt Windows-Befund vollständig, generalisiert auf Linux |
 
 Smoke 3/3 vor der Session. Keine gui-lib-Submodul-Änderungen (reine Diagnose/Validierung,
@@ -190,6 +190,46 @@ keine Fixes). Umbrella: dieser Report, `docs/HACKING.md` §23 um Linux-Spalte er
 
 **Nächster Schritt:** Push/Sync-Entscheidung (Regel 7) offen. `test-dock-size`-Fix bleibt
 eigene künftige Session (Startpunkt: `wx/qt/queue.rkt`-Pump-Modell, siehe Windows-Report-
-Nachtrag). Facette-1-Repaint-Befund und das `-S`/errortrace-Package-Problem (Facette 2)
-sind neue, unabhängige offene Punkte für eigene künftige Sessions. macOS-Validierung
-weiterhin separater Prompt.
+Nachtrag). Facette-1-Repaint-Befund ist neuer, unabhängiger offener Punkt für eine
+künftige Session. macOS-Validierung weiterhin separater Prompt.
+
+## Nachtrag (selbe Sitzung) — Facette-2-Package-Problem strukturell gefixt
+
+Auf Nutzer-Wunsch nach diesem Report vertieft statt nur dokumentiert (Regel 7,
+Nutzer-Bestätigung eingeholt). **Root-Cause war nicht die Package-*Version*** (beide
+`gui-lib` bei 1.80, laut `info.rkt`-`deps` kompatibel), **sondern die `-S`-Override-
+*Methode* selbst:** `drracket-core-lib`/`errortrace-lib` bleiben System-Pakete,
+vorkompiliert gegen die System-`gui-lib`; unser Fork wird per `-S` bei jedem
+Prozessstart frisch aus Quellcode geladen. Reine Werteberechnung (Facette 1/3) bleibt
+unberührt — sobald Errortrace ein echtes Fenster-erzeugendes Programm (big-bang) tief
+durch `framework`/`mred` instrumentiert, kollidieren die zwei Kompilate.
+
+**Fix:** Fork wie unter Windows als Installation-scope-Link aktiviert:
+```bash
+raco pkg update --link third_party/gui/gui-lib
+raco pkg update --link third_party/draw/draw-lib
+```
+Kein `sudo` nötig (`~/racket` ist user-owned, anders als Windows' `Program Files`).
+Löst automatisch eine vollständige `raco setup`-Neukompilierung aus (je ca. 10 Minuten
+für gui-lib und draw-lib). **Vorher Backup** der bisherigen `gui-lib`/`draw-lib`-
+Installationsverzeichnisse + der Paket-Registry `pkgs.rktd` nach
+`~/racket-link-backup-2026-07-14/` (garantierter Rollback-Weg, analog zum
+Windows-Vorgehen aus `docs/2026-07-02_report.md`).
+
+**Verifiziert:**
+- **Gate-Test:** `raco test tests/smoke.rkt` **ohne** `PLT_QT` weiterhin 3/3 grün — kein
+  struktureller Mismatch durch den Link selbst (entspricht Windows' Gate-Kriterium).
+- Qt-Smoke weiterhin 3/3 grün, jetzt ohne `-S`.
+- `htdp-bigbang-probe.rkt` läuft über echtes `racket -l drracket` unter `PLT_QT=1` jetzt
+  **ohne** den Errortrace-Fehler: Tick-Log + World-Fenster korrekt, `on-key`-Reset
+  bestätigt (Screenshot-verifiziert). Bestätigt die Root-Cause-Hypothese.
+- **Facette 3 erneut geprüft (1 Durchlauf mit Link):** `test-dock-size`-Crash bei der
+  1→2-Tab-Sequenz tritt **identisch** weiterhin auf — bestätigt, dass der Facette-3-
+  Kernbefund ein echter `wx/qt`-Bug ist und kein Artefakt der (jetzt ohnehin abgelösten)
+  `-S`-Methode war.
+
+**Ergebnis:** Linux-Laufrezept jetzt strukturell an Windows angeglichen — `PLT_QT=1
+QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins racket -l drracket`, kein `-S` mehr nötig.
+`CLAUDE.md` (neue Linux-Umgebungstabelle, Run-Rezept, Checkpoint-Zeile) und
+`docs/HACKING.md` §23.1 aktualisiert. Damit ist die Facette-2-Zusammenfassungszeile
+oben (🟡, DrRacket-Pfad blockiert) **überholt** — der DrRacket-Pfad funktioniert jetzt.

@@ -33,6 +33,16 @@ Qt Widgets backend ("wx/qt/") für `racket/gui`. Additiver Spike: aktiviert via 
 | CMake | Ninja, Generator "Ninja" |
 | Preset | `macos-arm64` → `qt-shim/build/macos-arm64` |
 
+### Linux x64
+
+| | |
+|---|---|
+| Racket | v9.2 [cs], x86-64 (`~/racket`) |
+| Qt | 6.11.1, `~/Qt/6.11.1/gcc_64` (Hinweis: 6.11.**1**, nicht 6.11.0 wie Windows/macOS) |
+| CMake | Ninja, GCC 13.3.0 |
+| Preset | `linux-x64` → `qt-shim/build/linux-x64` |
+| gui-lib/draw-lib | seit 2026-07-14 als Installation-scope-Link aktiv (`raco pkg update --link`, kein `sudo` nötig — `~/racket` ist user-owned), kein `-S` mehr nötig |
+
 ## Build
 
 **Windows:**
@@ -75,15 +85,30 @@ Linklet-Mismatch). Single-Instance-Falle: ein zweiter Aufruf bei bereits laufend
 Instanz startet nichts Neues (Exit 0, kein Fenster) — vorher `tasklist | grep drracket`
 prüfen. Details/Fallstricke (Autosave-Recovery bei hartem Kill etc.): `docs/HACKING.md §13`.
 
-**macOS / Linux:**
+**macOS:**
 ```bash
-PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
-  racket -S third_party/gui/gui-lib -S third_party/draw/draw-lib examples/hello.rkt
+PLT_QT=1 racket -S third_party/gui/gui-lib -S third_party/draw/draw-lib examples/hello.rkt
 # Smoke tests:
-PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins \
-  racket -S third_party/gui/gui-lib -S third_party/draw/draw-lib -l raco -- test tests/smoke.rkt
+PLT_QT=1 racket -S third_party/gui/gui-lib -S third_party/draw/draw-lib -l raco -- test tests/smoke.rkt
 ```
-(macOS: QT_PLUGIN_PATH nicht nötig; Linux: xcb-Plugin über `QT_PLUGIN_PATH` setzen)
+(noch per `-S`-Override, nicht verlinkt — Angleich an Windows/Linux offen.)
+
+**Linux — echtes DrRacket (seit 2026-07-14 verlinktes Paket, `-S` nicht mehr nötig):**
+```bash
+PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins racket examples/hello.rkt
+# Smoke tests:
+PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins racket -l raco -- test tests/smoke.rkt
+# Echtes DrRacket:
+PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins racket -l drracket
+```
+`raco pkg update --link third_party/gui/gui-lib` + `--link third_party/draw/draw-lib`
+(einmalig, kein `sudo` nötig — `~/racket` ist user-owned, anders als Windows' `Program
+Files`). Löste ein `-S`-spezifisches Errortrace/Namespace-Mismatch-Problem (Facette 2 in
+`docs/2026-07-14_report-linux.md`/`docs/HACKING.md` §23.1) strukturell. Gate-Test:
+DrRacket **ohne** `PLT_QT` muss weiterhin nativ starten (bestätigt, `raco test
+tests/smoke.rkt` ohne `PLT_QT` grün). Rückfallpfad falls je nötig: Backup der
+vorherigen `gui-lib`/`draw-lib`-Installation + `pkgs.rktd` liegt unter
+`~/racket-link-backup-2026-07-14/` auf dieser Maschine.
 
 ## Aktueller Checkpoint-Status
 
@@ -102,6 +127,7 @@ referenziert).
 | macOS Smoke | ✅ 2026-06-25 |
 | Linux Smoke | ✅ 2026-06-29 |
 | E-0 – Widget-Stubs + gui-lib-Angleich 1.78→1.80 + echtes DrRacket | ✅ 2026-06-30/2026-07-02 |
+| Linux – gui-lib/draw-lib als Installation-scope-Link (kein `-S` mehr nötig, wie Windows) | ✅ 2026-07-14 — löste das Facette-2-Errortrace-Problem strukturell (§23.1), Gate-Test (nativ ohne `PLT_QT`) bestanden |
 | E-0 – Menüs (Titel-/addAction-/mapToGlobal-Fix) | ✅ 2026-07-08, alle 3 Plattformen (§14/§15) |
 | E-0 – Redraw-Bug (retained-bitmap-Fix) | ✅ 2026-07-10, alle 3 Plattformen (§16) |
 | E – list-box%/check-box% echt | ✅ 2026-07-10, Windows (§18) |
@@ -110,7 +136,7 @@ referenziert).
 | E – `choice%`/`radio-box%`/`slider%` echt | ✅ 2026-07-13, alle 3 Plattformen (§20) |
 | E – `tab-panel%`/`canvas-panel%`/`group-panel%` echt (Widget-Breite abgeschlossen) | ✅ 2026-07-14, alle 3 Plattformen (§21; macOS via `tab-panel%` real + isolierter Proben für `canvas-panel%`/`group-panel%`, §21.8) |
 | E – Preferences Ende-zu-Ende | 🟡 Windows + Linux: Dialog öffnet + navigiert (Tabs/Font/Colors/Browser bestätigt), 4 neue Einzelbefunde offen (§21.6, auf Linux identisch reproduziert), restliche Kategorien nicht durchgesehen. **macOS: Menüzugang gefixt** (§22, 2026-07-14) — Preferences erscheint jetzt im Edit-Menü und öffnet den echten Dialog; Restbefunde §21.6 vermutlich auch hier relevant, nicht erneut durchgesehen |
-| htdp-Lackmustest (`2htdp/image`, big-bang, `test-engine`) | 🟡 Windows + Linux, 2026-07-14 (§23): `test-engine`-Dock-Crash (`test-dock-size`) reproduziert bei 1→2-Tab-Sequenz **7/7 unter Qt, 0/7 nativ** (Windows 4/4+3/3, Linux 3/3+3/3) — **kein htdp-lib-Bug, sondern echte `wx/qt`-Lücke**, auf Linux vollständig bestätigt/generalisiert (§23.1). Root-Cause bis `on-tab-change`-Dispatch eingegrenzt, bester Fix-Ansatzpunkt `wx/qt/queue.rkt`s 50ms-Poll-Pump (kein echtes OS-Wakeup, `docs/ARCHITECTURE.md` §3). `2htdp/universe` big-bang: Kern-Wette „Racket treibt, Pump blockiert nie" auf beiden Plattformen bestätigt (Linux: über `racket` direkt, DrRacket-Pfad durch unabhängiges `-S`/errortrace-Package-Problem blockiert, kein Qt-Bezug). `2htdp/image`: Windows einwandfrei; Linux 4/5 sofort sauber, 5. Bild (`text`+`above/align`) zeigt neuen, nicht root-gecausten Repaint-Verzögerungsbefund (Arbeitshypothese: derselbe Pump-Schwachpunkt, §23.1). Fix offen für künftige Session. macOS-Validierung separater Prompt |
+| htdp-Lackmustest (`2htdp/image`, big-bang, `test-engine`) | 🟡 Windows + Linux, 2026-07-14 (§23): `test-engine`-Dock-Crash (`test-dock-size`) reproduziert bei 1→2-Tab-Sequenz **7/7 unter Qt, 0/7 nativ** (Windows 4/4+3/3, Linux 3/3+3/3) — **kein htdp-lib-Bug, sondern echte `wx/qt`-Lücke**, auf Linux vollständig bestätigt/generalisiert (§23.1). Root-Cause bis `on-tab-change`-Dispatch eingegrenzt, bester Fix-Ansatzpunkt `wx/qt/queue.rkt`s 50ms-Poll-Pump (kein echtes OS-Wakeup, `docs/ARCHITECTURE.md` §3). `2htdp/universe` big-bang: Kern-Wette „Racket treibt, Pump blockiert nie" auf beiden Plattformen bestätigt. Auf Linux zunächst nur über `racket` direkt möglich (DrRacket-Pfad durch ein `-S`/errortrace-Package-Problem blockiert, kein Qt-Bezug) — nach dem Linux-DrRacket-Link (s. o.) läuft big-bang auch über echtes DrRacket unter Qt sauber, Problem strukturell gelöst. `2htdp/image`: Windows einwandfrei; Linux 4/5 sofort sauber, 5. Bild (`text`+`above/align`) zeigt neuen, nicht root-gecausten Repaint-Verzögerungsbefund (Arbeitshypothese: derselbe Pump-Schwachpunkt, §23.1). Fix offen für künftige Session. macOS-Validierung separater Prompt |
 
 **Offene Nebenbefunde, je eigene Session:** macOS-Menüleiste zeigt teils 8 statt 9
 Einträge (`Windows`-Menü fehlt manchmal, Ursache offen — evtl. verwandt mit §22, nicht

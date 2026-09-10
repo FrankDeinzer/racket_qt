@@ -1932,6 +1932,36 @@ Require-Graph), **kein `wx/qt`-Bug**. Workaround: Probe direkt via `racket -S ..
 deklarierten Rate, `on-key`-Reset funktioniert, Loop läuft danach unverändert weiter.
 Bestätigt „Racket treibt, Pump blockiert nie" für big-bang auch auf Linux.
 
+**Nachtrag, selbe Sitzung — strukturell gefixt:** Root-Cause war nicht die genaue
+Package-*Version* (beide `gui-lib` bei 1.80, kompatibel laut `info.rkt`-`deps`), sondern
+die `-S`-Override-*Methode* selbst: `drracket-core-lib`/`errortrace-lib` bleiben
+System-Pakete, vorkompiliert gegen die System-`gui-lib`; unser Fork wird per `-S` bei
+jedem Prozessstart frisch aus Quellcode geladen. Solange nur Werte berechnet werden
+(Facette 1/3), harmlos — sobald Errortrace ein echtes Fenster-erzeugendes Programm
+(big-bang) tief durch `framework`/`mred` instrumentiert, kollidieren die zwei
+Kompilate. **Fix (Nutzer-genehmigt, Regel 7):** Fork wie unter Windows als
+Installation-scope-Link aktiviert — `raco pkg update --link third_party/gui/gui-lib`
+und `--link third_party/draw/draw-lib` (kein `sudo` nötig, `~/racket` ist user-owned;
+löst automatisch eine vollständige `raco setup`-Neukompilierung aus, je ca. 10 Minuten
+für gui-lib und draw-lib). Vorher Backup der bisherigen `gui-lib`/`draw-lib`-
+Installationsverzeichnisse + `pkgs.rktd` nach `~/racket-link-backup-2026-07-14/`
+(analog zum Windows-Vorgehen, `docs/2026-07-02_report.md`).
+
+**Verifiziert nach dem Link:**
+- Gate-Test bestanden: `raco test tests/smoke.rkt` **ohne** `PLT_QT` weiterhin 3/3 grün
+  (kein Linklet-/Struktur-Mismatch durch den Link selbst).
+- Qt-Smoke weiterhin 3/3 grün, jetzt ohne `-S`.
+- `htdp-bigbang-probe.rkt` läuft über echtes `racket -l drracket` unter `PLT_QT=1` jetzt
+  **ohne** den Errortrace-Fehler — Tick-Log und World-Fenster korrekt, `on-key`-Reset
+  bestätigt. Bestätigt die Root-Cause-Hypothese (Override-Methode, nicht Version).
+- **Facette 3 mit dem Link erneut geprüft (1 Durchlauf):** `test-dock-size`-Crash tritt
+  bei der 1→2-Tab-Sequenz **identisch** weiterhin auf — bestätigt, dass der Facette-3-
+  Befund ein echter `wx/qt`-Bug ist und kein Artefakt der (jetzt ohnehin abgelösten)
+  `-S`-Methode war.
+- Linux-Laufrezept damit strukturell an Windows angeglichen: `PLT_QT=1
+  QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins racket -l drracket` (kein `-S` mehr),
+  `CLAUDE.md` aktualisiert.
+
 **Automatisierungs-Gotcha (Methodik, kein Produktbug):** `xdotool windowkill` sendet
 `XKillClient` und beendet die **gesamte X11-Verbindung des Ziel-Clients**, nicht nur das
 eine Fenster — bei DrRackets Stepper-Fenster (selber Prozess wie das Hauptfenster) riss
