@@ -1737,3 +1737,102 @@ bewiesen.
 Proben validiert (§21.8) — der Preferences-Dialog selbst ist strukturell intakt
 (bestätigt per direktem `(preferences:show-dialog)`-Aufruf); nur der reguläre
 Menü-Zugangsweg auf macOS ist kaputt.
+
+## 23. htdp-Lackmustest — `test-engine:test-dock-size`-Crash ist doch kein reiner
+htdp-lib-Bug, sondern Qt-spezifisch getriggert (2026-07-14, Windows)
+
+**Kontext:** `docs/2026-07-14_prompt.md`. Windows-only, Diagnose-Session (kein Widget-
+Code). Ziel: htdp-Stack (`2htdp/image`, `2htdp/universe` big-bang, `test-engine`) unter
+`PLT_QT=1` als Schluss-Lackmustest für die fertige Widget-Breite (Checkpoint E).
+
+**Facette 1 (`2htdp/image`):** einwandfrei. Fünf Bild-Ausdrücke
+(`examples/htdp-image-probe.rkt`) rendern im Interactions-Fenster korrekt als Snips
+über den Cairo→Backing-Pfad — Kreis, Rechteck-Outline, `overlay`, `beside`, `text`
++ `above/align`, keine Artefakte.
+
+**Facette 2 (`2htdp/universe` big-bang):** einwandfrei —
+`examples/htdp-bigbang-probe.rkt`. Unbedingter `printf` im `on-tick`-Handler bestätigt:
+Tick-Stream in Interactions korreliert exakt mit dem gerenderten Wert im World-Fenster
+(z. B. „tick: 8" gefolgt von Anzeige „9"). `on-key` (Taste „r" → Reset auf 0) greift
+zuverlässig, Loop läuft nach dem Reset unverändert weiter. Bestätigt die Kern-Wette:
+big-bang treibt seine eigene interaktive Schleife sauber unter „Racket treibt, Pump
+blockiert nie" — kein `exec()`, keine geschachtelte Schleife nötig.
+
+**Facette 3 (`test-engine`/`check-expect`) — der historische Absturz reproduziert sich,
+aber NICHT auf beiden Backends:**
+
+- `examples/htdp-tests-probe.rkt` (`#lang htdp/bsl`, ein absichtlich fehlschlagender
+  `check-expect`) geöffnet als einzige Registerkarte, „Run", Test-Report erscheint
+  korrekt in Interactions. Dann `File → Open` von `examples/htdp-image-probe.rkt` als
+  zweite Registerkarte (Trigger laut §19-Historie: File→Open bei einer offenen
+  Registerkarte mit sichtbarem Test-Dock) — Qt: **`DrRacket Internal Error`**
+  reproduziert sich **4/4** identisch zum historischen Fund (§19-Notiz): `preferences:set:
+  new value doesn't satisfy preferences:set-default predicate — pref symbol:
+  'test-engine:test-dock-size — given: '(1)`, Stack durch `test-panel%`s `remove`
+  (`test-tool.rkt:267`) über `undock-tests`/`on-tab-change`. Prozess überlebt (Definitions
+  editierbar, Interactions-Leiste verschwindet), exakt wie dokumentiert.
+- **Nativer Oracle-Vergleich (identische Sequenz, win32, kein `PLT_QT`): 3/3 sauber,
+  kein Crash.** Das widerspricht der bisherigen Annahme „externer, plattformunabhängiger
+  htdp-lib-Bug" (so in `docs/2026-07-14_prompt.md`s OUT-OF-SCOPE-Guardrail festgehalten,
+  basierend auf früheren macOS/Linux-Sessions, die immer unter `PLT_QT=1` liefen). Nach
+  Phase-2-Entscheidungsregel des Prompts selbst bedeutet „nur unter Qt kaputt, nativ
+  sauber" eigentlich: gui-lib/Qt-Lücke, kein Fremdbug — Reklassifizierung nach
+  Nutzer-Rückfrage (Regel 7), Nutzer wählte vertiefte Diagnose in derselben Session.
+
+**Instrumentierter Diskriminator (temporär, `eprintf` in
+`framework/private/panel.rkt`s `dragable-mixin`, nach Diagnose vollständig
+zurückgesetzt via `git checkout` + `raco setup framework` — keine dauerhafte Änderung,
+keine htdp-lib-Datei angefasst):**
+
+- `percentages` (Cache der Splitter-Anteile in `dragable-mixin`, liefert
+  `get-percentages`) wird nur bei `after-new-child` und `place-children` neu
+  berechnet, nie bei reinem Kind-Entfernen. Während der DrRacket-internen
+  Tab-Erstellung (`create-new-tab`/`change-to-tab`, `drracket-core-lib`) feuert eine
+  Salve von `place-children`-Aufrufen, die kurzzeitig zwischen 1 und 2 Kindern
+  oszilliert (Layout-Kirchen, backend-unabhängig — dieselbe Salve tritt **auch nativ**
+  auf, siehe Log-Vergleich unten).
+- Mit `continuation-mark-set->context` je `get-percentages`-Aufruf mit Caller-Stack
+  instrumentiert: der überwiegende Teil der Aufrufe (native wie Qt identisch) kommt aus
+  generischen `after-percentage-change`-Reaktionen (Syncheck, Debugger-Tool,
+  `dragable/def-int-mixin`) — harmlos, unabhängig vom Test-Dock.
+- **Der eine Aufruf, der tatsächlich in `preferences:set` mündet, kommt exklusiv aus
+  `test-panel%::remove` ← `undock-tests` ← `on-tab-change`.** Unter Qt tritt dieser
+  Aufruf **4/4** auf und liest dabei `children-len=1` (Absturz). **Unter nativem win32
+  tritt dieser exakte Caller in keinem der Läufe überhaupt auf** — `on-tab-change`s
+  `cond` nimmt dort einen anderen Zweig (die Aufruf-Kette `remove`/`undock-tests`
+  erscheint schlicht nicht im Log).
+- Da `on-tab-change`s dritter `cond`-Zweig (`(and panel-shown? (not dock?))` →
+  `undock-tests`) rein von der Preference `test-engine:test-window:docked?` (identisch
+  auf beiden Backends) und `(send test-panel is-shown?)` abhängt, zeigt der Vergleich:
+  **`is-shown?`/die Sichtbarkeits-Propagierung des Test-Dock-Widgets unterscheidet sich
+  zwischen Qt- und win32-Backend zum Zeitpunkt der Tab-Erstellung** — plausibel verwandt
+  mit dem in §18.1 gefixten, aber vielleicht nicht vollständig abgedeckten
+  `show()`/`is-shown?`-Verhalten von `wx/qt/window.rkt`, oder mit der Häufigkeit/
+  Reihenfolge der Qt-Pump-getriebenen Resize-Events während der Tab-Erstellung
+  (`shim_pump` vs. win32s synchrone `WM_SIZE`-Verarbeitung). Nicht abschließend
+  root-gecausert — die exakte Quelle des abweichenden `is-shown?`-Timings ist eigene
+  künftige Session (vermutlich `wx/qt/window.rkt` + `wx/qt/frame.rkt`, Resize-Event-
+  Timing während Tab-/Fenster-Erzeugung).
+
+**Verdikt `test-dock-size`:** **nicht** außerhalb des Scopes — echte, reproduzierbare
+`wx/qt`-Timing-Lücke (Qt 4/4, nativ 0/3), keine htdp-lib-Baustelle. Root-Cause lokalisiert
+auf Höhe „`is-shown?`-Divergenz während Tab-Erstellung", nicht weiter bis in den Shim
+verfolgt (Diagnose-Scope dieser Session). **Kein Fix in dieser Session** (Diagnose-
+Charakter, Nutzer-Entscheidung).
+
+**Nebenbefund (eigenes Artefakt, kein Produktbug):** ein `DrRacket Internal Error` beim
+Klick auf „Done" im `Recover Files`-Dialog (`copy-file: copy failed ... win_err=2`,
+`framework/private/autosave.rkt:360`/`271`, `recover-file`) trat auf, nachdem ich
+versehentlich Text in einen laufenden big-bang-Puffer getippt hatte (Fokus-Fehlgriff
+bei Fenster-Automatisierung) und den dadurch dirty gewordenen Prozess hart beendete.
+Der Windows-`copy-file`-Fehler beim „Done"-Klick nach „Delete" ist ein generischer
+`framework/private`-Bug (nicht `wx/qt/`, nicht in dieser Session verursacht durch
+Widget-Code) — benannte die Originaldatei kurzzeitig in
+`<name>.rkt-autorec.<name>` um; Inhalt blieb byte-identisch zum sauberen Original,
+manuell zurückbenannt. Rein informativ festgehalten, nicht verfolgt.
+
+**Sonstiges:** Windows-DLL war beim Sessionstart stale (§22-Fix hatte `shim.cpp`
+angefasst, DLL noch von vorher) — neu gebaut vor Testbeginn. Light Mode bestätigt
+(`(preferences:get 'framework:white-on-black-mode?)` → `#f`). Menü-Sanity-Check nach
+§22-Pull: 9 Menüs unverändert korrekt (File/Edit/View/Language/Racket/Insert/Scripts/
+Tabs/Help), kein Regressions-Hinweis. Smoke 3/3 vor und nach der Session.

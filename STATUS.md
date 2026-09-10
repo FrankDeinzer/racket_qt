@@ -5,6 +5,53 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-14 (Windows) — htdp-Lackmustest: `test-dock-size`-Crash ist Qt-spezifisch, nicht htdp-lib (§23)
+
+**Kontext:** `docs/2026-07-14_prompt.md`. Voller Bericht: `docs/2026-07-14_report-win.md`.
+Windows-only, reine Diagnose (kein Widget-Code). Racket `v9.2 [cs]` gemessen. Sync-Check:
+Submodul bereits auf `54f2f702` (kein Pull nötig), aber Windows-DLL war stale (§22-Fix
+hatte `shim.cpp` angefasst) → neu gebaut vor Testbeginn. Smoke 3/3 vor und nach.
+
+- **Facette 1 (`2htdp/image`) und Facette 2 (`2htdp/universe` big-bang):** beide
+  einwandfrei. big-bang bestätigt die Kern-Wette explizit (Tick-Stream, Rendering,
+  `on-key`-Reset, Loop läuft nach Reset weiter — kein `exec()`, keine geschachtelte
+  Schleife).
+- **Facette 3 (`test-engine`/`check-expect`) — Kernergebnis der Session:** der
+  historische `test-dock-size`-Contract-Crash (bisher als externer, plattform-
+  unabhängiger htdp-lib-Bug eingestuft, s. §19) reproduziert sich **4/4 unter Qt**,
+  aber **0/3 nativ unter win32** bei identischer Auslösesequenz (1→2 Tabs, File→Open
+  nach Test-Fehlschlag). Das widerspricht der Prompt-Annahme — Nutzer-Rückfrage
+  (Regel 7) ergab: vertiefte Diagnose statt nur dokumentieren.
+- **Instrumentierte Diagnose** (temporäre `eprintf`+Caller-Stack-Instrumentierung in
+  `framework/private/panel.rkt`, vollständig zurückgesetzt nach Analyse — kein
+  dauerhafter Code-Eingriff): lokalisiert den Diskriminator exakt auf
+  `on-tab-change`s `cond`-Dispatch (`test-tool.rkt`) — der `undock-tests`/`remove`-Zweig
+  (abhängig von `(send test-panel is-shown?)`) wird unter Qt bei jedem Versuch
+  genommen, unter nativem win32 in keinem einzigen Versuch. Zeigt auf eine
+  `is-shown?`/Sichtbarkeits-Propagierungs- oder Resize-Timing-Differenz in `wx/qt/`
+  während der Tab-Erstellung — nicht bis in den Shim verfolgt (Root-Cause-Tiefe wäre
+  eigene Session). Details, Logs, Caller-Traces: `docs/HACKING.md` §23.
+- **Verdikt:** `test-dock-size` ist **keine** htdp-lib-Baustelle mehr, sondern eine
+  echte `wx/qt`-Lücke — reklassifiziert von OUT-OF-SCOPE zu offenem, lokalisiertem
+  Befund für eine künftige Fix-Session (nur `wx/qt/`, vermutlich `window.rkt`/
+  `frame.rkt`).
+- **Nebenartefakt (kein Produktbug, eigener Automatisierungsfehler):** ein Fokus-
+  Fehlgriff beim big-bang-Tastatur-Test tippte versehentlich `r` in den Definitions-
+  Puffer; nach hartem Prozess-Kill zeigte der Recover-Files-Dialog dies korrekt an
+  (Backup gelöscht, Original unverändert). Der anschließende „Done"-Klick löste einen
+  separaten, generischen `framework/private/autosave.rkt`-Bug aus (`copy-file`-
+  Fehler unter Windows, benennt die Zieldatei kurzzeitig um) — Inhalt blieb intakt,
+  manuell zurückbenannt, nicht weiter verfolgt (§23).
+- **Commits:** keine gui-lib-Submodul-Änderungen (Instrumentierung vollständig
+  revertiert). Umbrella: drei neue `examples/htdp-*-probe.rkt`, `docs/HACKING.md` §23,
+  `CLAUDE.md`-Checkpoint, dieser Eintrag, `docs/2026-07-14_report-win.md`.
+- **Nächster Schritt:** Push/Sync-Entscheidung (Regel 7) offen. Eigene künftige Session
+  für die `wx/qt`-Root-Cause-Fixdiagnose (`is-shown?`/Resize-Timing während
+  Tab-Erstellung); macOS/Linux-Validierung dieser Session separater Prompt (Windows
+  führt laut Auftrag).
+
+---
+
 ## Session 2026-07-14 (macOS, Fortsetzung) — macOS-Preferences-Menü-Bug gefixt (§22)
 
 **Kontext:** direkte Fortsetzung derselben Sitzung (s. u.), Nutzer bat nach dem
