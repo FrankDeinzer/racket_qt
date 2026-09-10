@@ -1820,6 +1820,45 @@ auf Höhe „`is-shown?`-Divergenz während Tab-Erstellung", nicht weiter bis in
 verfolgt (Diagnose-Scope dieser Session). **Kein Fix in dieser Session** (Diagnose-
 Charakter, Nutzer-Entscheidung).
 
+**Read-only-Nachtrag (auf Nutzer-Wunsch, nach der eigentlichen Diagnose, weiterhin kein
+Fix-Versuch):** Code-Scan von `show`/`is-shown?`/`queue-on-size` über alle vier Backends,
+um den Diskriminator weiter einzugrenzen.
+
+- `show`/`is-shown?` selbst sind auf allen Backends simple, synchrone Racket-seitige
+  Flags (`wx/qt/window.rkt:85-88` vs. `wx/win32/window.rkt:280-328`) — kein Unterschied,
+  der die Divergenz erklärt. `show-children` ist unter Qt bewusst ein No-op
+  (`wx/qt/window.rkt:167`), während win32/cocoa es real implementieren
+  (`wx/win32/panel.rkt:77-82`) — aber das ist bereits dokumentiertes, beabsichtigtes
+  Design (§21: Qt verlässt sich auf natives Show/Hide-Kaskadieren statt expliziter
+  Propagierung) und passt nicht als Erklärung für *diese* Timing-Lücke.
+- `wx/qt/frame.rkt:138` überschreibt `queue-on-size` zusätzlich auf Frame-Ebene mit
+  `(void)` — anders als win32/gtk/cocoa, die es dort unverändert von der Basisklasse
+  erben. Nach Analyse der `public*`/`override*`-Komposition (`make-top-container%` in
+  `wxtop.rkt:389-434` wrapt `wx:frame%` und überschreibt `queue-on-size` seinerseits via
+  `override*` mit der echten Implementierung) ist das aber wahrscheinlich **totes,
+  bereits überschattetes Code** — kein bestätigter Bug, eher ein irreführender,
+  überflüssiger Stub. Nicht als Fix-Ansatzpunkt geeignet, ohne das zur Laufzeit zu
+  verifizieren.
+- **Konkreter, gut belegter Ansatzpunkt: `wx/qt/queue.rkt`s Pump-Modell.** Anders als
+  win32/cocoa (die laut `docs/ARCHITECTURE.md` §3 echte OS-Wakeup-Mechanismen nutzen —
+  `unsafe-poll-ctx-eventmask-wakeup` bzw. `unsafe-set-sleep-in-thread!`, sodass Racket
+  sofort aufwacht, wenn ein natives Resize/Paint-Event ankommt) pumpt Qt aktuell **nur**
+  über einen dokumentierten **50ms-Poll-Fallback** (`qt-start-event-pump`,
+  `wx/qt/queue.rkt:23-35`, Kommentar: „A proper wakeup mechanism is a follow-up task")
+  plus einen `set-queue-wakeup!`-Hook, der lediglich feuert, wenn Racket's *eigener*
+  Scheduler ohnehin gerade blockieren würde — kein echtes „wach auf, sobald ein
+  Qt-Event da ist". Das bedeutet: die Verarbeitung nativer Qt-Resize/Paint-Events
+  relativ zum Racket-Call-Stack ist strukturell weniger deterministisch als bei win32
+  (dessen `WM_SIZE` synchron über `SendMessage` im selben Aufruf-Stack verarbeitet
+  wird) — genau die Art von Nichtdeterminismus, die die in §23 gemessene, transiente
+  1-Kind-Fensterlage während der Tab-Erstellung erklären würde. **Bereits als
+  architektonische Alt-Baustelle bekannt** (`docs/ARCHITECTURE.md` §3, „echtes Wakeup
+  ist dokumentierte Folgeaufgabe"), hier erstmals mit einem konkreten, beobachtbaren
+  Symptom (`test-dock-size`-Crash) verknüpft. **Nicht verifiziert** (würde
+  Shim-seitige Instrumentierung von `shim_pump`/den Qt-Resize-Callbacks brauchen, um
+  die exakte Latenz nachzuweisen) — bester Startpunkt für die künftige Fix-Session,
+  aber kein bestätigter Root-Cause.
+
 **Nebenbefund (eigenes Artefakt, kein Produktbug):** ein `DrRacket Internal Error` beim
 Klick auf „Done" im `Recover Files`-Dialog (`copy-file: copy failed ... win_err=2`,
 `framework/private/autosave.rkt:360`/`271`, `recover-file`) trat auf, nachdem ich

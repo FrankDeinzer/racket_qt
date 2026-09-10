@@ -87,9 +87,38 @@ Befund:
 **Verdikt `test-dock-size`:** reklassifiziert von OUT-OF-SCOPE (externer htdp-lib-Bug)
 zu einer echten, lokalisierten `wx/qt`-Lücke. Root-Cause bis zum Diskriminator
 eingegrenzt, aber nicht bis zur letzten Ursache im Shim verfolgt — **kein Fix in dieser
-Session** (Diagnose-Charakter, Nutzer-Entscheidung). Empfehlung für die Fix-Session:
-`wx/qt/window.rkt` (`is-shown?`/`show()`-Propagierung) und `wx/qt/frame.rkt`
-(Resize-Event-Timing während Tab-/Fenster-Erzeugung) als Startpunkt.
+Session** (Diagnose-Charakter, Nutzer-Entscheidung).
+
+### Read-only-Nachtrag: wo genau eine künftige Fix-Session ansetzen sollte
+
+Auf Nachfrage, ob sich Facette 3 direkt in dieser Session fixen lässt: **nein**, aber
+ein zusätzlicher Read-only-Scan (kein Fix-Versuch) über `show`/`is-shown?`/
+`queue-on-size` in allen vier Backends hat den Suchraum weiter eingegrenzt:
+
+- `show`/`is-shown?` sind überall simple, synchrone Racket-Flags — kein Unterschied,
+  der die Divergenz erklärt. Qt's `show-children`-No-op (`wx/qt/window.rkt:167`) ist
+  bereits dokumentiertes, beabsichtigtes Design (§21), keine Erklärung für *dieses*
+  Timing-Problem.
+- `wx/qt/frame.rkt:138`s zusätzlicher `queue-on-size`-Void-Override auf Frame-Ebene
+  sieht zunächst verdächtig aus (win32/gtk/cocoa überschreiben dort nichts), ist aber
+  nach Analyse der `public*`/`override*`-Komposition (`make-top-container%` in
+  `wxtop.rkt` überschreibt `queue-on-size` seinerseits via `override*`) wahrscheinlich
+  totes, überschattetes Code — kein bestätigter Bug.
+- **Bester Ansatzpunkt: `wx/qt/queue.rkt`s Pump-Modell.** Win32/Cocoa nutzen laut
+  `docs/ARCHITECTURE.md` §3 echte OS-Wakeup-Mechanismen, sodass Racket sofort
+  aufwacht, sobald ein natives Resize/Paint-Event ankommt. Qt pumpt aktuell nur über
+  einen dokumentierten **50ms-Poll-Fallback** (`qt-start-event-pump`,
+  `wx/qt/queue.rkt:23-35`, Kommentar: „A proper wakeup mechanism is a follow-up
+  task") plus einen Scheduler-Wakeup-Hook, der nicht speziell auf Qt-Events reagiert.
+  Das macht die Verarbeitung nativer Resize/Paint-Events relativ zum Racket-Call-Stack
+  strukturell weniger deterministisch als bei win32 (synchrones `WM_SIZE` über
+  `SendMessage`) — plausible Erklärung für die in Phase 2 gemessene, transiente
+  1-Kind-Fensterlage während der Tab-Erstellung. Diese Pump-Limitierung ist bereits
+  als architektonische Alt-Baustelle bekannt (`docs/ARCHITECTURE.md` §3); hier
+  erstmals mit einem konkreten, reproduzierbaren Symptom verknüpft. **Nicht
+  verifiziert** — würde Shim-seitige Instrumentierung von `shim_pump`/den
+  Qt-Resize-Callbacks brauchen. Empfehlung für die Fix-Session: dort ansetzen, nicht
+  bei `is-shown?`/`show()` selbst.
 
 ## Nebenartefakt (eigener Automatisierungsfehler, kein Produktbug)
 

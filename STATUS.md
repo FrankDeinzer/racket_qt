@@ -27,10 +27,15 @@ hatte `shim.cpp` angefasst) → neu gebaut vor Testbeginn. Smoke 3/3 vor und nac
   dauerhafter Code-Eingriff): lokalisiert den Diskriminator exakt auf
   `on-tab-change`s `cond`-Dispatch (`test-tool.rkt`) — der `undock-tests`/`remove`-Zweig
   (abhängig von `(send test-panel is-shown?)`) wird unter Qt bei jedem Versuch
-  genommen, unter nativem win32 in keinem einzigen Versuch. Zeigt auf eine
-  `is-shown?`/Sichtbarkeits-Propagierungs- oder Resize-Timing-Differenz in `wx/qt/`
-  während der Tab-Erstellung — nicht bis in den Shim verfolgt (Root-Cause-Tiefe wäre
-  eigene Session). Details, Logs, Caller-Traces: `docs/HACKING.md` §23.
+  genommen, unter nativem win32 in keinem einzigen Versuch. Read-only-Nachtrag
+  (auf Nutzer-Wunsch, `show`/`is-shown?`/`queue-on-size` über alle vier Backends
+  verglichen): `is-shown?`/`show()` selbst sind überall simple synchrone Flags, kein
+  Unterschied dort. Bester Ansatzpunkt ist stattdessen `wx/qt/queue.rkt`s Pump-Modell
+  (nur 50ms-Poll-Fallback statt echtem OS-Wakeup wie bei win32/cocoa, laut
+  `docs/ARCHITECTURE.md` §3 bereits als Folgeaufgabe dokumentiert) — plausible
+  Erklärung für die undeterministischere Resize/Paint-Verarbeitung unter Qt, hier
+  erstmals mit diesem konkreten Symptom verknüpft, aber nicht bis in den Shim
+  verifiziert. Details, Logs, Caller-Traces: `docs/HACKING.md` §23.
 - **Verdikt:** `test-dock-size` ist **keine** htdp-lib-Baustelle mehr, sondern eine
   echte `wx/qt`-Lücke — reklassifiziert von OUT-OF-SCOPE zu offenem, lokalisiertem
   Befund für eine künftige Fix-Session (nur `wx/qt/`, vermutlich `window.rkt`/
@@ -43,11 +48,13 @@ hatte `shim.cpp` angefasst) → neu gebaut vor Testbeginn. Smoke 3/3 vor und nac
   Fehler unter Windows, benennt die Zieldatei kurzzeitig um) — Inhalt blieb intakt,
   manuell zurückbenannt, nicht weiter verfolgt (§23).
 - **Commits:** keine gui-lib-Submodul-Änderungen (Instrumentierung vollständig
-  revertiert). Umbrella: drei neue `examples/htdp-*-probe.rkt`, `docs/HACKING.md` §23,
-  `CLAUDE.md`-Checkpoint, dieser Eintrag, `docs/2026-07-14_report-win.md`.
+  revertiert). Umbrella: drei neue `examples/htdp-*-probe.rkt`, `docs/HACKING.md` §23
+  (inkl. Read-only-Nachtrag), `CLAUDE.md`-Checkpoint, dieser Eintrag,
+  `docs/2026-07-14_report-win.md`.
 - **Nächster Schritt:** Push/Sync-Entscheidung (Regel 7) offen. Eigene künftige Session
-  für die `wx/qt`-Root-Cause-Fixdiagnose (`is-shown?`/Resize-Timing während
-  Tab-Erstellung); macOS/Linux-Validierung dieser Session separater Prompt (Windows
+  für die `wx/qt`-Root-Cause-Fixdiagnose — Startpunkt laut Read-only-Nachtrag:
+  `wx/qt/queue.rkt`s 50ms-Poll-Pump (kein echtes OS-Wakeup), nicht `is-shown?`/`show()`
+  selbst; macOS/Linux-Validierung dieser Session separater Prompt (Windows
   führt laut Auftrag).
 
 ---
