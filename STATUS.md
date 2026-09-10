@@ -5,6 +5,52 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-07-14 (Linux) — htdp-Lackmustest: `test-dock-size`-Befund auf Linux bestätigt + generalisiert (§23.1)
+
+**Kontext:** `docs/2026-07-14_prompt.md`, Fortsetzung der Windows-Session (s. u.). Voller
+Bericht: `docs/2026-07-14_report-linux.md`. Racket `v9.2 [cs]` gemessen.
+
+- **Sync:** Umbrella `main` bereits aktuell; Submodul 1 Commit hinter, nach
+  Nutzer-Bestätigung (Regel 7) reiner Fast-Forward auf den bereits vom Umbrella
+  referenzierten Commit (`54f2f702`), keine Konflikte. Shim war stale (§22-`shim.cpp`
+  neuer als gebaute `.so`) → neu gebaut. Diese Maschine ist **nicht** per `raco pkg
+  update --link` verlinkt (anders als Windows) — Startrezept bleibt `racket -S ... -l
+  drracket`; für jeden Lauf per `/proc/<pid>/maps` verifiziert, dass der Qt-Shim
+  tatsächlich (nicht) geladen ist. Re-Smoke 3/3, Light Mode bestätigt, 9-Menü-Sanity
+  bestätigt (§22 Part B strukturell No-op auf Linux, `system-type` ≠ `'macosx`).
+- **Facette 3 (Kernergebnis, n=3 je Bedingung, automatisiert via `xdotool`):** 1→2-Tab-
+  Sequenz **3/3 Absturz unter Qt, 3/3 sauber nativ** — byte-identischer Fehler zu Windows
+  (`test-engine:test-dock-size`-Contract, `on-tab-change`/`undock-tests`). **Bestätigt und
+  generalisiert die Windows-Reklassifizierung: echte `wx/qt`-Lücke, kein htdp-lib-Bug.**
+  Kombiniert Windows+Linux: 7/7 Qt-Crash, 0/7 nativ. Reine 1-Tab-Bedingung: 3/3 sauber auf
+  beiden Backends — die alte Linux-Notiz „1 Tab reicht" (§19) hat sich nicht reproduziert,
+  nicht weiter verfolgt.
+- **Facette 1 (`2htdp/image`):** 4/5 Bilder sofort sauber; das 5. (`text`+`above/align`)
+  fehlte in einem Lauf 8+ Minuten (kein Scroll-Effekt, Nutzer-bestätigt), obwohl ein
+  headless Gegencheck zeigt, dass die Berechnung selbst < 1 s dauert. Fontconfig-Kaltstart
+  und „Erstlauf kompiliert langsam" als Erklärung geprüft und verworfen. Arbeitshypothese:
+  derselbe Pump-Schwachpunkt wie Facette 3 (`wx/qt/queue.rkt` 50ms-Poll statt OS-Wakeup) —
+  neues, unabhängiges Symptom, nicht root-gecausert, eigene künftige Session.
+- **Facette 2 (big-bang):** DrRacket-Pfad blockiert durch ein deterministisches (2/2 Qt,
+  1/1 nativ identisch) `-S`-Override-Package-Problem (`errortrace-lib`/`drracket-core-lib`
+  kollidieren mit `2htdp/universe`s Require-Graph) — **kein Qt-Bezug**, Environment-Gap.
+  Workaround über `racket` direkt (ohne DrRacket/Errortrace) unter `PLT_QT=1`: Tick-Loop,
+  Redraw und `on-key`-Reset laufen sauber — Kern-Wette „Racket treibt, Pump blockiert nie"
+  bestätigt.
+- **Methodik-Notiz:** `xdotool`/`ydotool`/`wtype` vom Nutzer mitten in der Session
+  nachinstalliert, danach deutlich zuverlässigere GUI-Automatisierung als die zuvor
+  genutzten rohen X11-`ctypes`-Events. Gotcha: `xdotool windowkill` beendet die komplette
+  X11-Verbindung des Ziel-Prozesses (alle seine Fenster), nicht nur das eine Fenster — bei
+  DrRackets Stepper-Fenster riss das die ganze Session ab.
+- **Commits:** keine gui-lib-Submodul-Änderungen (reine Diagnose/Validierung). Umbrella:
+  `docs/2026-07-14_report-linux.md`, `docs/HACKING.md` §23.1, `CLAUDE.md`-Checkpoint,
+  dieser Eintrag.
+- **Nächster Schritt:** Push/Sync-Entscheidung (Regel 7) offen. `test-dock-size`-Fix,
+  Facette-1-Repaint-Befund und das Facette-2-Package-Problem sind je eigene künftige
+  Sessions. macOS-Validierung weiterhin separater Prompt.
+
+---
+
 ## Session 2026-07-14 (Windows) — htdp-Lackmustest: `test-dock-size`-Crash ist Qt-spezifisch, nicht htdp-lib (§23)
 
 **Kontext:** `docs/2026-07-14_prompt.md`. Voller Bericht: `docs/2026-07-14_report-win.md`.

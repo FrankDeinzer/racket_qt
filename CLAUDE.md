@@ -110,7 +110,7 @@ referenziert).
 | E – `choice%`/`radio-box%`/`slider%` echt | ✅ 2026-07-13, alle 3 Plattformen (§20) |
 | E – `tab-panel%`/`canvas-panel%`/`group-panel%` echt (Widget-Breite abgeschlossen) | ✅ 2026-07-14, alle 3 Plattformen (§21; macOS via `tab-panel%` real + isolierter Proben für `canvas-panel%`/`group-panel%`, §21.8) |
 | E – Preferences Ende-zu-Ende | 🟡 Windows + Linux: Dialog öffnet + navigiert (Tabs/Font/Colors/Browser bestätigt), 4 neue Einzelbefunde offen (§21.6, auf Linux identisch reproduziert), restliche Kategorien nicht durchgesehen. **macOS: Menüzugang gefixt** (§22, 2026-07-14) — Preferences erscheint jetzt im Edit-Menü und öffnet den echten Dialog; Restbefunde §21.6 vermutlich auch hier relevant, nicht erneut durchgesehen |
-| htdp-Lackmustest (`2htdp/image`, big-bang, `test-engine`) | 🟡 Windows, 2026-07-14 (§23): `2htdp/image` + big-bang einwandfrei (Kern-Wette „Racket treibt, Pump blockiert nie" bestätigt). `test-engine`-Dock-Crash reproduziert 4/4 unter Qt, 0/3 nativ — **kein htdp-lib-Bug, sondern lokalisierte `wx/qt`-Lücke**, Root-Cause bis `on-tab-change`-Dispatch eingegrenzt. Read-only-Nachtrag: bester Fix-Ansatzpunkt ist `wx/qt/queue.rkt`s 50ms-Poll-Pump (kein echtes OS-Wakeup wie win32/cocoa, laut `docs/ARCHITECTURE.md` §3 bereits bekannte Alt-Baustelle), nicht `is-shown?`/`show()`. Fix offen für künftige Session. macOS/Linux-Validierung separater Prompt |
+| htdp-Lackmustest (`2htdp/image`, big-bang, `test-engine`) | 🟡 Windows + Linux, 2026-07-14 (§23): `test-engine`-Dock-Crash (`test-dock-size`) reproduziert bei 1→2-Tab-Sequenz **7/7 unter Qt, 0/7 nativ** (Windows 4/4+3/3, Linux 3/3+3/3) — **kein htdp-lib-Bug, sondern echte `wx/qt`-Lücke**, auf Linux vollständig bestätigt/generalisiert (§23.1). Root-Cause bis `on-tab-change`-Dispatch eingegrenzt, bester Fix-Ansatzpunkt `wx/qt/queue.rkt`s 50ms-Poll-Pump (kein echtes OS-Wakeup, `docs/ARCHITECTURE.md` §3). `2htdp/universe` big-bang: Kern-Wette „Racket treibt, Pump blockiert nie" auf beiden Plattformen bestätigt (Linux: über `racket` direkt, DrRacket-Pfad durch unabhängiges `-S`/errortrace-Package-Problem blockiert, kein Qt-Bezug). `2htdp/image`: Windows einwandfrei; Linux 4/5 sofort sauber, 5. Bild (`text`+`above/align`) zeigt neuen, nicht root-gecausten Repaint-Verzögerungsbefund (Arbeitshypothese: derselbe Pump-Schwachpunkt, §23.1). Fix offen für künftige Session. macOS-Validierung separater Prompt |
 
 **Offene Nebenbefunde, je eigene Session:** macOS-Menüleiste zeigt teils 8 statt 9
 Einträge (`Windows`-Menü fehlt manchmal, Ursache offen — evtl. verwandt mit §22, nicht
@@ -128,10 +128,13 @@ KWin nicht validiert; Windows Toolbar-Save-Icon-Timing (`wx/qt/button.rkt`); Lin
 („arity mismatch") nach den macOS-Menü-Dispatch-Fixes (§19) in 4 Versuchen nicht mehr
 reproduziert — plausibel behoben, nicht absolut bewiesen (Original war
 n=1-intermittierend); Linux Crash B (Teardown, „invalid memory reference") 1/1
-unverändert reproduziert, bleibt offen, andere Ursache als die Menü-Fixe; `htdp-lib`-
-Contract-Bug (`test-engine:test-dock-size`) auf macOS UND jetzt auch Linux beobachtet —
-auf Linux bereits bei nur einem offenen Tab (Auslöser weiter gefasst als ursprünglich
-angenommen), nicht root-caused (§19); nativer macOS-Save-Dialog hängt bei fehlender
+unverändert reproduziert, bleibt offen, andere Ursache als die Menü-Fixe; `test-dock-
+size`-Crash (früher hier als `htdp-lib`-Contract-Bug geführt) **reklassifiziert 2026-07-14
+(§23/§23.1): echte `wx/qt`-Lücke, kein htdp-lib-Bug** — Windows+Linux je 1→2-Tab-Sequenz
+7/7 Qt-Crash, 0/7 nativ; die frühere Linux-Beobachtung „reicht schon 1 Tab" hat sich in
+der §23.1-Session nicht reproduziert (3/3 sauber bei nur einem Tab, beide Backends),
+Root-Cause bis `on-tab-change`/`wx/qt/queue.rkt`-Pump eingegrenzt, Fix offen; nativer
+macOS-Save-Dialog hängt bei fehlender
 Endung ein literales `.*` an den Dateinamen an (nur nativer Pfad, Qt-eigener Dialog
 unbetroffen — Diskriminator bestätigt, §19), bewusst nicht gefixt, da native Pfad ohnehin
 nicht der Standard ist. Neu seit 2026-07-14 (§21.6, nicht root-caused; auf Linux

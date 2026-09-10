@@ -1875,3 +1875,65 @@ angefasst, DLL noch von vorher) — neu gebaut vor Testbeginn. Light Mode bestä
 (`(preferences:get 'framework:white-on-black-mode?)` → `#f`). Menü-Sanity-Check nach
 §22-Pull: 9 Menüs unverändert korrekt (File/Edit/View/Language/Racket/Insert/Scripts/
 Tabs/Help), kein Regressions-Hinweis. Smoke 3/3 vor und nach der Session.
+
+### 23.1 Linux-Validierung (2026-07-14) — Reklassifizierung bestätigt + generalisiert
+
+**Kontext:** `docs/2026-07-14_report-linux.md`, direkte Fortsetzung von §23 (Windows).
+Diese Maschine ist **nicht** per `raco pkg update --link` verlinkt (`raco pkg show -l`
+zeigt keine User-Pakete) — Startrezept bleibt `racket -S third_party/gui/gui-lib -S
+third_party/draw/draw-lib -l drracket` (§13). Für jeden Lauf per `grep libracketqtshim
+/proc/<pid>/maps` positiv (Qt-Läufe) bzw. negativ (native Läufe) verifiziert, dass das
+jeweils erwartete Backend tatsächlich aktiv ist.
+
+**Facette 3 — vollständig mit n=3 je Bedingung wiederholt (automatisiert via `xdotool`,
+Fenstersuche + Geometrie-relative Klicks):**
+
+| Sequenz | Qt (`PLT_QT=1`) | Nativ (GTK) |
+|---|---|---|
+| nur 1 Tab | 3/3 sauber | 3/3 sauber |
+| 1 Tab → `File → Open` 2. Tab | **3/3 Absturz** | 3/3 sauber |
+
+Fehler bei allen 3 Qt-Läufen byte-identisch zu Windows/§19: `preferences:set: ... pref
+symbol: 'test-engine:test-dock-size — given: '(1)`, Stack über `test-panel%::remove` ←
+`undock-tests` ← `on-tab-change`. **Bestätigt und generalisiert die Windows-
+Reklassifizierung: echte, reproduzierbare `wx/qt`-Timing-Lücke, kein htdp-lib-Bug.**
+Kombiniert über beide Plattformen: 7/7 Crash unter Qt (Windows 4/4 + Linux 3/3) bei der
+1→2-Tab-Sequenz, 0/7 nativ (Windows 3/3 + Linux 3/3) bei derselben Sequenz. Die alte
+Linux-Notiz „ein Tab allein reicht" (§19/STATUS 2026-07-12) hat sich diesmal **nicht**
+reproduziert (3/3 sauber bei nur einem Tab, sowohl Qt als auch nativ) — plausibel
+intermittierend oder an einen inzwischen veränderten Zustand geknüpft, nicht weiter
+verfolgt, da die robustere Windows-Sequenz (Schritt B) ohnehin der aussagekräftigere,
+jetzt zweifach (Win+Linux) bestätigte Auslöser ist. Die im Windows-Report benannte
+Root-Cause-Richtung (`is-shown?`-Divergenz während `on-tab-change`, vermutlich
+`wx/qt/queue.rkt`s 50ms-Poll-Pump) wurde auf Linux nicht erneut instrumentiert (keine
+neue Information gegenüber der bereits tiefen Windows-Diagnose erwartet).
+
+**Facette 1 (`2htdp/image`) — neuer, unabhängiger Repaint-Befund:** die ersten vier
+Bild-Snips (Kreis, Rechteck-Outline, `overlay`, `beside`) erscheinen in jedem Lauf sofort
+korrekt. Das fünfte (`above/align` aus `text` + `rectangle`) fehlte in einem Lauf über
+8+ Minuten vollständig (kein Scrollbalken, Nutzer-bestätigt kein Effekt durch manuelles
+Scrollen), obwohl ein headless Gegencheck zeigt, dass die reine Bildberechnung < 1 s
+dauert — das Problem liegt beim Rendern/Einfügen des Snips, nicht bei der Berechnung. In
+späteren Läufen erschien dasselbe Bild unauffällig, jeweils nachdem eine
+Fenster-Interaktion stattgefunden hatte. Fontconfig-Kaltstart und „Erststart kompiliert
+langsam" wurden als Erklärung geprüft und beide verworfen (siehe Report für Details).
+**Arbeitshypothese:** derselbe Pump-Schwachpunkt wie oben (`wx/qt/queue.rkt`s
+50ms-Poll statt OS-Wakeup) — ein zweites, unabhängiges Symptom für dieselbe
+architektonische Lücke. Nicht root-gecausert, eigene künftige Session.
+
+**Facette 2 (big-bang) — Kern-Wette bestätigt, DrRacket-Pfad durch Fremdproblem
+blockiert:** `examples/htdp-bigbang-probe.rkt` löst über echtes DrRacket sofort einen
+`DrRacket Internal Error` aus (`require: namespace mismatch ... drracket-errortrace-
+key.rkt, phase: 1`) — deterministisch 2/2 unter Qt **und** 1/1 nativ identisch, damit
+zweifelsfrei ein reines `-S`-Override-Package-Versions-Problem (`errortrace-lib`/
+`drracket-core-lib` bleiben System-Pakete, kollidieren mit `2htdp/universe`s größerem
+Require-Graph), **kein `wx/qt`-Bug**. Workaround: Probe direkt via `racket -S ...`
+(ohne DrRacket/Errortrace) unter `PLT_QT=1` gestartet — Tick-Loop läuft korrekt mit der
+deklarierten Rate, `on-key`-Reset funktioniert, Loop läuft danach unverändert weiter.
+Bestätigt „Racket treibt, Pump blockiert nie" für big-bang auch auf Linux.
+
+**Automatisierungs-Gotcha (Methodik, kein Produktbug):** `xdotool windowkill` sendet
+`XKillClient` und beendet die **gesamte X11-Verbindung des Ziel-Clients**, nicht nur das
+eine Fenster — bei DrRackets Stepper-Fenster (selber Prozess wie das Hauptfenster) riss
+das die komplette Session ab. Für Hilfsfenster `key Return`/`Escape` oder den regulären
+Schließen-Button verwenden, nicht `windowkill`.
