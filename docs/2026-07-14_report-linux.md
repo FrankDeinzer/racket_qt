@@ -180,7 +180,7 @@ denselben architektonischen Schwachpunkt zeigen.
 
 | Facette | Ergebnis |
 |---|---|
-| `2htdp/image` | 🟡 4/5 sofort sauber; 5. Bild (`text`+`above/align`) zeigt in einem Lauf einen 8+ Min. Repaint-Hänger, in späteren Läufen unauffällig — nicht root-gecausert, Arbeitshypothese: derselbe Pump-Schwachpunkt wie Facette 3 |
+| `2htdp/image` | 🟡 Interactions-REPL rendert reproduzierbar (3/3) nur die ersten 4 Top-Level-Bildwerte einer `Run`-Sitzung, danach dauerhaft nichts mehr — content-unabhängig, kein Scroll-/Compute-/Deadlock-Problem. Pump-Hypothese widerlegt (Nachtrag 2), Spur zeigt auf `framework`-Insert-Pfad/Qt-Canvas-Kapazität, nicht root-gecausert |
 | `2htdp/universe` big-bang | ✅ Kern-Wette bestätigt (Tick/Redraw/`on-key` sauber unter Qt); ursprünglich blockierter DrRacket-Pfad (unabhängiges `-S`/errortrace-Problem) im Nachtrag strukturell gefixt (Fork-Link, s. u.) |
 | `test-engine`/`check-expect` (`test-dock-size`) | 🔴 **3/3 Absturz** bei 1→2-Tab-Sequenz unter Qt, **0/3** nativ; 3/3 sauber bei nur 1 Tab auf beiden Seiten — bestätigt Windows-Befund vollständig, generalisiert auf Linux |
 
@@ -233,3 +233,45 @@ QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins racket -l drracket`, kein `-S` mehr n�
 `CLAUDE.md` (neue Linux-Umgebungstabelle, Run-Rezept, Checkpoint-Zeile) und
 `docs/HACKING.md` §23.1 aktualisiert. Damit ist die Facette-2-Zusammenfassungszeile
 oben (🟡, DrRacket-Pfad blockiert) **überholt** — der DrRacket-Pfad funktioniert jetzt.
+
+## Nachtrag 2 (selbe Sitzung) — Facette-1-Repaint-Befund vertieft, Pump-Hypothese widerlegt
+
+Auf Nutzer-Wunsch vertieft (Regel 7, Nutzer-Bestätigung eingeholt). Ausgangspunkt war die
+Arbeitshypothese oben: derselbe `wx/qt/queue.rkt`-Pump-Schwachpunkt wie `test-dock-size`.
+**Diese Hypothese hält einer genauen Code-Lektüre nicht stand:** `qt-start-event-pump`
+(`wx/qt/queue.rkt:23-35`) ruft `shim_pump 0` **unbedingt alle 50ms**, unabhängig vom
+Scheduler-Zustand — das erklärt höchstens ~50ms Latenz, keine mehrminütigen Hänger wie im
+ersten Facette-1-Lauf beobachtet.
+
+**Diagnose mit `PLT_QT_DEBUG=1` + drei neuen Isolationsproben**
+(`examples/htdp-text-isolated-probe.rkt`, `examples/htdp-image-count-probe.rkt`,
+letztere mit 6 Bildern):
+
+1. Ein isoliertes `text`+`above/align`-Bild als einzige Top-Level-Expression rendert
+   sofort korrekt — kein `text`-spezifischer Rendering-Bug.
+2. Eine Probe mit 5 rein geometrischen Bildern (kein `text`) zeigt **dasselbe Muster**:
+   Bild 5 fehlt. Mit 6 Bildern fehlen Bild 5 **und** 6. **3/3 reproduzierbar** an diesem
+   Sessiontag: die Interactions-REPL rendert die ersten **4** Top-Level-Werte einer
+   frischen `Run`-Sitzung korrekt und zeigt danach dauerhaft nichts mehr —
+   content-unabhängig.
+3. Fenster auf 600×1400px vergrößert (viel Leerraum unterhalb von Bild 4): Bild 5/6
+   erscheinen weiterhin nicht — **kein Scroll-/Viewport-Problem**, das Bild ist nicht nur
+   außerhalb des sichtbaren Bereichs vorhanden.
+4. Alle Racket-Threads liegen nach der Auswertung im `do_poll`-Leerlauf (`ps -L -o
+   wchan`) — **kein Deadlock**, die Auswertung ist fertig.
+5. Ein Klick löst im Debug-Log nachweislich neue Repaint-Aktivität aus (`[qt-canvas]
+   refresh -> queue-paint` + `[qt-dc] on-backing-flush proc fired, bm=600x292`), aber
+   **nur für den bereits vorhandenen Inhalt** — kein größerer Bitmap-Bereich, kein
+   vorher fehlendes Bild wird dadurch sichtbar. Spricht dafür, dass der 5. Wert nie in
+   den Interactions-Puffer eingefügt wurde (nicht: eingefügt, aber nicht gemalt).
+
+**Neues Verdikt:** kein `wx/qt/queue.rkt`-Pump-Bug. Die deutlich präzisere Spur zeigt auf
+`framework`s Interactions-Snip-Insert-Pfad oder eine Qt-Canvas-Kapazitätsgrenze bei genau
+4 eingefügten Bild-Snips — auf Windows tritt das laut Windows-Report nicht auf (alle 5
+Bilder sofort sauber). Die frühere Beobachtung „5. Bild erschien in einem späteren Lauf
+doch" (vor diesem Nachtrag, anderer Tab-/Prozesszustand) ist mit den heutigen 3/3-Messungen
+nicht konsistent, vermutlich abweichender Ausgangszustand (zweiter Tab nach
+Dialog-Dismiss statt frischer `Run`). **Weiterhin nicht root-gecausert** — vermutlich
+teilweise Shared-Code (`framework`), nicht nur `wx/qt/`; bei einem Fund dort vor jedem
+Fix-Versuch STOPP + Rückfrage. Eigene künftige Session. Die drei neuen Isolationsproben
+bleiben in `examples/` für diese künftige Session.

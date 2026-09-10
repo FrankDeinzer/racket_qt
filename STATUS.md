@@ -28,9 +28,24 @@ Bericht: `docs/2026-07-14_report-linux.md`. Racket `v9.2 [cs]` gemessen.
 - **Facette 1 (`2htdp/image`):** 4/5 Bilder sofort sauber; das 5. (`text`+`above/align`)
   fehlte in einem Lauf 8+ Minuten (kein Scroll-Effekt, Nutzer-bestätigt), obwohl ein
   headless Gegencheck zeigt, dass die Berechnung selbst < 1 s dauert. Fontconfig-Kaltstart
-  und „Erstlauf kompiliert langsam" als Erklärung geprüft und verworfen. Arbeitshypothese:
-  derselbe Pump-Schwachpunkt wie Facette 3 (`wx/qt/queue.rkt` 50ms-Poll statt OS-Wakeup) —
-  neues, unabhängiges Symptom, nicht root-gecausert, eigene künftige Session.
+  und „Erstlauf kompiliert langsam" als Erklärung geprüft und verworfen.
+- **Nachtrag 2 (selbe Sitzung, Nutzer bat um Vertiefung nach dem Link-Fix):** Die
+  ursprüngliche Pump-Arbeitshypothese ist **widerlegt** — `qt-start-event-pump` ruft
+  `shim_pump 0` unbedingt alle 50ms, kann also keine Mehrminuten-Hänger erklären. Mit
+  `PLT_QT_DEBUG=1` + gezielten Isolationsproben (einzelnes Text-Bild, 5×/6× rein
+  geometrische Bilder, 600×1400px-Fenster) reproduzierbar (3/3) gemessen: die
+  Interactions-REPL rendert die ersten **4** Top-Level-Bildwerte einer `Run`-Sitzung
+  korrekt und zeigt danach dauerhaft nichts mehr — content-unabhängig (auch ohne `text`),
+  kein Scroll-/Viewport-Problem (viel Leerraum bleibt sichtbar leer), kein Deadlock (alle
+  Threads im `do_poll`-Leerlauf nach der Auswertung), ein Klick löst zwar nachweislich
+  neuen Repaint der vorhandenen Interactions-Canvas aus, bringt aber kein fehlendes Bild
+  zum Vorschein (spricht für „nie eingefügt", nicht „eingefügt, aber nicht gemalt"). Auf
+  Windows tritt das laut Windows-Report nicht auf (alle 5 Bilder sofort sauber).
+  **Neue, deutlich präzisere Root-Cause-Richtung:** vermutlich `framework`s Interactions-
+  Snip-Insert-Pfad oder eine Qt-Canvas-Kapazitätsgrenze bei genau 4 Bildern — nicht mehr
+  der Pump. Weiterhin nicht root-gecausert (würde Instrumentierung von mutmaßlich
+  Shared-Code brauchen), eigene künftige Session. `docs/HACKING.md` §23.1 entsprechend
+  korrigiert/erweitert.
 - **Facette 2 (big-bang):** DrRacket-Pfad zunächst blockiert durch ein deterministisches
   (2/2 Qt, 1/1 nativ identisch) `-S`-Override-Package-Problem (`errortrace-lib`/
   `drracket-core-lib` kollidieren mit `2htdp/universe`s Require-Graph) — **kein

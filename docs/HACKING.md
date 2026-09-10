@@ -1908,18 +1908,50 @@ Root-Cause-Richtung (`is-shown?`-Divergenz während `on-tab-change`, vermutlich
 `wx/qt/queue.rkt`s 50ms-Poll-Pump) wurde auf Linux nicht erneut instrumentiert (keine
 neue Information gegenüber der bereits tiefen Windows-Diagnose erwartet).
 
-**Facette 1 (`2htdp/image`) — neuer, unabhängiger Repaint-Befund:** die ersten vier
-Bild-Snips (Kreis, Rechteck-Outline, `overlay`, `beside`) erscheinen in jedem Lauf sofort
-korrekt. Das fünfte (`above/align` aus `text` + `rectangle`) fehlte in einem Lauf über
-8+ Minuten vollständig (kein Scrollbalken, Nutzer-bestätigt kein Effekt durch manuelles
-Scrollen), obwohl ein headless Gegencheck zeigt, dass die reine Bildberechnung < 1 s
-dauert — das Problem liegt beim Rendern/Einfügen des Snips, nicht bei der Berechnung. In
-späteren Läufen erschien dasselbe Bild unauffällig, jeweils nachdem eine
-Fenster-Interaktion stattgefunden hatte. Fontconfig-Kaltstart und „Erststart kompiliert
-langsam" wurden als Erklärung geprüft und beide verworfen (siehe Report für Details).
-**Arbeitshypothese:** derselbe Pump-Schwachpunkt wie oben (`wx/qt/queue.rkt`s
-50ms-Poll statt OS-Wakeup) — ein zweites, unabhängiges Symptom für dieselbe
-architektonische Lücke. Nicht root-gecausert, eigene künftige Session.
+**Facette 1 (`2htdp/image`) — reproduzierbarer Befund: Interactions-REPL rendert nur die
+ersten 4 Bild-Werte einer Sitzung, danach dauerhaft nichts mehr (2026-07-14, Nachtrag zum
+Nachtrag, nach dem Linux-DrRacket-Link, s. o.):**
+
+Ursprünglich (vor dem Link-Fix) wurde vermutet, das sei derselbe Pump-Schwachpunkt wie
+`test-dock-size` (`wx/qt/queue.rkt`s 50ms-Poll). **Diese Hypothese ist widerlegt:**
+`qt-start-event-pump` ruft `shim_pump 0` **unbedingt alle 50ms**, unabhängig vom
+Scheduler-Zustand (`wx/qt/queue.rkt:23-35`) — das kann höchstens ~50ms Latenz erklären,
+keine mehrminütigen Hänger. Mit `PLT_QT_DEBUG=1` und gezielten Isolations-Proben wurde
+stattdessen Folgendes gemessen:
+
+1. **Kein Rendering-/Compute-Bug:** ein isoliertes `(above/align "left" (text ...)
+   (rectangle ...))` als einzige Top-Level-Expression rendert sofort korrekt. Der Fehler
+   hängt nicht an `text` oder an Bildberechnung.
+2. **Kein Content-abhängiger Bug:** eine Probe mit 5 rein geometrischen Bildern (keine
+   `text`-Verwendung) zeigt exakt dasselbe Muster — Bild 5 fehlt. Eine Probe mit 6 Bildern
+   zeigt: Bild 5 **und** 6 fehlen. **Reproduzierbar 3/3 an diesem Sessionstag:** die
+   Interactions-Anzeige rendert die ersten 4 Top-Level-Werte einer frischen `Run`-Sitzung
+   korrekt und zeigt danach **dauerhaft nichts mehr** — unabhängig vom Bildinhalt.
+3. **Kein Scroll-/Viewport-Problem:** dasselbe Fenster auf 600×1400px vergrößert (viel
+   Leerraum unterhalb von Bild 4 sichtbar) zeigt weiterhin kein 5./6. Bild — es ist nicht
+   nur außerhalb des sichtbaren Bereichs gerendert.
+4. **Kein Hänger/Deadlock:** alle Racket-Threads des Prozesses liegen nach der Auswertung
+   im `do_poll`-Leerlauf (`ps -L -o wchan`), keiner ist in einem blockierenden Syscall
+   stecken geblieben — die Auswertung ist fertig, es wird schlicht nichts mehr eingefügt/
+   gerendert.
+5. **Ein Klick löst nachweislich neue Repaint-Aktivität aus** (`[qt-canvas] refresh ->
+   queue-paint` + `[qt-dc] on-backing-flush proc fired, bm=600x292` im Debug-Log direkt
+   nach einem synthetischen Klick), aber **nur auf den bereits vorhandenen Inhalt** —
+   kein neuer/größerer Bitmap-Bereich, kein vorher fehlendes Bild taucht dadurch auf. Das
+   spricht dafür, dass der 5. Wert nie in den Interactions-Puffer eingefügt wurde, nicht
+   dafür, dass er eingefügt, aber nicht gemalt wurde.
+
+**Verdikt:** kein `wx/qt/queue.rkt`-Pump-Bug. Eher ein Bug in der REPL-Ergebnis-Anzeige-
+Pipeline (vermutlich `framework`s Interactions-Snip-Insert-Pfad oder eine Qt-spezifische
+Canvas-/Backing-Store-Kapazitätsgrenze, die genau bei 4 eingefügten Bild-Snips greift),
+der auf Windows laut Windows-Report nicht auftrat (dort alle 5 Bilder sofort sauber). Die
+frühere Beobachtung „5. Bild erschien in einem späteren Lauf doch" (vor dem Link-Fix,
+andere Tab-Historie/Prozesszustand) ist mit den heutigen 3/3-Messungen nicht konsistent
+und vermutlich auf einen abweichenden Ausgangszustand zurückzuführen (zweiter Tab nach
+Dialog-Dismiss statt frischer `Run`). **Nicht root-gecausert** — würde Instrumentierung
+von `framework`s Interactions-/Snip-Insert-Code brauchen (mutmaßlich Shared-Code, nicht
+nur `wx/qt/` — bei einem Fund dort vor jedem Fix-Versuch STOPP + Rückfrage, Regel bei
+Shared-Code-Änderungen). Eigene künftige Session.
 
 **Facette 2 (big-bang) — Kern-Wette bestätigt, DrRacket-Pfad durch Fremdproblem
 blockiert:** `examples/htdp-bigbang-probe.rkt` löst über echtes DrRacket sofort einen
