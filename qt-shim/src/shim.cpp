@@ -13,6 +13,7 @@
 #include <QTabBar>
 #include <QGroupBox>
 #include <QFrame>
+#include <QScrollBar>
 #include <QSignalBlocker>
 #include <QMenuBar>
 #include <QMenu>
@@ -945,6 +946,46 @@ void shim_slider_set_value(void* sl_ptr, int v)
 int shim_slider_get_value(void* sl_ptr)
 {
     return static_cast<QSlider*>(sl_ptr)->value();
+}
+
+// ---- scrollbar (canvas% do-set-scrollbars / manual scroll API) -----------
+
+void* shim_scrollbar_create(void*           parent_widget,
+                            int             vertical, // 0=horizontal 1=vertical
+                            shim_callback_t changed_cb,
+                            void*           ud)
+{
+    auto* parent = static_cast<QWidget*>(parent_widget);
+    auto* sb = new QScrollBar(vertical ? Qt::Vertical : Qt::Horizontal, parent);
+    if (changed_cb) {
+        QObject::connect(sb, &QScrollBar::valueChanged,
+                         [changed_cb, ud](int) { changed_cb(ud); });
+    }
+    return sb;
+}
+
+// Blocks valueChanged for programmatic range/value sets (same rationale as
+// shim_slider_set_value above). `step` drives arrow-click/wheel granularity
+// (QScrollBar::setSingleStep) -- wx's h-step/v-step init args.
+void shim_scrollbar_set_range(void* sb_ptr, int max, int page, int step)
+{
+    auto* sb = static_cast<QScrollBar*>(sb_ptr);
+    QSignalBlocker blocker(sb);
+    sb->setRange(0, max);
+    sb->setPageStep(page);
+    sb->setSingleStep(step > 0 ? step : 1);
+}
+
+void shim_scrollbar_set_value(void* sb_ptr, int v)
+{
+    auto* sb = static_cast<QScrollBar*>(sb_ptr);
+    QSignalBlocker blocker(sb);
+    sb->setValue(v);
+}
+
+int shim_scrollbar_get_value(void* sb_ptr)
+{
+    return static_cast<QScrollBar*>(sb_ptr)->value();
 }
 
 // ---- choice (choice%) ------------------------------------------------------
