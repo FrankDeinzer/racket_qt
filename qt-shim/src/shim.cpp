@@ -12,6 +12,7 @@
 #include <QSlider>
 #include <QTabBar>
 #include <QGroupBox>
+#include <QFrame>
 #include <QSignalBlocker>
 #include <QMenuBar>
 #include <QMenu>
@@ -543,11 +544,15 @@ void shim_canvas_destroy(void* canvas_ptr)
 
 // ---- panel --------------------------------------------------------------
 
-// Creates a plain container QWidget. Racket positions it via
-// shim_widget_set_geometry; children of the panel parent themselves here.
-void* shim_panel_create(void* parent_widget)
+// Creates a plain container widget (a QFrame so a border can be turned on).
+// Racket positions it via shim_widget_set_geometry; children of the panel
+// parent themselves here. QFrame with the default NoFrame style renders
+// identically to a bare QWidget, so border=0 callers are unaffected.
+void* shim_panel_create(void* parent_widget, int border)
 {
-    return new QWidget(static_cast<QWidget*>(parent_widget));
+    auto* frame = new QFrame(static_cast<QWidget*>(parent_widget));
+    if (border) frame->setFrameStyle(QFrame::Box | QFrame::Plain);
+    return frame;
 }
 
 // ---- button -------------------------------------------------------------
