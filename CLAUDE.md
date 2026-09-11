@@ -19,7 +19,7 @@ Qt Widgets backend ("wx/qt/") für `racket/gui`. Additiver Spike: aktiviert via 
 
 | | |
 |---|---|
-| Racket | v9.2 [cs], x86-64 |
+| Racket | v9.3 [cs], x86-64 — seit 2026-09-11 migriert (`docs/HACKING.md` §24.1) |
 | Qt | 6.11.0, `C:\Qt\6.11.0\msvc2022_64` |
 | CMake | 4.2.3, Generator "Visual Studio 17 2022" |
 | Preset | `windows-x64` → `qt-shim/build/windows-x64` |
@@ -135,7 +135,8 @@ referenziert).
 | E – `file-selector` (get-file/put-file, Qt-eigener Dialog) | ✅ 2026-07-12, alle 3 Plattformen; Qt-eigen×nativ-Matrix (3×2) komplett 2026-07-13 (§19) |
 | E – `choice%`/`radio-box%`/`slider%` echt | ✅ 2026-07-13, alle 3 Plattformen (§20) |
 | E – `tab-panel%`/`canvas-panel%`/`group-panel%` echt (Widget-Breite abgeschlossen) | ✅ 2026-07-14, alle 3 Plattformen (§21; macOS via `tab-panel%` real + isolierter Proben für `canvas-panel%`/`group-panel%`, §21.8) |
-| E – Preferences Ende-zu-Ende | 🟡 Windows + Linux: Dialog öffnet + navigiert (Tabs/Font/Colors/Browser bestätigt), 4 neue Einzelbefunde offen (§21.6, auf Linux identisch reproduziert), restliche Kategorien nicht durchgesehen. **macOS: Menüzugang gefixt** (§22, 2026-07-14) — Preferences erscheint jetzt im Edit-Menü und öffnet den echten Dialog; Restbefunde §21.6 vermutlich auch hier relevant, nicht erneut durchgesehen |
+| E – Preferences Ende-zu-Ende | 🟡 Windows + Linux: Dialog öffnet + navigiert (Tabs/Font/Colors/Browser bestätigt). Von den 4 §21.6-Einzelbefunden sind 2 gefixt (Font-Size-Slider-Zahl; Colors-Tab-Rahmen — Rahmen-Teil, rechte Spalte weiterhin offen, 2026-09-11 Windows, §24.2/§24.3), Editor-Canvas-Scrollbars root-caused + Fix zurückgerollt/geparkt (2026-09-11 Windows, §24.5), Resize/Reflow-Bug weiterhin offen (§21.7); restliche Preferences-Kategorien nicht durchgesehen. **macOS: Menüzugang gefixt** (§22, 2026-07-14) — Preferences erscheint jetzt im Edit-Menü und öffnet den echten Dialog; Restbefunde vermutlich auch hier relevant, nicht erneut durchgesehen |
+| Windows Racket 9.2 → 9.3 Migration | ✅ 2026-09-11 (`docs/HACKING.md` §24.1) — kein gui-lib/draw-lib-Versionsangleich nötig, `raco pkg update --link` (Nutzer-elevated), Gate-Test (nativ ohne `PLT_QT`) grün |
 | htdp-Lackmustest (`2htdp/image`, big-bang, `test-engine`) | ✅ **DrRacket-auf-Qt trägt htdp** — auf allen drei Plattformen validiert (Windows/Linux 2026-07-14, macOS 2026-09-10, §23/§23.1/§23.2). `test-engine`-Dock-Crash (`test-dock-size`) reproduziert bei 1→2-Tab-Sequenz **10/10 unter Qt, 0/10 nativ** (Windows 4/4+3/3, Linux 3/3+3/3, macOS 3/3+3/3) — **kein htdp-lib-Bug, sondern echte `wx/qt`-Lücke**, auf allen drei Plattformen bestätigt/generalisiert. Root-Cause bis `on-tab-change`-Dispatch eingegrenzt, bester Fix-Ansatzpunkt `wx/qt/queue.rkt`s 50ms-Poll-Pump (kein echtes OS-Wakeup, `docs/ARCHITECTURE.md` §3) — **Fix selbst bleibt offen, eigene künftige Session**. `2htdp/universe` big-bang: Kern-Wette „Racket treibt, Pump blockiert nie" auf allen drei Plattformen bestätigt. Auf Linux zunächst nur über `racket` direkt möglich (DrRacket-Pfad durch ein `-S`/errortrace-Package-Problem blockiert, kein Qt-Bezug) — nach dem Linux-DrRacket-Link läuft big-bang auch über echtes DrRacket unter Qt sauber; auf macOS trat dieses Problem trotz weiterhin genutztem `-S`-Rezept gar nicht erst auf. `2htdp/image`: Windows + macOS einwandfrei (alle 5 Bilder sofort korrekt); Linux Interactions-REPL rendert reproduzierbar (3/3) nur die ersten 4 Top-Level-Bildwerte einer `Run`-Sitzung, danach dauerhaft nichts mehr — Pump-Hypothese widerlegt (Poll läuft unbedingt alle 50ms, erklärt keine Mehrminuten-Hänger), kein Scroll-/Compute-/Deadlock-Problem, vermutlich `framework`-Interactions-Insert-Pfad oder Qt-Canvas-Kapazitätsgrenze (§23.1), auf macOS nicht reproduziert — Fix offen für künftige Session (ggf. Shared-Code-Scope, vor Fix-Versuch Rückfrage). macOS lief auf Racket **v9.3** statt v9.2 (Homebrew-Auto-Update 2026-08-19, s. Umgebungstabelle + §23.2) — Fork neu kompiliert, Ergebnis unverändert. |
 
 **Offene Nebenbefunde, je eigene Session:** macOS-Menüleiste zeigt teils 8 statt 9
@@ -150,7 +151,7 @@ Exit-Bestätigung + tatsächliche Prozessbeendigung beim Schließen des letzten 
 trat NICHT ein (Prozess läuft weiter, kein Crash) — nicht root-caused, zwei Hypothesen
 (DrRacket-eigene Close-Logik vs. Qt-Pump-Loop-Bug bei `queue-callback`), eigene künftige
 Session. Linux Resize/Minimieren unter
-KWin nicht validiert; Windows Toolbar-Save-Icon-Timing (`wx/qt/button.rkt`); Linux Crash A
+KWin nicht validiert; Linux Crash A
 („arity mismatch") nach den macOS-Menü-Dispatch-Fixes (§19) in 4 Versuchen nicht mehr
 reproduziert — plausibel behoben, nicht absolut bewiesen (Original war
 n=1-intermittierend); Linux Crash B (Teardown, „invalid memory reference") 1/1
@@ -164,14 +165,21 @@ reproduziert (3/3 sauber bei nur einem Tab, beide Backends), Root-Cause bis
 macOS-Save-Dialog hängt bei fehlender
 Endung ein literales `.*` an den Dateinamen an (nur nativer Pfad, Qt-eigener Dialog
 unbetroffen — Diskriminator bestätigt, §19), bewusst nicht gefixt, da native Pfad ohnehin
-nicht der Standard ist. Neu seit 2026-07-14 (§21.6, nicht root-caused; auf Linux
-identisch reproduziert, s. u. — backend-generisch, nicht Windows-spezifisch):
-Resize/Reflow-Bug (Kind-Controls wandern beim Fenster-Vergrößern nicht mit, bestätigt
-allgemein — reproduziert sowohl im Preferences-Dialog als auch in einer isolierten
-Probe, nicht spezifisch für `tab-panel%`/`canvas-panel%`/`group-panel%`); Editor-Canvas-
-Scrollbars fehlen (bewusst offen seit Checkpoint C); Font-Size-Slider zeigt keine Zahl;
-Colors-Tab: rechte Spalte + dunkle Rahmen fehlen bei vielen Controls. Details je Fund:
-`STATUS.md`, `docs/HACKING.md`.
+nicht der Standard ist. **Windows Toolbar-Save-Icon-Timing:** 2026-09-11 systematisch
+gegen echtes DrRacket getestet, in keinem Fall reproduziert — kein offener Befund mehr;
+korrigierte Datei-Zuordnung: `mrlib/switchable-button.rkt` + `wx/qt/canvas.rkt`, **nicht**
+`wx/qt/button.rkt` (§24.4). Aus §21.6 (2026-07-14, backend-generisch, auf Linux identisch
+reproduziert) weiterhin offen: Resize/Reflow-Bug (Kind-Controls wandern beim
+Fenster-Vergrößern nicht mit, reproduziert sowohl im Preferences-Dialog als auch in einer
+isolierten Probe, §21.7); Editor-Canvas-Scrollbars (2026-09-11 Windows: Fix-Versuch
+root-caused einen degenerierten Scroll-Range-Bug, der den Editor-Inhalt komplett
+weißmalt — Fix zurückgerollt/geparkt, additive Shim-Primitiven bleiben als Grundlage
+für einen zweiten Anlauf, §24.5); Colors-Tab rechte Spalte (Rahmen-Teil 2026-09-11
+gefixt, §24.3). Font-Size-Slider-Zahl **gefixt 2026-09-11** (§24.2). Neuer Nebenbefund
+(2026-09-11, inzident entdeckt, vorbestehend/unabhängig von den Scrollbar-Änderungen,
+per `git stash` bestätigt): grafischer Störeffekt (orange/blau gestreiftes Rechteck) nahe
+dem oberen Rand des DrRacket-Editor-Fensters, Root-Cause nicht untersucht. Details je
+Fund: `STATUS.md`, `docs/HACKING.md`.
 
 ## Dokumentation
 

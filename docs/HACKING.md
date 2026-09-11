@@ -1509,16 +1509,16 @@ Background Expansion) durchgesehen wurden.
 2. **Editor-Canvas-Scrollbars fehlen.** `canvas:color%` (Farbschema-Beispieltext im
    Font-Tab) zeigt im Original zwei Scrollbars, hier keine — bewusst offen seit
    Checkpoint C (`wx/qt/canvas.rkt`s eigener Kommentar: „Scroll stubs — no scrollbars
-   in the spike").
+   in the spike"). **2026-09-11: Fix-Versuch unternommen, Root Cause teilweise
+   gemessen, Fix zurückgerollt und geparkt — Details §24.5.**
 3. **Font-Size-Slider zeigt keine Zahl.** Im Original: horizontal zentrierter, vertikal
    zwischen Slider und den beiden Buttons positionierter Zahlen-Text; hier fehlt die
-   Anzeige komplett. Vermutlich ein separates `message%`/Text-Anzeige-Problem, nicht
-   untersucht.
+   Anzeige komplett. **Gefixt 2026-09-11, §24.2.**
 4. **Colors-Tab: rechte Spalte fehlt + generell fehlende dunkle Rahmen.** Pro Stil
    sollte ein Button+Checkbox („Revert...") in einer rechten Spalte stehen — fehlt
-   komplett. Zusätzlich fehlen bei vielen Controls sichtbare (dunkle) Rahmen. Nicht
-   untersucht, vermutlich ein weiterer fehlender Content-Pfad plus `'border`-Style-
-   Zeichnung.
+   komplett. Zusätzlich fehlen bei vielen Controls sichtbare (dunkle) Rahmen.
+   **Rahmen-Teil gefixt 2026-09-11, §24.3 — rechte Spalte weiterhin offen, nicht
+   untersucht.**
 
 Die noch nicht durchgesehenen Kategorien (Editing/Warnings/General/Profiling/Tools/
 Background Expansion) werden vermutlich weitere, ähnlich eigenständige Befunde zutage
@@ -2060,3 +2060,136 @@ Muster) — Workaround: Aufruf bei Fehlschlag 1–2× wiederholen. Ein dabei ent
 Automatisierungsartefakt (eine fehlgeleitete Tastatureingabe fügte eine Leerzeile in
 `examples/htdp-tests-probe.rkt` ein) wurde bemerkt und vor jedem Commit per `git checkout`
 zurückgesetzt.
+
+## 24. Racket-9.3-Migration (Windows) + drei §21.6-Befunde geschlossen, vierter root-caused und geparkt (2026-09-11_prompt)
+
+**Kontext:** `docs/2026-09-11_prompt.md`. Voller Bericht: `docs/2026-09-11_report-win.md`.
+Windows-only. Phase 0 (Hard Gate): Migration dieser Maschine von Racket v9.2 auf v9.3,
+danach Phase 1 (freie Stabilisierung, Triage-Regel: max. 2 Hypothesen-Zyklen pro Befund,
+`wx/qt`-lokale Root-Causes sofort fixen, Shared-Code-berührende Root-Causes eskalieren,
+Budget-Erschöpfung ohne Root-Cause → parken statt spekulativ fixen).
+
+### 24.1 Racket v9.2 → v9.3 (Windows)
+
+Kein gui-lib/draw-lib-Versionsangleich nötig diesmal (anders als der historische
+1.78→1.80-Fall, §10) — Fork blieb kompatibel. Ablauf: Backup der bestehenden Installation
+(Nutzer bestätigte „Backup-only genügt" statt Voll-Snapshot), `raco pkg update --link`
+für gui-lib/draw-lib vom Nutzer selbst elevated ausgeführt (installations-scope Link
+schreibt nach `C:\Program Files\Racket\...`, braucht Admin-Rechte — kann nicht aus einer
+nicht-elevated Automatisierungs-Session heraus laufen). Gate-Test (DrRacket **ohne**
+`PLT_QT` startet weiterhin nativ, kein Linklet-Mismatch) grün. `CLAUDE.md`-Umgebungstabelle
+aktualisiert.
+
+### 24.2 Befund 1 — Font-Size-Slider zeigt keine Zahl (§21.6 Punkt 3) — gefixt
+
+Root Cause: `QSlider` hat kein eingebautes numerisches Readout (anders als gtk's
+`gtk_scale_set_draw_value` oder win32s separates `STATIC`-Control). Fix (Rule-2,
+`wx/qt/`-lokal, sofort umgesetzt): `wx/qt/slider.rkt` baut jetzt bei nicht-`'plain`-Stil
+einen `shim_panel_create`-Container mit Slider + `shim_label_create`-Wertelabel, beide
+manuell in `set-size` positioniert (mirrored win32s Ansatz); Label-Update im
+eventspace-geposteten Thunk, nicht synchron im nativen Callback (Regel 2). `'plain`
+behält das alte reine-Slider-Verhalten. Verifiziert gegen `examples/value-widgets-probe.rkt`.
+Commit (gui-Submodul, `qt-backend`): `2b0d5e5a`.
+
+### 24.3 Befund 2 — Colors-Tab: fehlende dunkle Rahmen (Teil von §21.6 Punkt 4) — gefixt, nach Eskalation
+
+Root Cause (Rule-3-Fall, Fix berührt den gemeinsamen `shim_panel_create`-Aufrufpfad):
+`shim_panel_create` erzeugte immer ein randloses `QWidget`, nie ein `QFrame` mit
+sichtbarem Rahmen — win32/gtk zeichnen dagegen abhängig vom `'border`-Style-Symbol einen
+Rahmen. Nach kurzer Architektur-Rückfrage (kein Projekthistorien-Dump) + Nutzer-Freigabe
+(„Ja, Fix jetzt umsetzen"): `shim_panel_create` bekommt einen neuen `int border`-Parameter,
+erzeugt bei `border≠0` ein `QFrame` mit `QFrame::Box | QFrame::Plain` statt eines nackten
+`QWidget`. Aufrufer: `wx/qt/panel.rkt` übergibt `(if (memq 'border style) 1 0)`;
+`wx/qt/slider.rkt`s eigener (unverändertem Verhalten entsprechender) Aufruf übergibt
+explizit `0`. FFI-Signatur in `wx/qt/utils.rkt` entsprechend erweitert. Verifiziert gegen
+den echten Preferences-Colors-Tab. Commits: gui-Submodul `ee75372d`; Umbrella (`shim.cpp`)
+`ea19095` — unabhängig von der Submodul-Pointer-Push-Reihenfolge, da `shim.cpp` im
+Umbrella selbst liegt, nicht im Submodul.
+
+Die rechte Spalte (Button+Checkbox „Revert...") aus §21.6 Punkt 4 wurde in dieser Session
+**nicht** untersucht — nur der Rahmen-Teil des Befunds ist geschlossen.
+
+### 24.4 Befund 3 — Windows Toolbar-Save-Icon-Timing — nicht reproduziert, geparkt (Regel 4)
+
+Per Subagent delegiert diagnostiziert. Korrigiert eine historische Datei-Fehlzuordnung:
+der Toolbar-„Save"-Indikator ist **kein** `wx/qt/button.rkt`, sondern
+`mrlib/switchable-button.rkt`s `switchable-button%` (ein selbstmalendes `canvas%`) —
+tatsächlicher Pfad `canvas%` `refresh` → `canvas-mixin`s `queue-paint`/`do-on-paint` →
+`wx/qt/canvas.rkt`s `queue-backing-flush`. Systematisch gegen echtes DrRacket getestet
+(Tippen→Icon-Erscheinen, Undo→Verschwinden, Tippen+Resize-Race): kein Fall zeigte ein
+Lag. Tab-Wechsel-Testfall durch den unabhängigen `test-dock-size`-Crash (§23) blockiert,
+nicht verfolgt. Kein Fix (kein Root-Cause gefunden). Für künftige Sessions: die korrekte
+Datei ist `mrlib/switchable-button.rkt` + `wx/qt/canvas.rkt`, nicht `button.rkt`.
+
+### 24.5 Befund 4 — Editor-Canvas-Scrollbars (§21.6 Punkt 2) — root-caused (teilweise), Fix zurückgerollt, geparkt
+
+Architektonisch ein Rule-3-Fall (Fix berührt die Komposition von
+`wx/common/canvas-mixin.rkt`s `canvas-autoscroll-mixin`) — Empfehlung war, ihn wie §21.7
+zu parken. Nutzer-Entscheidung: **„Trotzdem in dieser Sitzung versuchen."**
+
+**Architektur (implementiert):** anders als `wx/win32/canvas.rkt` (eigene Klasse
+subclassed `canvas-autoscroll-mixin` direkt und überschreibt dessen No-Op-Defaults) sitzt
+`wx/qt/canvas.rkt`s `base-canvas%` **unter** `canvas-autoscroll-mixin` — die No-Op-Methoden
+(`do-set-scrollbars`, `reset-dc-for-autoscroll`, `get-virtual-h-pos`, `get-virtual-v-pos`)
+sind dort bereits `define/public`, `base-canvas%` kann sie nicht per `override*` erneut
+definieren (`public*`/`override*`-Invariante, §1). Lösung: eine neue Zwischen-Mixin-Schicht
+`qt-canvas-scroll-mixin`, rein in `wx/qt/`, zwischen `canvas-autoscroll-mixin` und
+`canvas-mixin` eingefügt — implementiert die vier Methoden über eine manuelle
+Scroll-API, die echte `QScrollBar`-Kinder via neuer Shim-Primitiven ansteuert
+(`shim_scrollbar_create/set_range/set_value/get_value`, exakter Analogbau zu den
+bestehenden `shim_slider_*`-Funktionen).
+
+**Gemessene Regression:** bei aktivierten Scrollbars (`editor-canvas%` mit
+`'(auto-hscroll auto-vscroll)`) rendert der Editor-Inhalt **komplett weiß** — nur ein
+Caret ist sichtbar, kein Text. Drei Hypothesen getestet:
+
+1. **Ausgeschlossen:** `get-client-size`s Scrollbar-Dicke-Rahmenreduktion — mit
+   vollständig deaktivierter Reduktion (Probe liefert Rohgröße) bleibt der Inhalt
+   identisch weiß, bei sonst korrekter 400×300-Geometrie.
+2. **Ausgeschlossen:** Sichtbarkeit/Z-Order der Scrollbar-Widgets — mit dauerhaft
+   unsichtbar geschalteten (aber weiterhin angelegten) Scrollbar-Kindern bleibt der Text
+   weiterhin unsichtbar.
+3. **Gemessen, nicht abschließend erklärt:** `do-set-scrollbars` feuert genau einmal,
+   sehr früh (Konstruktionszeit, Client-Größe noch beim 30×30-Platzhalter, degenerierte
+   Werte `h-len=1 v-len=1 h-page=1 v-page=1`) und danach nie wieder — auch nicht,
+   nachdem das Canvas Sekunden später auf seine reale 400×300-Geometrie wächst (das
+   eigene `set-size`/`position-scrollbars` feuert zu diesem späten Zeitpunkt sehr wohl
+   erneut). `get-virtual-h-pos`/`get-virtual-v-pos` wurden in keinem Testlauf ein
+   einziges Mal aufgerufen. Naheliegende, nicht verifizierte Hypothese: die früh
+   eingefrorene 1×1-Virtualgröße lässt den Editor-Admin einen leeren Content-Bereich
+   annehmen und den Text-Layout-/Paint-Pfad gar nicht erst anlaufen.
+
+Zusätzlich beobachtet, nicht root-caused: mit aktivem Scrollbar-Kind lief die
+Paint-/Blit-Schleife der isolierten Probe für die ersten ~200 ms exzessiv häufig
+(~1 ms-Takt statt der sonst üblichen ~500 ms-Taktung), bevor sie sich normalisierte.
+
+**Root-Cause nicht isoliert innerhalb des 2-Zyklen-Budgets** (3 Zyklen verbraucht).
+Callback-Lifetime-Bug **gefunden und gefixt** (unabhängig vom obigen Problem, wäre aber
+für sich genommen eine Use-after-Free-Landmine gewesen): die Scrollbar-`changed`-Callbacks
+wurden als Inline-Lambda direkt an `shim_scrollbar_create` übergeben statt zuerst — wie
+bei `mouse-cb`/`key-cb`/`focus-cb`/`slider.rkt`s `changed-fn` — an ein Objektfeld gebunden;
+ohne Racket-seitigen Owner ist die Lebensdauer der Closure nicht garantiert. Dieser Fix
+wurde mit dem Revert unten mit entfernt und muss in einer künftigen Fix-Session als
+Konvention erneut angewendet werden.
+
+**Entscheidung:** `canvas.rkt` vollständig auf den Sitzungsanfang zurückgesetzt
+(`git checkout` im gui-Submodul) — ein weißer, unscrollbarer, aber korrekt Text
+anzeigender Editor schlägt einen Editor mit sichtbaren, aber die Textdarstellung
+zerstörenden Scrollbars. Die additiven, für sich harmlosen Shim-Primitiven
+(`shim_scrollbar_*` in `qt-shim/src/shim.cpp` + FFI-Deklarationen in `wx/qt/utils.rkt`)
+bleiben bestehen (unbenutzt, exakt nach dem Muster der bestehenden `shim_slider_*`-
+Funktionen) — Grundlage für einen künftigen zweiten Anlauf ohne erneuten Shim-Rebuild.
+Nächster Ansatzpunkt für diese Session: die Trigger-Reihenfolge zwischen der Qt-nativen
+Geometrieänderung (läuft außerhalb von Racket-`set-size`) und dem Editor-eigenen
+Content-Scrollbar-Rebuild.
+
+Gate-Nachweis nach Revert: Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ ohne `PLT_QT` — beide grün.
+
+**Nebenbefund (inzident, nicht Teil dieses Fundes):** ein grafischer Störeffekt
+(orange/blau gestreiftes Rechteck nahe dem oberen Rand des DrRacket-Editor-Fensters)
+wurde während der Diagnose beobachtet. Per `git stash` bei vollständig scrollbar-freiem
+Code identisch reproduziert — **vorbestehender, unabhängiger Bug**, kein Bezug zu diesem
+Fund, Root-Cause nicht untersucht.
+
+Commits: gui-Submodul `7d1231e0` (additive FFI-Deklarationen); Umbrella `a721ac5`
+(additive Shim-Primitiven), `0e8d308` (Report).

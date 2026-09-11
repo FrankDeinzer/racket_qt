@@ -5,6 +5,72 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-11 (Windows) — Racket-9.3-Migration + Preferences-Stabilisierung: 2 Befunde gefixt, 1 nicht reproduziert, 1 root-caused und geparkt
+
+**Kontext:** `docs/2026-09-11_prompt.md`. Voller Bericht: `docs/2026-09-11_report-win.md`.
+Windows-only. Phase 0 (Hard Gate): Migration auf Racket v9.3. Phase 1: freie
+Stabilisierung der §21.6-Einzelbefunde unter einer expliziten Triage-Regel (max. 2
+Hypothesen-Zyklen pro Befund, `wx/qt`-lokale Root-Causes sofort fixen, Shared-Code-
+berührende eskalieren, Budget-Erschöpfung ohne Root-Cause → parken statt spekulativ
+fixen). Details: `docs/HACKING.md` §24.
+
+- **Phase 0:** v9.2 → v9.3, kein gui-lib/draw-lib-Versionsangleich nötig (anders als der
+  historische 1.78→1.80-Fall). Backup-only (Nutzer-Entscheidung, kein Voll-Snapshot),
+  `raco pkg update --link` vom Nutzer selbst elevated ausgeführt (Admin-Rechte nötig für
+  `C:\Program Files\Racket\...`). Gate-Test (nativ ohne `PLT_QT`) grün. `CLAUDE.md`
+  aktualisiert.
+- **Befund 1 (Font-Size-Slider zeigt keine Zahl, §21.6):** gefixt, Rule-2 (`wx/qt/`-lokal,
+  sofort). `QSlider` hat kein eingebautes Readout — `wx/qt/slider.rkt` baut jetzt bei
+  nicht-`'plain`-Stil einen Panel-Container mit Slider + separatem Wertelabel, mirrored
+  win32. Commit (gui-Submodul): `2b0d5e5a`.
+- **Befund 2 (Colors-Tab: fehlende dunkle Rahmen, Teil von §21.6):** gefixt, Rule-3
+  (berührt `shim_panel_create`s gemeinsamen Aufrufpfad) — kurze Architektur-Rückfrage,
+  Nutzer-Freigabe („Ja, Fix jetzt umsetzen"). `shim_panel_create` erzeugt jetzt bei
+  gesetztem `'border`-Style ein `QFrame` statt eines randlosen `QWidget`. Rechte Spalte
+  (Button+Checkbox „Revert...") aus demselben §21.6-Punkt bleibt offen, nicht untersucht.
+  Commits: gui-Submodul `ee75372d`; Umbrella `ea19095`.
+- **Befund 3 (Windows Toolbar-Save-Icon-Timing):** per Subagent diagnostiziert, in keinem
+  systematischen Test reproduziert (Tippen/Undo/Resize-Race) — kein Fix (Rule 4). Korrigiert
+  eine historische Datei-Fehlzuordnung: der Indikator ist `mrlib/switchable-button.rkt` +
+  `wx/qt/canvas.rkt`, nicht `wx/qt/button.rkt`.
+- **Befund 4 (Editor-Canvas-Scrollbars, §21.6):** architektonisch ein Rule-3-Fall
+  (berührt die `canvas-autoscroll-mixin`-Komposition), Empfehlung war Parken wie §21.7 —
+  Nutzer-Entscheidung **„Trotzdem in dieser Sitzung versuchen."** Neue
+  `qt-canvas-scroll-mixin` + echte `QScrollBar`-Kinder via neuer Shim-Primitiven
+  implementiert; real-world getestet zeigt sich: bei aktivierten Scrollbars rendert der
+  Editor-Inhalt komplett weiß. Zwei Hypothesen sauber ausgeschlossen (Client-Size-
+  Rahmenreduktion; Scrollbar-Sichtbarkeit/Z-Order), eine dritte gemessen, aber nicht
+  abschließend erklärt (ein einmaliger, sehr früher `do-set-scrollbars`-Aufruf friert
+  eine degenerierte 1×1-Scroll-Range dauerhaft ein). Root-Cause nicht innerhalb des
+  2-Zyklen-Budgets isoliert (3 Zyklen verbraucht) — **geparkt**: `canvas.rkt` vollständig
+  auf Sitzungsanfang zurückgesetzt, additive (unbenutzte, harmlose) Shim-Primitiven
+  bleiben als Grundlage für einen künftigen zweiten Anlauf. Ein dabei gefundener
+  Callback-Lifetime-Bug (Inline-Lambda statt Feld-Bindung, mirrored `mouse-cb`/`key-cb`/
+  `slider.rkt`s Konvention) wurde mit zurückgerollt und muss in der Fix-Session erneut
+  angewendet werden. Gate-Nachweis nach Revert: Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ.
+  Commits: gui-Submodul `7d1231e0`; Umbrella `a721ac5`, `0e8d308`.
+- **Nebenbefund (inzident, nicht Teil von Befund 4):** grafischer Störeffekt (orange/blau
+  gestreiftes Rechteck) nahe dem oberen Rand des DrRacket-Editor-Fensters — per
+  `git stash` bei vollständig scrollbar-freiem Code identisch reproduziert, also
+  vorbestehend und unabhängig. Root-Cause nicht untersucht.
+- **Push/Sync:** Nutzer-Bestätigung eingeholt (Regel 7) — Submodul `qt-backend` zuerst
+  gepusht (`54f2f702..7d1231e0`), danach Umbrella-Pointer-Commit erstellt+gepusht
+  (`895ccb1..b2bb7f7`), Reihenfolge nach Regel 8 eingehalten. Beide Repos nach Abschluss
+  clean.
+- **Commits (Zusammenfassung):** gui-Submodul (`qt-backend`) `2b0d5e5a`, `ee75372d`,
+  `7d1231e0`. Umbrella (`main`) `eda3b07` (Phase-0-Doku), `ea19095`, `a721ac5`, `0e8d308`,
+  `b2bb7f7` (Pointer-Bump), plus `docs/HACKING.md` §24, `CLAUDE.md` (Checkpoint +
+  Umgebung + Nebenbefunde), dieser Eintrag.
+- **Nächster Schritt:** Phase 2 (systematischer Sweep der restlichen
+  Preferences-Kategorien: Editing/Warnings/General/Profiling/Tools/Background Expansion)
+  und Phase 3 (Regressions-Gate gegen die Phase-0-Baseline) stehen noch aus — eigene
+  künftige Session. Editor-Canvas-Scrollbars: nächster Ansatzpunkt ist die
+  Trigger-Reihenfolge zwischen der Qt-nativen Geometrieänderung (läuft außerhalb von
+  Racket-`set-size`) und dem Editor-eigenen Content-Scrollbar-Rebuild. Resize/Reflow-Bug
+  (§21.7) und Colors-Tab rechte Spalte weiterhin offen, je eigene Session.
+
+---
+
 ## Session 2026-09-10 (macOS) — htdp-Lackmustest: `test-dock-size`-Befund auf macOS bestätigt, Drei-Plattform-Validierung abgeschlossen (§23.2)
 
 **Kontext:** `docs/2026-07-14_prompt.md` (Windows/Linux-Sessions liefen 2026-07-14, diese
