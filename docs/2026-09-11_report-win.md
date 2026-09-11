@@ -145,4 +145,224 @@ Smoke 3/3, Basislinie deckt sich mit 9.2 → weiter zu Phase 1.
 
 ## Phase 1 — Bekannte flache Befunde
 
-*(wird fortgeschrieben)*
+### Befund 1 — Font-Size-Slider zeigt keine Zahl (§21.6)
+
+**Status: gefixt.**
+
+**Root-Cause (gemessen, Code-Vergleich gtk/win32/qt):** `QSlider` hat keine
+eingebaute Wertanzeige. win32 (`wx/win32/slider.rkt`) löst das über eine separate
+`STATIC`-Kind-HWND neben dem Trackbar (in einem gemeinsamen `PLTPanel`-Wrapper,
+manuell positioniert in `set-size`); gtk (`wx/gtk/slider.rkt`) nutzt das eingebaute
+`gtk_scale_set_digits`/`gtk_scale_set_draw_value` (nur bei `'plain` deaktiviert).
+`wx/qt/slider.rkt` hatte **überhaupt keine** Wertanzeige-Logik — die alte
+Implementierung wrappte ausschließlich den nackten `QSlider`.
+
+**Fix (`wx/qt/slider.rkt`, keine Shim-Änderung):** mirrort win32s Muster mit
+bereits vorhandenen Shim-Primitiven (`shim_panel_create`, `shim_label_create`,
+`shim_label_set_text`, `shim_widget_get_size_hint` — alle schon für
+`panel%`/`message%` im Einsatz, kein `shim.cpp`-Touch nötig → Regel 2, nicht
+Regel 3). Bei nicht-`'plain`-Style: Slider + Value-Label werden in einen
+`shim_panel_create`-Container gepackt, `set-size` positioniert beide manuell
+(Slider oben/links, Label darunter/rechts, `THICKNESS`/`MIN_LENGTH`-Konstanten
+wie win32). Label-Breite wird einmalig aus der breiteren von `lo`/`hi`
+formatierten Zahl via `shim_widget_get_size_hint` ermittelt. Label-Update läuft
+**im gequeuten Thunk** (Eventspace-Thread), nicht synchron im nativen
+Change-Callback (Regel 2 der Fixen Regeln).
+
+**Verifikation:**
+- `raco test tests/smoke.rkt` (`PLT_QT=1`): weiterhin 3/3.
+- `examples/value-widgets-probe.rkt`: Slider zeigt initial „20" unter dem
+  Track; nach Klick auf „slider: set-value 75 via code" zeigt Label „75", Track
+  bewegt sich mit, **kein** spurious Callback-Feuern (Screenshot-bestätigt).
+- Echtes DrRacket unter `PLT_QT=1`: Edit → Preferences → Font-Tab zeigt jetzt
+  „17" unter dem Font-Size-Slider (vorher: keine Zahl).
+
+**Commit:** gui-Submodul `2b0d5e5a` (lokal, **noch nicht gepusht** — Push-Runde
+wird gebündelt am Ende von Phase 1 mit Nutzer-Rückfrage, Regel 7). Umbrella-
+Zeiger-Commit folgt nach dem Push (Regel 8: Zeiger darf nur auf einen bereits
+auf `origin/qt-backend` existierenden SHA zeigen).
+
+---
+
+### Befund 2 — Colors-Tab: rechte Spalte + dunkle Rahmen fehlen (§21.6)
+
+**Status: gefixt (nach Eskalation).**
+
+Diagnose per Subagent (delegiert). **Root-Cause (gemessen):** Die "rechte Spalte"
+war **nicht** fehlend oder falsch platziert — Foreground-/Background-Color-Buttons
+der `'(background? #t)`-Zeilen (z. B. HtDP Languages → „Tests didn't cover")
+wurden korrekt erzeugt und positioniert (Pointer-Adress-Vergleich instrumentiert
+bestätigt). Der **tatsächliche** Defekt: dunkle Rahmen um jede Vorlagen-Zeile
+fehlen komplett — `wx/qt/panel.rkt` ignorierte den `style`-Init-Parameter
+vollständig, und `shim_panel_create` (`qt-shim/src/shim.cpp`) erzeugte immer ein
+rahmenloses `QWidget`. Ohne den trennenden Rahmen verschmelzen benachbarte Zeilen
+optisch — das erzeugte den Eindruck einer „fehlenden rechten Spalte" bei der
+höheren 2-Button-Zeile. win32 zeichnet den Rahmen nativ über `WS_BORDER`
+(`wx/win32/panel.rkt`).
+
+**Eskalation (Regel 3):** Fix berührt `qt-shim/src/shim.cpp` (Shared/Shim-Code) →
+Architektur-Subagent (fokussiert, kein Historien-Dump) empfahl: `border`-Parameter
+an `shim_panel_create` statt neuer FFI-Funktion (nur 2 Call-Sites: `panel.rkt`,
+`slider.rkt`), intern `QFrame` statt `QWidget` (`QFrame::Box|Plain` nur bei
+`border=1`), kein Stylesheet (würde alle Kind-Widgets mit-restylen). Kein
+Event-Loop-Bezug, klein/isoliert. Per `AskUserQuestion` bestätigt → umgesetzt.
+
+**Fix:** `shim_panel_create(parent, border)` (Umbrella, `qt-shim/src/shim.cpp`) +
+`wx/qt/panel.rkt` reicht `(if (memq 'border style) 1 0)` durch + `wx/qt/slider.rkt`
+(Aufrufstelle auf neue Arität angepasst, `border=0`) + `wx/qt/utils.rkt`
+(FFI-Signatur `_pointer _int -> _pointer`).
+
+**Verifikation:** Shim neu gebaut, `raco make` sauber, Smoke 3/3 (mit **und** ohne
+`PLT_QT`). Echtes DrRacket: Preferences → Colors → HtDP Languages zeigt jetzt einen
+sichtbaren Rahmen um die Zeilengruppe; Font-Tab-Slider (Befund 1) weiterhin
+unbeeinträchtigt.
+
+**Commits:** gui-Submodul `ee75372d` (lokal, noch nicht gepusht); Umbrella `ea19095`
+(shim.cpp, bereits committet — kein Submodul-Pointer-Bezug, daher unabhängig von der
+Push-Reihenfolge aus Regel 8).
+
+---
+
+### Befund 3 — Windows Toolbar-Save-Icon-Timing (`wx/qt/button.rkt`)
+
+**Status: nicht reproduziert — geparkt (Regel 4).**
+
+Diagnose per Subagent (delegiert). Erste Korrektur der historischen Notiz: Der
+Toolbar-„Save"-Indikator ist **kein** `button%`, sondern
+`mrlib/switchable-button.rkt`s `switchable-button%` (ein `canvas%`, selbst-malend
+via `on-paint`/`refresh`, verdrahtet über `framework/private/panel.rkt`) — die
+2026-07-10-Notiz hatte die falsche Datei benannt. Tatsächlicher Pfad: `canvas%`
+`refresh` → `canvas-mixin`s `queue-paint`/`do-on-paint` → `wx/qt/canvas.rkt`s
+`queue-backing-flush`.
+
+**Getestet (systematisch, gegen echtes DrRacket unter `PLT_QT=1`):** Tippen →
+Icon erscheint promt (~150–300 ms, kein Sekundär-Trigger nötig); Undo → Icon
+verschwindet ebenso prompt; Tippen unmittelbar gefolgt von Fenster-Resize
+(Race-Test) → Icon korrekt im nächsten Frame. Tab-Wechsel-Test durch den
+bekannten, unabhängigen `test-dock-size`-Crash (§23) blockiert — nicht verfolgt,
+kein Bezug zu diesem Befund.
+
+**Ausgeschlossen:** Tipp→Anzeige-Lag, Undo→Anzeige-Lag, Resize-Race-Lag — keiner
+davon reproduziert sich. **Kein Fix** (Regel 4, kein spekulativer Fix ohne
+Root-Cause). **Für künftige Sessions:** Datei-Zuordnung korrigiert —
+`mrlib/switchable-button.rkt` + `wx/qt/canvas.rkt`, **nicht** `button.rkt` (das an
+DrRackets Toolbar gar nicht beteiligt ist).
+
+**Nativ-Vergleich:** nicht durchgeführt — keine Qt-seitige Anomalie vorhanden, die
+einen Differenzvergleich rechtfertigt hätte.
+
+**Commit:** keiner.
+
+---
+
+### Befund 4 — Editor-Canvas-Scrollbars fehlen (`wx/qt/canvas.rkt`)
+
+**Status: geparkt mit negativem Befund (Regel 4) — Fix-Versuch nach expliziter
+Nutzer-Freigabe unternommen, Budget in dieser Sitzung ausgeschöpft.**
+
+Ausgangslage: seit Checkpoint C offener Nebenbefund, „bewusst offen" — kein
+Scroll-Support in `wx/qt/canvas.rkt`, `do-set-scrollbars`/
+`get-virtual-h-pos`/`get-virtual-v-pos` liefen als No-Op-Defaults aus
+`canvas-autoscroll-mixin` durch. Dieser Fund berührt architektonisch
+`wx/common/canvas-mixin.rkt` (Kompositionsreihenfolge) und war damit klar
+Rule-3-Kandidat; die Empfehlung war, ihn wie §21.7/`test-dock-size` zu parken.
+Nutzer-Entscheidung: **„Trotzdem in dieser Sitzung versuchen."**
+
+**Architektur (umgesetzt, Kompositions-Diskrepanz gemessen):** Anders als
+`wx/win32/canvas.rkt` (eigene Klasse subclassed `canvas-autoscroll-mixin` und
+kann dessen No-Op-Defaults direkt überschreiben) sitzt `wx/qt/canvas.rkt`s
+`base-canvas%` **unter** `canvas-autoscroll-mixin` in der Komposition — die
+No-Op-Methoden sind dort bereits `define/public`, `base-canvas%` selbst kann
+sie nicht per `override*` erneut definieren (`public*`/`override*`-Invariante,
+`CLAUDE.md` Regel 3). Fix: eine neue Zwischen-Mixin-Schicht
+`qt-canvas-scroll-mixin`, rein in `wx/qt/` (kein Shared-Code-Touch), zwischen
+`canvas-autoscroll-mixin` und `canvas-mixin` eingefügt; sie implementiert
+`do-set-scrollbars`/`reset-dc-for-autoscroll`/`get-virtual-h-pos`/
+`get-virtual-v-pos` über eine manuelle Scroll-API, die echte `QScrollBar`-Kinder
+via neuen Shim-Primitiven (`shim_scrollbar_create/set_range/set_value/
+get_value`, exakter Analogbau zu den bestehenden `shim_slider_*`-Funktionen)
+ansteuert.
+
+**Gemessene Regressionen (isolierte Probe, `editor-canvas%` mit
+`'(auto-hscroll auto-vscroll)`, 100 Zeilen Testinhalt):**
+
+1. Bei aktivierten Scrollbars bleibt der Editor-Inhalt **komplett weiß** —
+   nur ein blinkender Caret oben links ist sichtbar, kein Zeilentext.
+2. **Getestet und ausgeschlossen:** Die `get-client-size`-Rahmenreduktion
+   (Scrollbar-Dicke wird von der gemeldeten Client-Größe abgezogen) ist
+   **nicht** die Ursache — mit vollständig deaktivierter Reduktion (Probe gibt
+   Rohgröße zurück) bleibt der Inhalt identisch weiß, bei sonst korrekter
+   400×300-Geometrie.
+3. **Getestet und ausgeschlossen:** Sichtbarkeit/Z-Order der Scrollbar-Widgets
+   selbst ist nicht die Ursache — mit dauerhaft unsichtbar geschalteten
+   Scrollbar-Kindern (Widget bleibt aber angelegt) bleibt der Text weiterhin
+   unsichtbar; einzige Änderung: der Caret wird sichtbar (vorher augenscheinlich
+   nicht, vermutlich Phasenzufall des Blink-Timers).
+4. **Gemessen, nicht abschließend erklärt:** `do-set-scrollbars` feuert genau
+   **einmal**, sehr früh (Konstruktionszeit, Client-Größe noch beim
+   30×30-Platzhalter, degenerierte Werte `h-len=1 v-len=1 h-page=1 v-page=1
+   h-pos=0 v-pos=0`) und danach **nie wieder** — auch nicht, nachdem das Canvas
+   Sekunden später auf seine reale 400×300-Geometrie wächst (bestätigt: unser
+   eigenes `set-size`/`position-scrollbars` feuert zu diesem späten Zeitpunkt
+   sehr wohl erneut mit `cw=400 ch=300`, der Editor-eigene
+   Content-Scrollbar-Rebuild-Pfad aber nicht). `get-virtual-h-pos`/
+   `get-virtual-v-pos` wurden in keinem Testlauf ein einziges Mal aufgerufen —
+   der Autoscroll-`view-start`-Pfad, der sie konsumieren sollte, läuft
+   offenbar gar nicht an, wenn eine derart degenerierte Scrollrange einmal
+   verankert wurde. Naheliegende, aber **nicht verifizierte** Hypothese: die
+   früh eingefrorene 1×1-Virtualgröße lässt den Editor-Admin einen leeren
+   Content-Bereich annehmen und den eigentlichen Text-Layout-/Paint-Pfad gar
+   nicht erst anlaufen (Caret-Malung scheint ein von diesem Pfad unabhängiger
+   Code-Pfad zu sein).
+5. Zusätzlich beobachtet, nicht root-caused: mit aktivem Scrollbar-Kind lief
+   die Paint-/Blit-Schleife der isolierten Probe für die ersten ~200 ms exzessiv
+   häufig (¹/₁ₘₛ statt der sonst üblichen ¹/₅₀₀ₘₛ-Taktung), bevor sie sich
+   normalisierte — mögliche Zweitursache oder Symptom desselben Problems,
+   nicht weiter zerlegt.
+
+**Root-Cause nicht isoliert innerhalb des 2-Hypothesen-Zyklen-Budgets**
+(tatsächlich 3 Zyklen verbraucht, s. o.) — Trigger-Reihenfolge zwischen
+Qt-nativer Geometrieänderung (läuft außerhalb von Racket-`set-size`) und dem
+Editor-eigenen Content-Scrollbar-Rebuild ist der wahrscheinlichste
+Ansatzpunkt für eine künftige Session, aber nicht bewiesen.
+
+**Callback-Lifetime-Bug gefunden und gefixt (unabhängig vom obigen, hätte aber
+für sich genommen zu Use-after-Free-artigen Symptomen geführt):** die
+Scrollbar-`changed`-Callbacks wurden ursprünglich als Inline-Lambda direkt an
+`shim_scrollbar_create` übergeben, statt (wie bei `mouse-cb`/`key-cb`/
+`focus-cb`/`slider.rkt`s `changed-fn`) zuerst an ein Objektfeld gebunden zu
+werden — ohne Racket-seitigen Owner ist die Lebensdauer der Closure nicht
+garantiert. **Dieser Fix ist mit dem Revert unten mit entfernt worden** (er
+existierte nur innerhalb des jetzt zurückgerollten Scrollbar-Codes) und muss
+in einer künftigen Fix-Session erneut angewendet werden — als Konvention
+festgehalten, nicht nur als Fußnote.
+
+**Entscheidung (nach Rücksprache mit Architektur-Review):** Canvas.rkt
+vollständig auf den Sitzungsanfang zurückgesetzt (`git checkout` im
+gui-Submodul) — ein weißer, unscrollbarer, aber **korrekt Text anzeigender**
+Editor schlägt einen Editor mit sichtbaren, aber funktional die
+Textdarstellung zerstörenden Scrollbars. Die additiven, für sich genommen
+harmlosen Shim-Primitiven (`shim_scrollbar_create/set_range/set_value/
+get_value` in `qt-shim/src/shim.cpp`, korrespondierende FFI-Deklarationen in
+`wx/qt/utils.rkt`) bleiben **bestehen** (unbenutzt, ungefährlich, exakt nach
+dem Muster der bestehenden `shim_slider_*`-Funktionen) — Grundlage für einen
+künftigen zweiten Anlauf, kein weiterer Shim-Rebuild nötig.
+
+**Nativ-Vergleich:** nicht durchgeführt (Fund scheiterte vor Erreichen eines
+vergleichsfähigen Zustands).
+
+**Gate-Nachweis nach Revert:** Smoke-Tests 3/3 mit `PLT_QT=1`, 3/3 nativ ohne
+`PLT_QT` — beide grün, keine Regression durch die verbliebenen additiven
+Shim-/FFI-Änderungen.
+
+**Nebenbefund (inzident entdeckt, nicht Teil dieses Fundes):** ein
+grafischer Störeffekt (orange/blau gestreiftes Rechteck nahe dem oberen Rand
+des DrRacket-Editor-Fensters) wurde während der Diagnose beobachtet und zunächst
+dem neuen Scrollbar-Code zugeschrieben. Per `git stash` bei vollständig
+scrollbar-freiem Code **identisch reproduziert** — **beweist: vorbestehender,
+unabhängiger Bug**, kein Bezug zu diesem Fund. Root-Cause nicht untersucht
+(außerhalb des Scopes dieser Sitzung); für eine künftige Session vorzumerken.
+
+**Commits:** gui-Submodul (nur additive `utils.rkt`-FFI-Deklarationen, kein
+`canvas.rkt`-Bezug, s. u.); Umbrella (nur additive `shim.cpp`-Scrollbar-
+Primitiven).
