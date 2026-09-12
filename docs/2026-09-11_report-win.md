@@ -605,6 +605,56 @@ danach wieder auf dem Ausgangsstand.
 
 **Kein Commit** — Root-Cause ist Shared Code, Fix explizit nicht versucht (s. o.).
 
+### Nachtrag 2026-09-12 (Teil 3) — Stretch-Ziel: `test-dock-size`-Crash, `is-shown?`-Divergenz präzise lokalisiert (nur Messung, kein Fix)
+
+**Auf Nutzerwunsch, nach `AskUserQuestion` (Regel 7).** Prompt-Vorgabe: nur messen,
+welcher der beiden `on-tab-change`-Eingänge (`test-engine:test-window:docked?` oder
+`(send test-panel is-shown?)`) zwischen Qt und nativ divergiert — Fix bleibt in jedem
+Fall out of scope.
+
+**Versuch, live zu instrumentieren — blockiert:** `test-tool.rkt`
+(`htdp-lib/test-engine/`, **außerhalb** des Forks, unter
+`C:\Program Files\Racket\share\pkgs\...`) hätte für Debug-Ausgaben editiert werden
+müssen; die aktuelle Shell ist nicht elevated, Schreibzugriff auf `Program Files`
+schlug mit `EPERM` fehl (derselbe Elevation-Bedarf wie beim `raco pkg update --link`
+aus Phase 0). Backup der Original-Datei + kompilierten `.zo`/`.dep` vorsorglich im
+Scratchpad angelegt, dann per `AskUserQuestion` beim Nutzer nachgefragt: Live-Diagnose
+(bräuchte eine elevierte Shell von ihm) vs. statischer Code-Befund als Ergebnis. Nutzer
+wählte den statischen Befund — kein elevierter Zugriff angefordert, `test-tool.rkt`
+unverändert (per erneutem `Read` bestätigt, kein Teil-Schreibvorgang hinterlassen).
+
+**Statischer Befund (eindeutig, keine Instrumentierung nötig):**
+`wx/qt/panel.rkt:58` überschreibt `is-shown?` unbedingt auf `#t`:
+`(define/override (is-shown?) #t)`. `wx/win32/panel.rkt` überschreibt `is-shown?`
+**nicht** — win32s `panel%` erbt die Basisimplementierung aus `wx/win32/window.rkt`
+unverändert: per Grep bestätigt ein echtes, dynamisches Feld (`(define shown? #f)`,
+Zeile 284, per `set!` bei Show/Hide aktualisiert, Zeile 287; `is-shown?`, Zeile 327/328,
+gibt exakt dieses Feld zurück). Dass es dort auch tatsächlich den realen Zustand trägt,
+bestätigt zusätzlich §23s Laufzeit-Messung: nativ durchläuft `on-tab-change` bei der
+1→2-Tab-Sequenz nie den `remove`/`undock-tests`-Pfad (0/10 Crashes, alle drei
+Plattformen) — konsistent mit einem dort tatsächlich `#f` liefernden `panel-shown?`.
+`test-panel%`
+(`htdp-lib/test-engine/test-tool.rkt:220`, ein reines `vertical-panel%` ohne eigene
+`is-shown?`-Override) erbt diese Backend-Divergenz durch. Damit ist `on-tab-change`s
+`panel-shown?` unter Qt strukturell **immer** `#t`, unter win32 spiegelt es die
+Realität — exakt die im Prompt vermutete Divergenzklasse, jetzt auf eine einzelne
+Zeile lokalisiert.
+
+**Korrigiert einen Teil der §23-Vorarbeit:** der dortige „Read-only-Nachtrag" hatte nur
+die **Basis**-`window%`-Implementierung von `is-shown?` verglichen (beide Backends:
+einfache, echte Flags, kein Unterschied — das stimmt weiterhin) und dabei nicht
+geprüft, ob einzelne Widget-Typen diese Basismethode überschreiben. Genau dort liegt
+die tatsächliche Divergenz. Dieselbe unbedingte `#t`-Überschreibung findet sich
+zusätzlich in praktisch jeder anderen `wx/qt`-Widget-Klasse außer `canvas%`/`frame%`
+(`list-box.rkt`, `tab-panel.rkt`, `slider.rkt`, `radio-box.rkt`, `group-panel.rkt`,
+`button.rkt`, `choice.rkt`, `check-box.rkt`, `message.rkt`) — ein systematisches Muster
+aus der additiven Spike-Phase, nicht nur an dieser einen Stelle.
+
+**Ergebnis:** „Befund ist lokal und klein" trifft zu — **nicht** das riskantere
+Pump-Modell (`wx/qt/queue.rkt`, §23s zweite, unverifizierte Hypothese). Kein Fix in
+dieser Sitzung (Diagnose-Charakter, wie vorgegeben). Details/vollständige Einordnung:
+`docs/HACKING.md` §23.3.
+
 ### Zusammenfassung Fortsetzung 2026-09-12
 
 - Phase 2: sechs Kategorien durchgesehen, **keine** neuen `wx/qt`-lokal fixbaren Defekte.
@@ -618,8 +668,15 @@ danach wieder auf dem Ausgangsstand.
   `wx/qt` nicht funktionsfähig) — kein neuer Fix-Versuch, konsistent mit der bereits für
   §24.5 getroffenen Parken-Entscheidung dieser Sitzung. Zwei Reproduktionsfälle für
   denselben offenen Scroll-Block statt einem.
+- **Teil 3 (Stretch-Ziel, auf Nutzerwunsch nach `AskUserQuestion`):** `test-dock-size`-
+  Crash — `is-shown?`-Divergenz auf eine einzelne Zeile lokalisiert (`wx/qt/panel.rkt:58`,
+  hartcodiertes `#t`, statt der echten `shown?`-Basisimplementierung wie unter win32).
+  Live-Instrumentierung an `test-tool.rkt` (htdp-lib, außerhalb des Forks) an fehlenden
+  Admin-Rechten gescheitert; Nutzer entschied sich für den bereits eindeutigen
+  statischen Befund statt elevierter Diagnose. Ergebnis: „lokal und klein" bestätigt,
+  nicht das riskantere Pump-Modell — kein Fix in dieser Sitzung. Details: `docs/HACKING.md` §23.3.
 - `CLAUDE.md`-PATH-Nachtrag aus Phase 0 nachgeholt.
 - Phase 3: beide Regressions-Gates grün, kein Code seit der 0.10-Baseline verändert.
 - **Keine Commits in dieser Fortsetzung** (nur Dokumentation: dieser Report,
-  `docs/HACKING.md` §25, `STATUS.md`, `CLAUDE.md`) — kein Submodul-Push nötig, keine
-  Sync-Rückfrage (Regel 7) fällig, da keine Repo-Zeiger sich ändern.
+  `docs/HACKING.md` §23.3/§25, `STATUS.md`, `CLAUDE.md`) — kein Submodul-Push nötig,
+  keine Sync-Rückfrage (Regel 7) fällig, da keine Repo-Zeiger sich ändern.

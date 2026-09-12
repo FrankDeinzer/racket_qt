@@ -69,7 +69,7 @@ fixen). Details: `docs/HACKING.md` §24.
 
 ---
 
-## Session 2026-09-12 (Windows, Fortsetzung von 2026-09-11) — Preferences-Sweep (Phase 2) + Regressions-Gate (Phase 3) + Colors-Tab rechte Spalte root-caused: keine neuen Fixes, ein Befund dem §21.7-Cluster zugeordnet, ein alter Befund als zweiter Reproduktionsfall von §24.5 (Scrollbar-Block) bestätigt
+## Session 2026-09-12 (Windows, Fortsetzung von 2026-09-11) — Preferences-Sweep (Phase 2) + Regressions-Gate (Phase 3) + Colors-Tab rechte Spalte root-caused + `test-dock-size`-Stretch-Messung: keine neuen Fixes, drei Root-Causes präzisiert (§21.7-Cluster, §24.5-Scrollbar-Block, `is-shown?`-Divergenz)
 
 **Kontext:** `docs/2026-09-11_prompt.md` Phase 2+3. Voller Bericht:
 `docs/2026-09-11_report-win.md`, Abschnitt „Fortsetzung 2026-09-12". `docs/HACKING.md`
@@ -114,7 +114,25 @@ fixen). Details: `docs/HACKING.md` §24.
   Reproduktionsfall derselben Root-Cause**. Kein Fix-Versuch (Shared Code, §24.5 hat
   dieselbe Methodenfamilie bereits mit Fix-Versuch+Rollback durchlaufen). Details:
   `docs/HACKING.md` §25.2 (verweist gegenseitig auf §24.5).
-- **Commits:** keine (nur Dokumentation — dieser Eintrag, `docs/HACKING.md` §25,
+- **Teil 3 (Stretch-Ziel, auf Nutzerwunsch nach `AskUserQuestion`):** `test-dock-size`-
+  Crash (§23/§23.1/§23.2) — die im Original-Prompt vorgeschlagene Messung, welcher
+  `on-tab-change`-Eingang divergiert. Live-Instrumentierung an `test-tool.rkt`
+  (htdp-lib, außerhalb des Forks unter `C:\Program Files\Racket\...`) scheiterte an
+  fehlenden Admin-Rechten dieser Shell — Nutzer entschied sich für den bereits
+  eindeutigen **statischen Code-Befund** statt elevierter Diagnose (keine Datei
+  verändert, per erneutem Lesen bestätigt). **Ergebnis: `is-shown?`-Divergenz auf eine
+  Zeile lokalisiert** — `wx/qt/panel.rkt:58` überschreibt `is-shown?` hartcodiert auf
+  `#t`, während `wx/win32/panel.rkt` keine Override hat und die Basisimplementierung
+  erbt (per Grep bestätigt: echtes, per `set!` aktualisiertes `shown?`-Feld,
+  `wx/win32/window.rkt:284/287/327` — zusätzlich gestützt durch §23s Laufzeitmessung:
+  nativ durchläuft `on-tab-change` bei der 1→2-Tab-Sequenz nie den
+  `remove`/`undock-tests`-Pfad, 0/10 Crashes). Korrigiert/präzisiert einen Teil von §23s früherem
+  Read-only-Scan (der nur die Basis-`window%`-Implementierung verglich, nicht
+  Widget-spezifische Overrides). Dasselbe Muster (`is-shown?` hartcodiert `#t`) findet
+  sich in praktisch jeder `wx/qt`-Widget-Klasse außer `canvas%`/`frame%`. **„Befund ist
+  lokal und klein" bestätigt** — nicht das riskantere Pump-Modell. Kein Fix (Diagnose-
+  Charakter). Details: `docs/HACKING.md` §23.3.
+- **Commits:** keine (nur Dokumentation — dieser Eintrag, `docs/HACKING.md` §23.3/§25,
   `docs/2026-09-11_report-win.md`, `CLAUDE.md`-PATH-Zeile). Kein Submodul-Push, keine
   Sync-Rückfrage fällig.
 - **Nächster Schritt:** §21.7 (Resize/Reflow) bleibt ein zentraler offener Block für
@@ -124,6 +142,9 @@ fixen). Details: `docs/HACKING.md` §24.
   Editor-Canvas-Scrollbars) hat jetzt **zwei** unabhängige Reproduktionsfälle (Editor
   + Colors-Tab „Color Schemes") für dieselbe eigene künftige Session. Colors-Tab
   „rechte Spalte" ist **nicht** geschlossen — sie ist Teil des offenen Scroll-Blocks.
+  `test-dock-size` (§23) hat jetzt eine präzise lokalisierte Root-Cause (`wx/qt`-weites
+  `is-shown?`-Muster über mehrere Widget-Klassen) — Fix bleibt eigene künftige Session,
+  aber deutlich risikoärmer eingeschätzt als zuvor angenommen (kein Pump/Reentrancy-Terrain).
 
 ---
 

@@ -2061,6 +2061,75 @@ Automatisierungsartefakt (eine fehlgeleitete Tastatureingabe fügte eine Leerzei
 `examples/htdp-tests-probe.rkt` ein) wurde bemerkt und vor jedem Commit per `git checkout`
 zurückgesetzt.
 
+### 23.3 `test-dock-size`-Crash — `is-shown?`-Divergenz präzise lokalisiert (Stretch-Ziel, 2026-09-12, nur Messung)
+
+**Kontext:** `docs/2026-09-11_prompt.md`, Stretch-Ziel-Abschnitt (nach Nutzer-Freigabe
+per `AskUserQuestion`, Regel 7). Nur Messung, **kein Fix** — wie im Prompt vorgesehen
+blieb der Fix selbst explizit außerhalb des Scopes.
+
+**Korrigiert einen Teil von §23s „Read-only-Nachtrag"-Schluss** (Zeile „`show`/
+`is-shown?` selbst sind auf allen Backends simple, synchrone Racket-seitige Flags ...
+kein Unterschied, der die Divergenz erklärt"): jener Scan verglich nur die **Basis**-
+`window%`-Implementierung von `is-shown?` über alle vier Backends (`wx/qt/window.rkt:88`
+vs. `wx/win32/window.rkt:327`) — dort stimmt es, beide sind einfache, echte `shown?`-
+Felder, kein Unterschied. **Nicht geprüft wurde damals, ob einzelne Widget-Typen diese
+Basis-Methode überschreiben.** Das ist der Fall, und dort liegt die tatsächliche
+Divergenz.
+
+**Befund:** `wx/qt/panel.rkt:58` überschreibt `is-shown?` unbedingt auf `#t`:
+```racket
+(define/override (is-shown?)        #t)
+```
+— unabhängig davon, ob der Panel tatsächlich noch Kind eines sichtbaren Containers ist.
+`wx/win32/panel.rkt` überschreibt `is-shown?` **nicht** (kein Treffer bei gezielter
+Suche) — win32s `panel%` erbt daher die Basisimplementierung aus `wx/win32/window.rkt`
+unverändert, dort per gezieltem Grep bestätigt als echtes, dynamisches Feld: `(define
+shown? #f)` (Zeile 284), per `set!` bei Show/Hide-Events aktualisiert (Zeile 287),
+`is-shown?` (Zeile 327/328) gibt exakt dieses Feld zurück — kein hartcodierter Wert.
+Dass dieses Feld unter win32 tatsächlich den realen Panel-Zustand trägt (nicht nur
+strukturell existiert), bestätigt zusätzlich die Laufzeit-Messung aus §23: nativ
+durchläuft `on-tab-change` bei der 1→2-Tab-Sequenz nie den `remove`/`undock-tests`-Pfad
+(0/10 Crashes, alle drei Plattformen) — konsistent mit einem `panel-shown?`, das dort
+tatsächlich `#f` liefert, wenn der Panel gerade nicht sichtbar ist. `test-panel%`
+(`htdp-lib/test-engine/test-tool.rkt:220`, ein reines `vertical-panel%`, keine eigene
+`is-shown?`-Override) erbt diese Backend-Divergenz durch. Damit ist `on-tab-change`s
+`panel-shown?` (`(send test-panel is-shown?)`, `test-tool.rkt:107`) unter Qt
+**strukturell immer `#t`**, unabhängig vom tatsächlichen Zustand — unter win32 spiegelt
+es (per Code UND per Laufzeit-Beobachtung) die Realität.
+
+Dieselbe unbedingte `#t`-Überschreibung findet sich **backendweit in praktisch jeder
+`wx/qt`-Widget-Klasse außer `canvas%`/`frame%`** (`list-box.rkt`, `tab-panel.rkt`,
+`slider.rkt`, `radio-box.rkt`, `group-panel.rkt`, `button.rkt`, `choice.rkt`,
+`check-box.rkt`, `message.rkt` — je ein Treffer `(define/override (is-shown?) #t)`),
+während `canvas.rkt`/`frame.rkt` echte, dynamische Implementierungen über
+`is-shown-to-root?` haben. Das ist ein systematisches Muster aus der additiven
+Spike-Phase (Checkpoint A/B), nicht ein Einzelfall an dieser einen Stelle.
+
+**Einordnung ggü. der im Prompt vorgeschlagenen Hypothese:** die vermutete Ursache
+("Qt's `show-children`-No-op, `wx/qt/window.rkt:167`, lässt den Sichtbarkeits-Flag von
+Kindern stehen") trifft in dieser genauen Form **nicht** zu — die hartcodierte
+`panel%`-Override allein ist bereits eine **hinreichende** Ursache für die Divergenz,
+unabhängig von `show-children`. Ob `show-children`s No-op-Charakter **daneben** eigene,
+zusätzliche Effekte hat, wurde nicht geprüft — das bleibt offen. Die **Fehlerklasse** der Hypothese
+(„`is-shown?` divergiert zwischen Qt und win32") ist damit aber **bestätigt und
+präzise lokalisiert** — sogar auf eine einzelne Zeile, nicht nur eine Verhaltensklasse.
+Live-Instrumentierung von `test-tool.rkt` (htdp-lib, außerhalb des Forks, bräuchte
+elevierte Schreibrechte unter `C:\Program Files\Racket\...`) wurde nach Rücksprache mit
+dem Nutzer **nicht** durchgeführt — der Code-Befund ist eindeutig genug, um die
+gestellte Frage („lokal und klein" vs. „Pump-Modell") zu beantworten, ohne den Crash
+live nachzustellen.
+
+**Ergebnis für die künftige Fix-Session:** „Befund ist lokal und klein" trifft zu (wie
+im Prompt für diesen Fall vorhergesagt) — **nicht** das riskantere Pump-Modell
+(`wx/qt/queue.rkt`s 50ms-Poll, §23s zweite, unverifizierte Hypothese). Ein Fix müsste
+`is-shown?` für die betroffenen `wx/qt`-Widget-Klassen echt implementieren (analog zu
+`canvas%`/`frame%`s `is-shown-to-root?`) statt hartcodiert `#t` zurückzugeben — bleibt
+in dieser Sitzung explizit ungefixt (Diagnose-Charakter, wie vom Nutzer vorgegeben).
+Vorsicht für die Fix-Session: die `#t`-Überschreibung ist an mehreren Stellen
+gleichzeitig vorhanden (s. o.) — ein Fix müsste alle betroffenen Klassen konsistent
+behandeln, nicht nur `panel%`, sonst bleibt dieselbe Divergenzklasse an anderer Stelle
+bestehen.
+
 ## 24. Racket-9.3-Migration (Windows) + drei §21.6-Befunde geschlossen, vierter root-caused und geparkt (2026-09-11_prompt)
 
 **Kontext:** `docs/2026-09-11_prompt.md`. Voller Bericht: `docs/2026-09-11_report-win.md`.
