@@ -150,22 +150,51 @@ fixen). Details: `docs/HACKING.md` §24.
   Render-Pfad abfragt — nicht verifiziert. Details: `docs/HACKING.md` §26. Fix-Versuch
   für `is-shown-to-root?`/`is-enabled-to-root?` folgt direkt im Anschluss (auf
   Nutzerwunsch: „erst dokumentieren, dann fixen versuchen").
+- **Teil 5 (Fix-Versuch für §26, wx/qt-lokal, `qt-backend`-Submodul):**
+  `is-shown-to-root?`/`is-enabled-to-root?` in `wx/qt/window.rkt` rekursiv gemacht
+  (Elternketten-Walk, mirrored win32/cocoa); `wx/qt/frame.rkt`s bisherige
+  `is-shown?`-Override entfernt (wäre sonst zirkulär geworden) und durch zwei
+  terminierende Overrides ersetzt: `is-shown-to-root?` mirrored
+  `win32/frame.rkt:406-407`; `is-enabled-to-root?` **bewusst nicht** mirrored zu
+  win32s unbedingtem `#t` (per Advisor-Review vor dem Commit gefunden) — win32 darf
+  dort `#t` hartcodieren, weil sein `enable` echt `EnableWindow` aufruft und das OS
+  selbst Input stoppt; Qts `enable` setzt nur das Racket-Flag, ein unbedingtes `#t`
+  hätte den `dispatch-on-char`/`dispatch-on-event`-Gate für einen deaktivierten Frame
+  lautlos stillgelegt. Stattdessen: `(send this is-window-enabled?)` (die einfache
+  `enabled?`-Basis). Bewusst **nicht** angefasst: die per-Widget
+  `is-shown?`-Hardcodierungen aus §23.3 (z. B. `panel%`). Gate: Smoke 3/3
+  `PLT_QT=1`, 3/3 nativ, beide grün (erneut nach der Korrektur bestätigt) — deckt die
+  geänderte Semantik selbst (Dispatch bei deaktiviertem/unsichtbarem Vorfahren) nicht
+  ab, nicht separat geprüft. **`test-dock-size`-Messung: zwei unabhängige
+  Läufe (DrRacket + `htdp-tests-probe.rkt`, „Run", dann zweiter Tab — Lauf 1
+  versehentlich über einen `Open Recent`-Fehlklick, Lauf 2 gezielt über `File → New
+  Tab`), beide reproduzieren den identischen historischen Crash** — die Rekursion
+  behebt `test-dock-size` **nicht** (erwartet: `panel%`s `is-shown?` lügt weiterhin,
+  egal wie korrekt die Elternkette jetzt geprüft wird), aber auch keine neue Regression.
+  **Entscheidung: Änderung behalten** (echte, regressionsfreie Korrektheitsverbesserung,
+  Parität mit den anderen drei Backends, Voraussetzung für einen künftigen
+  `test-dock-size`/§24.5/§25.2-Fix) — Commit im Submodul folgt, Push nach
+  Nutzer-Rückfrage (Regel 7/8). Details: `docs/HACKING.md` §26.1.
 - **Commits:** `1abc1f2` (Phase 2+3), `783152a` (Colors-Tab §25.2), `7d3ac9b` (§23.3
-  `is-shown?`-Lokalisierung, nach Advisor-Korrektur nachgeschärft) — alle gepusht nach
-  `origin/main` (Nutzer-Bestätigung je Regel 7 eingeholt). Kein Submodul-Push in
-  diesen dreien (nur Dokumentation, kein `wx/qt`-Code geändert).
+  `is-shown?`-Lokalisierung, nach Advisor-Korrektur nachgeschärft), `ae552b7` (§26
+  Dokumentation) — alle gepusht nach `origin/main` (Nutzer-Bestätigung je Regel 7
+  eingeholt). Submodul-Commit für den §26.1-Fix noch ausstehend zum Zeitpunkt dieses
+  Eintrags.
 - **Nächster Schritt:** §21.7 (Resize/Reflow) bleibt ein zentraler offener Block für
   eine eigene künftige Session — der neue Preferences-Button-Zeilen-Befund liefert
   dafür einen zusätzlichen, sehr konkreten Reproduktionsfall (kleinste
   Preferences-Fenstergröße, kein manueller Resize nötig). Der Scroll-Block (§24.5,
   Editor-Canvas-Scrollbars) hat jetzt **zwei** unabhängige Reproduktionsfälle (Editor
-  + Colors-Tab „Color Schemes") für dieselbe eigene künftige Session, plus eine neue,
-  ungeprüfte Verbindungshypothese zu §26. Colors-Tab
+  + Colors-Tab „Color Schemes") für dieselbe eigene künftige Session, plus eine
+  weiterhin ungeprüfte Verbindungshypothese zu §26 (nicht getestet in dieser Sitzung,
+  bewusst außerhalb des Scopes). Colors-Tab
   „rechte Spalte" ist **nicht** geschlossen — sie ist Teil des offenen Scroll-Blocks.
   `test-dock-size` (§23) hat jetzt eine präzise lokalisierte Root-Cause (`wx/qt`-weites
-  `is-shown?`-Muster über mehrere Widget-Klassen), jetzt vertieft auf die fehlende
-  `is-shown-to-root?`/`is-enabled-to-root?`-Rekursion (§26) — Fix-Versuch dafür direkt
-  im Anschluss dieser Sitzung.
+  `is-shown?`-Muster über mehrere Widget-Klassen); die tiefere
+  `is-shown-to-root?`/`is-enabled-to-root?`-Rekursion (§26) ist jetzt gefixt, der
+  eigentliche Crash bleibt aber offen — ein tatsächlicher Fix bräuchte zusätzlich eine
+  echte `is-shown?`-Implementierung für `panel%` (und die übrigen §23.3-Widget-Klassen),
+  eigene künftige Session.
 
 ---
 

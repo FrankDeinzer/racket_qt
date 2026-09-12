@@ -2500,3 +2500,70 @@ kaputt und müsste separat gefixt werden. Alle drei Befunde dieses Abschnitts si
 **Entscheidung:** auf Nutzerwunsch zunächst nur dokumentiert (dieser Abschnitt),
 Fix-Versuch für `is-shown-to-root?`/`is-enabled-to-root?` folgt danach in derselben
 Sitzung.
+
+### 26.1 Fix-Versuch: `is-shown-to-root?`/`is-enabled-to-root?` rekursiv gemacht — Korrektheit verbessert, `test-dock-size` bleibt bestehen
+
+**Umfang (bewusst begrenzt, wie oben vorgesehen):** nur die Rekursion selbst, **keine**
+Änderung an den per-Widget `is-shown?`-Overrides aus §23.3 (`panel%` bleibt
+hartcodiert `#t`).
+
+**Änderungen (gui-Submodul, `wx/qt/`):**
+- `window.rkt`: `is-shown-to-root?`/`is-enabled-to-root?` von reinen Feld-Zugriffen auf
+  `(and shown? (send parent is-shown-to-root?))` bzw.
+  `(and enabled? (send parent is-enabled-to-root?))` umgestellt — exakt analog zu
+  win32/cocoa.
+- `frame.rkt`: die bisherige `is-shown?`-Override (`(send this is-shown-to-root?)`)
+  entfernt (zirkulär geworden, s. o. Fallstrick-Absatz) und durch zwei neue,
+  terminierende Overrides ersetzt: `is-shown-to-root?` → `(send this is-shown?)`
+  (die jetzt wieder einfache, nicht-rekursive Basis-Implementierung aus `window.rkt`),
+  mirrored zu `win32/frame.rkt:406-407`. `is-enabled-to-root?` → `(send this
+  is-window-enabled?)` (die einfache `enabled?`-Basis-Implementierung,
+  `window.rkt:77`) — **bewusst nicht** mirrored zu win32s unbedingtem `#t`
+  (`win32/frame.rkt:408-409`): win32 kann dort `#t` hartcodieren, weil sein eigenes
+  `enable` echt `EnableWindow` aufruft — das Betriebssystem selbst stoppt Input an
+  einen deaktivierten Frame, der Racket-seitige Gate ist dort redundant. Qts `enable`
+  (`window.rkt:78`) setzt dagegen nur das Racket-seitige Flag, ohne
+  `shim_widget_set_enabled` aufzurufen (das passiert nur separat, direkt, in
+  `modal-enable`) — ein unbedingtes `#t` hätte hier `dispatch-on-char`/
+  `dispatch-on-event`s Gate (`window.rkt:211,220`) für einen deaktivierten Frame
+  still stillgelegt. Per Advisor-Review vor dem Commit gefunden und korrigiert.
+
+**Gate:** Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ — beide grün (erneut bestätigt nach der
+`is-enabled-to-root?`-Korrektur). Deckt aber **nicht** die geänderte Semantik selbst ab
+(Dispatch bei deaktiviertem/unsichtbarem Vorfahren) — dafür kein dediziertes Testszenario
+in `tests/smoke.rkt`, nicht separat geprüft in dieser Sitzung.
+
+**`test-dock-size`-Messung (Ziel: prüfen, ob die Rekursion die §23-Crash-Sequenz
+behebt):** DrRacket unter `PLT_QT=1`, `examples/htdp-tests-probe.rkt` geöffnet,
+„Run" (Testreport erscheint im REPL), dann ein zweiter Tab erzeugt — **zwei
+unabhängige Läufe** (Lauf 1: ein zweiter Tab entstand versehentlich über einen
+`Open Recent`-Fehlklick während der Automatisierung, nicht wie geplant über `File →
+Open`; Lauf 2: gezielt über `File → New Tab`, s. u.), **beide reproduzieren den
+identischen Crash** (`preferences:set` … `pref symbol: 'test-engine:test-dock-size`,
+`given: '(1)`, über `test-panel%::remove`/`undock-tests`/`on-tab-change`, exakt wie in
+§23/§23.3 dokumentiert). Der Mechanismus ist in beiden Fällen derselbe
+(1→2-Tab-Übergang), unabhängig vom genauen Auslöseweg. **Kein neuer Crash, keine neue
+Fehlermeldung** — die Rekursion selbst führt zu keiner Regression, behebt aber auch
+`test-dock-size` nicht.
+
+**Erklärung (wie im Fallstrick-Absatz oben vorhergesagt):** `panel%`s `is-shown?`
+bleibt weiterhin hartcodiert `#t` (§23.3, in diesem Fix-Versuch bewusst nicht
+angefasst) — die jetzt korrekt rekursive `is-shown-to-root?`-Kette trifft bei
+`test-panel%` (einem `vertical-panel%`) also weiterhin auf eine Stelle, die lügt,
+unabhängig davon, ob der Elternpfad davor korrekt geprüft wird. Die Rekursion allein
+kann das nicht kompensieren.
+
+**Methodische Randnotiz:** „New Tab" (`File → New Tab`, per Menü-Klick statt
+`Strg+T`-Tastenkürzel, das wie öfter in dieser Session per `SendKeys` nicht
+zuverlässig ankam) erzeugt denselben 1→2-Tab-Übergang wie das bisher dokumentierte
+`File → Open` einer zweiten Datei — einfacherer, ebenso zuverlässiger Reproduktionsweg
+für künftige Sessions, kein zweites Beispielprogramm nötig.
+
+**Entscheidung:** Änderung **wird behalten** (echte Korrektheitsverbesserung ohne
+Regression, bringt `wx/qt` in diesem Punkt auf Parität mit den anderen drei
+Backends, ist Voraussetzung für jeden künftigen Fix von §23.3/§24.5/§25.2), obwohl sie
+`test-dock-size` allein nicht löst. Ein tatsächlicher Fix von `test-dock-size` bräuchte
+zusätzlich eine echte, dynamische `is-shown?`-Implementierung für `panel%` (und die
+übrigen in §23.3 gelisteten Widget-Klassen) — bleibt eigene künftige Session, wie
+in §23.3 bereits vorgesehen. Kein Test der ungeprüften §24.5-Verbindungshypothese in
+dieser Sitzung (Scope bewusst auf die Rekursions-Messung begrenzt).
