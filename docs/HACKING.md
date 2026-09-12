@@ -2107,7 +2107,9 @@ den echten Preferences-Colors-Tab. Commits: gui-Submodul `ee75372d`; Umbrella (`
 Umbrella selbst liegt, nicht im Submodul.
 
 Die rechte Spalte (Button+Checkbox „Revert...") aus §21.6 Punkt 4 wurde in dieser Session
-**nicht** untersucht — nur der Rahmen-Teil des Befunds ist geschlossen.
+**nicht** untersucht — nur der Rahmen-Teil des Befunds ist geschlossen. **Nachtrag
+2026-09-12: bestätigt real, root-caused als dieselbe Ursache wie §24.5
+(Editor-Canvas-Scrollbars) — geparkt, kein Fix. Details §25.2.**
 
 ### 24.4 Befund 3 — Windows Toolbar-Save-Icon-Timing — nicht reproduziert, geparkt (Regel 4)
 
@@ -2183,6 +2185,13 @@ Nächster Ansatzpunkt für diese Session: die Trigger-Reihenfolge zwischen der Q
 Geometrieänderung (läuft außerhalb von Racket-`set-size`) und dem Editor-eigenen
 Content-Scrollbar-Rebuild.
 
+**Nachtrag 2026-09-12 (§25.2): zweiter, unabhängiger Reproduktionsfall derselben
+Root-Cause gefunden.** Colors-Tab → Color Schemes (`'(auto-vscroll)`-Panel) ist unter
+Qt aus genau demselben Grund unerreichbar — `show-scrollbars`/`set-scrollbars` (hier
+über `wx/common/canvas-mixin.rkt`, nicht über `editor-canvas%`) greifen unter `wx/qt`
+nicht. Für die künftige dedizierte Scroll-Session stehen damit zwei Testfälle bereit,
+nicht nur einer. Details: §25.2.
+
 Gate-Nachweis nach Revert: Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ ohne `PLT_QT` — beide grün.
 
 **Nebenbefund (inzident, nicht Teil dieses Fundes):** ein grafischer Störeffekt
@@ -2251,3 +2260,63 @@ Sitzungsbeginn-Backup zurückgespielt, kein Datenverlust. Für künftige Session
 Resizes an Preferences-artigen Dialogen bergen dasselbe Präferenz-Drift-Risiko wie
 Tippen im Editor — vor jeder GUI-Automatisierungssitzung `racket-prefs.rktd` sichern und
 den Hash danach prüfen.
+
+### 25.2 Colors-Tab „rechte Spalte" (letzter offener Rest von §21.6 Punkt 4) — bestätigt real, dieselbe Root-Cause wie §24.5, geparkt
+
+**Auf Nutzerwunsch untersucht (2026-09-12, Teil 2 der Fortsetzung). Status: Root-Cause
+gefunden (Shared Code, identisch zu §24.5) — kein Fix-Versuch, konsistent mit der dort
+bereits getroffenen Parken-Entscheidung. Korrigiert eine erste, hier zurückgezogene
+Fehleinschätzung („nicht reproduzierbar") derselben Sitzung — s. u.**
+
+§21.6 Punkt 4 (2026-07-13) beschrieb zusätzlich zum (am 2026-09-11 gefixten, §24.3)
+Rahmen-Defekt eine fehlende „rechte Spalte": „Pro Stil sollte ein Button+Checkbox
+('Revert...') in einer rechten Spalte stehen — fehlt komplett."
+
+**Erster (fehlerhafter) Durchlauf:** alle 7 Colors-Sub-Tabs nativ und unter Qt nur im
+jeweils ungescrollten oberen Bereich verglichen — beide identisch, daraus vorschnell
+„Kontrollstruktur existiert nicht mehr" gefolgert. **Fehler:** beide Seiten starten am
+selben Scroll-Zustand; ein Vergleich ohne bis ans Ende zu scrollen beweist nichts über
+scroll-abhängigen Inhalt. Zurückgezogen.
+
+**Korrigierte Messung:** Colors → Color Schemes ist ein `vertical-panel%` mit Stil
+`'(auto-vscroll)` (`framework/private/color-prefs.rkt:1267-1270`) und enthält nach allen
+Schema-Einträgen eine Zeile mit drei Buttons — „Revert Colors to Color Scheme's Default
+Colors", „Design Your Own Color Schemes", „Style & Color Names"
+(`color-prefs.rkt:1410-1420`) — das ist die in §21.6 gemeinte Kontrollstruktur. Nativ
+über den panel-eigenen Scrollbar erreichbar (funktionsfähig). Unter `PLT_QT=1` auf drei
+unabhängigen Wegen als unerreichbar bestätigt: Fenster vergrößern (bringt nichts, §21.7
+verhindert Reflow des Panelinhalts), Klick auf die native Scrollbar-Track-Position (keine
+Reaktion, kein sichtbarer Thumb), Mausrad über dem Panel-Hintergrund (keine Reaktion).
+
+**Root-Cause:** `'(auto-vscroll)`-Panels rufen in `wxpanel.rkt` (`adjust-panel-size`/
+`panel-redraw`, geteilter Code) unbedingt `show-scrollbars`/`set-scrollbars` auf. Diese
+Methoden existieren backendübergreifend **nur** in den jeweiligen `canvas.rkt`-Dateien
+plus `wx/common/canvas-mixin.rkt` — **exakt dieselben Methoden, die §24.5
+(Editor-Canvas-Scrollbars) bereits als unter `wx/qt` nicht funktionsfähig identifiziert
+hat** (`wx/qt/canvas.rkt:307`, No-Op-Stub). `wx/qt/panel.rkt`/`wx/qt/window.rkt`
+definieren keine dieser Methoden selbst; da Preferences dennoch ohne Absturz öffnet,
+wird der scroll-aktivierende Codepfad unter Qt offenbar gar nicht erst betreten (exakter
+Dispatch-Pfad nicht bis ins letzte Detail nachverfolgt — würde Instrumentierung
+brauchen) — der praktische Effekt ist aber identisch zu §24.5: `auto-vscroll`-Inhalt
+wird unter `wx/qt` unerreichbar, ohne Absturz, ohne sichtbaren Scrollbar.
+
+**Entscheidung:** kein Fix-Versuch. §24.5 hat für dieselbe Methodenfamilie bereits drei
+Hypothesen-Zyklen verbraucht, einen Fix versucht und wegen einer schwereren Regression
+zurückgerollt — dies ist **kein neuer Befund**, sondern ein zweiter Reproduktionsfall
+derselben offenen Architektur-Lücke. Beide Funde sind für die künftige dedizierte
+Scroll-Session zusammenzufassen.
+
+**Methodische Lehre:** bei jedem `'(auto-vscroll)`/`'(vscroll)`-artigen Panel muss aktiv
+bis ans Ende gescrollt werden, bevor „nativ == Qt, also kein Defekt" geschlossen werden
+darf — ein Vergleich im selben (ungescrollten) Ausgangszustand kann identisch aussehen,
+obwohl der Scroll-Mechanismus selbst komplett unterschiedlich funktioniert.
+
+**Automatisierungs-Nebenfund:** nach mehrfachem `taskkill /F` zeigte DrRacket (nativ
+**und** Qt) den bekannten Autosave-Recovery-Dialog (§13). Verhalten uneinheitlich: in
+einem Durchlauf registrierte unter Qt ein synthetischer Mausklick auf den „No"-Button
+nicht (`{ESC}` per `SendKeys` half sofort), in einem späteren Durchlauf umgekehrt half
+der Mausklick, `{ESC}` nicht — für künftige Sessions: bei modalen Qt-Dialogen beide Wege
+bereithalten, keinen davon als zuverlässig annehmen.
+
+Details/Methode: `docs/2026-09-11_report-win.md`, Abschnitt „Nachtrag 2026-09-12
+(Teil 2)". Kein Commit — Root-Cause ist Shared Code, Fix bewusst nicht versucht.

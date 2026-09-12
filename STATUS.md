@@ -69,7 +69,7 @@ fixen). Details: `docs/HACKING.md` §24.
 
 ---
 
-## Session 2026-09-12 (Windows, Fortsetzung von 2026-09-11) — Preferences-Sweep (Phase 2) + Regressions-Gate (Phase 3): keine neuen Fixes nötig, ein Befund dem §21.7-Cluster zugeordnet
+## Session 2026-09-12 (Windows, Fortsetzung von 2026-09-11) — Preferences-Sweep (Phase 2) + Regressions-Gate (Phase 3) + Colors-Tab rechte Spalte root-caused: keine neuen Fixes, ein Befund dem §21.7-Cluster zugeordnet, ein alter Befund als zweiter Reproduktionsfall von §24.5 (Scrollbar-Block) bestätigt
 
 **Kontext:** `docs/2026-09-11_prompt.md` Phase 2+3. Voller Bericht:
 `docs/2026-09-11_report-win.md`, Abschnitt „Fortsetzung 2026-09-12". `docs/HACKING.md`
@@ -101,14 +101,29 @@ fixen). Details: `docs/HACKING.md` §24.
   **nicht** erneut gelaufen — `git status` zeigt für die gesamte Fortsetzung außer dem
   CLAUDE.md-PATH-Nachtrag keine Codeänderung, ein Rerun ohne Diff hätte keine neue
   Aussagekraft gehabt (Begründung im Report festgehalten).
+- **Teil 2 (auf Nutzerwunsch):** letzter offener Rest von §21.6 Punkt 4 — Colors-Tab
+  „rechte Spalte" (Button+Checkbox „Revert...") — untersucht. **Bestätigt real**
+  (Korrektur einer ersten, zu früh gezogenen „nicht reproduzierbar"-Einschätzung
+  innerhalb derselben Sitzung, s. Report): die Kontrollstruktur (3 Buttons am Ende des
+  `'(auto-vscroll)`-Panels „Color Schemes") existiert und ist nativ über einen
+  funktionierenden Panel-Scrollbar erreichbar, unter `PLT_QT=1` aber auf drei
+  unabhängigen Wegen als unerreichbar bestätigt (Fenster vergrößern — blockiert von
+  §21.7; Scrollbar-Klick; Mausrad — beide ohne Wirkung). Root-Cause: dieselben
+  `show-scrollbars`/`set-scrollbars`-Methoden, die §24.5 bereits als unter `wx/qt`
+  nicht funktionsfähig identifiziert hat — **kein neuer Befund, zweiter
+  Reproduktionsfall derselben Root-Cause**. Kein Fix-Versuch (Shared Code, §24.5 hat
+  dieselbe Methodenfamilie bereits mit Fix-Versuch+Rollback durchlaufen). Details:
+  `docs/HACKING.md` §25.2 (verweist gegenseitig auf §24.5).
 - **Commits:** keine (nur Dokumentation — dieser Eintrag, `docs/HACKING.md` §25,
   `docs/2026-09-11_report-win.md`, `CLAUDE.md`-PATH-Zeile). Kein Submodul-Push, keine
   Sync-Rückfrage fällig.
-- **Nächster Schritt:** §21.7 (Resize/Reflow) bleibt der zentrale offene Block für eine
-  eigene künftige Session — der neue Preferences-Button-Zeilen-Befund liefert dafür einen
-  zusätzlichen, sehr konkreten Reproduktionsfall (kleinste Preferences-Fenstergröße, kein
-  manueller Resize nötig). Colors-Tab rechte Spalte und Editor-Canvas-Scrollbars weiterhin
-  offen, unverändert gegenüber dem 09-11-Eintrag.
+- **Nächster Schritt:** §21.7 (Resize/Reflow) bleibt ein zentraler offener Block für
+  eine eigene künftige Session — der neue Preferences-Button-Zeilen-Befund liefert
+  dafür einen zusätzlichen, sehr konkreten Reproduktionsfall (kleinste
+  Preferences-Fenstergröße, kein manueller Resize nötig). Der Scroll-Block (§24.5,
+  Editor-Canvas-Scrollbars) hat jetzt **zwei** unabhängige Reproduktionsfälle (Editor
+  + Colors-Tab „Color Schemes") für dieselbe eigene künftige Session. Colors-Tab
+  „rechte Spalte" ist **nicht** geschlossen — sie ist Teil des offenen Scroll-Blocks.
 
 ---
 
