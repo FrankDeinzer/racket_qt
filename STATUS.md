@@ -175,11 +175,14 @@ fixen). Details: `docs/HACKING.md` §24.
   Parität mit den anderen drei Backends, Voraussetzung für einen künftigen
   `test-dock-size`/§24.5/§25.2-Fix) — Commit im Submodul folgt, Push nach
   Nutzer-Rückfrage (Regel 7/8). Details: `docs/HACKING.md` §26.1.
-- **Commits:** `1abc1f2` (Phase 2+3), `783152a` (Colors-Tab §25.2), `7d3ac9b` (§23.3
-  `is-shown?`-Lokalisierung, nach Advisor-Korrektur nachgeschärft), `ae552b7` (§26
-  Dokumentation) — alle gepusht nach `origin/main` (Nutzer-Bestätigung je Regel 7
-  eingeholt). Submodul-Commit für den §26.1-Fix noch ausstehend zum Zeitpunkt dieses
-  Eintrags.
+- **Commits:** Umbrella `main`: `1abc1f2` (Phase 2+3), `783152a` (Colors-Tab §25.2),
+  `7d3ac9b` (§23.3 `is-shown?`-Lokalisierung, nach Advisor-Korrektur nachgeschärft),
+  `ae552b7` (§26 Dokumentation), `7e2d094` (Submodul-Pointer-Bump für §26.1 + Doku).
+  Submodul `qt-backend`: `2740a9e0` (§26.1-Fix, `is-shown-to-root?`/
+  `is-enabled-to-root?` rekursiv). Alle gepusht (Nutzer-Bestätigung je Regel 7/8
+  eingeholt, Submodul zuerst). §27-Fix (Frame-Maximize/Iconize/Fullscreen, umbrella
+  `qt-shim/src/shim.cpp` + Submodul `wx/qt/frame.rkt`+`utils.rkt`) zum Zeitpunkt
+  dieses Eintrags noch ungepusht.
 - **Nächster Schritt:** §21.7 (Resize/Reflow) bleibt ein zentraler offener Block für
   eine eigene künftige Session — der neue Preferences-Button-Zeilen-Befund liefert
   dafür einen zusätzlichen, sehr konkreten Reproduktionsfall (kleinste
@@ -195,6 +198,29 @@ fixen). Details: `docs/HACKING.md` §24.
   eigentliche Crash bleibt aber offen — ein tatsächlicher Fix bräuchte zusätzlich eine
   echte `is-shown?`-Implementierung für `panel%` (und die übrigen §23.3-Widget-Klassen),
   eigene künftige Session.
+- **Teil 6 (auf Nutzerwunsch, „was können wir auf Windows noch tun" →
+  „Frame Maximize/Iconize/Fullscreen fixen"):** §26 Fund 3 behoben —
+  `wx/qt/frame.rkt` überschrieb `maximize`/`is-maximized?`/`iconized?`/`fullscreen`/
+  `fullscreened?` vorher gar nicht. Berührt (anders als §26.1) auch den nativen Shim
+  (Umbrella-Repo, `qt-shim/src/shim.cpp`): sechs neue `extern "C"`-Funktionen +
+  sechs FFI-Bindings (`wx/qt/utils.rkt`, gui-Submodul); `wx/qt/frame.rkt` delegiert
+  jetzt an diese. **Erster Entwurf per Advisor-Review vor dem Commit verworfen:**
+  Convenience-Methoden (`showMaximized`/`showMinimized`/`showFullScreen`/
+  `showNormal`) hätten (1) ein noch nicht gezeigtes Fenster bei `maximize #t`
+  fälschlich sofort sichtbar gemacht (exakt der `mrtop.rkt`-Ablauf
+  „Zustand setzen vor dem ersten Show") und (2) bei `iconize #f` den zuvor
+  gesetzten Maximize-Zustand mit gelöscht statt ihn wiederherzustellen — **beides
+  empirisch bestätigt** (eigene `EnumWindows`/`IsWindowVisible`-Messung: Fenster
+  vor jedem `show`-Aufruf trotzdem `visible=True`; Zustandssequenz-Probe zeigte
+  `maximized=#f` statt der nativen Oracle-Antwort `#t`). **Korrigiert:** direkte
+  `Qt::WindowStates`-Bit-Manipulation via `setWindowState()` statt der
+  Convenience-Methoden — beide Bugs nach dem Fix nicht mehr reproduzierbar,
+  identisch zur nativen Oracle-Messung. Shim neu gebaut nach jeder Änderung
+  (`cmake --build qt-shim/build/windows-x64 --config Debug`). Gate: Smoke 3/3
+  `PLT_QT=1`, 3/3 nativ, beide grün (vor und nach der Korrektur). **Wichtig für
+  Drei-Maschinen-Sync:** erste Änderung dieser Sitzung mit hartem Shim-ABI-Bedarf
+  — macOS/Linux müssen `qt-shim` nach dem Pull neu bauen, bevor der Fork überhaupt
+  lädt (`get-ffi-obj` wirft sonst beim Modul-Laden). Details: `docs/HACKING.md` §27.
 
 ---
 

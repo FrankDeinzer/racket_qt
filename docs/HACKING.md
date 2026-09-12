@@ -2567,3 +2567,138 @@ zusätzlich eine echte, dynamische `is-shown?`-Implementierung für `panel%` (un
 übrigen in §23.3 gelisteten Widget-Klassen) — bleibt eigene künftige Session, wie
 in §23.3 bereits vorgesehen. Kein Test der ungeprüften §24.5-Verbindungshypothese in
 dieser Sitzung (Scope bewusst auf die Rekursions-Messung begrenzt).
+
+## 27. Frame-Zustand (Maximize/Iconize/Fullscreen) implementiert (2026-09-12, Windows)
+
+**Kontext:** Fund 3 aus §26 (`wx/qt/frame.rkt` überschrieb `maximize`/`is-maximized?`/
+`iconized?`/`fullscreen`/`fullscreened?` gar nicht, erbte die hartcodierten `#f`/
+No-op-Stubs aus `window.rkt`). Auf Nutzerwunsch als nächster Schritt gefixt
+(`AskUserQuestion`, „Frame Maximize/Iconize/Fullscreen fixen").
+
+**Anders als §26.1: dieser Fix berührt den nativen Shim** (`qt-shim/src/shim.cpp`,
+Umbrella-Repo, nicht das gui-Submodul), da Qt für diese drei Zustände echte
+`QWidget`-Methoden hat, die vorher nicht durch die FFI-Grenze exponiert waren.
+
+**Shim-Ergänzung (`qt-shim/src/shim.cpp`, sechs neue `extern "C"`-Funktionen,
+direkt nach `shim_window_get_content_widget`):**
+```cpp
+void shim_window_maximize(void* win, int on);
+int  shim_window_is_maximized(void* win);
+void shim_window_iconize(void* win, int on);
+int  shim_window_is_iconized(void* win);
+void shim_window_fullscreen(void* win, int on);
+int  shim_window_is_fullscreen(void* win);
+```
+Keine Änderung an `CMakeLists.txt` nötig (`WINDOWS_EXPORT_ALL_SYMBOLS ON` bereits
+gesetzt, kein `.def`-File/manuelle Export-Liste).
+
+**Erster Entwurf (per Advisor-Review vor dem Commit verworfen, zwei reale Bugs
+gefunden):** die naheliegende erste Implementierung rief für `on? #t`/`#f` einfach
+Qts Convenience-Methoden `showMaximized()`/`showMinimized()`/`showFullScreen()`/
+`showNormal()` auf. Der Advisor identifizierte zwei Defekte, die die isolierte
+Zustands-Sequenz-Probe (unten) nicht hätte auffangen können, weil sie das Fenster
+vor jedem Schritt bereits gezeigt bzw. zwischen den Schritten immer wieder auf
+„normal" zurückgesetzt hatte:
+1. **`show*()`-Methoden erzwingen Sichtbarkeit** (`setVisible(true)` intern) — bei
+   einem noch nicht gezeigten Frame (genau der `mrtop.rkt:197`-Ablauf:
+   `(send wx position-for-initial-show) (send wx maximize on?)`, **vor** dem
+   eigentlichen `show`) hätte `maximize #t` das Fenster fälschlich sofort auf den
+   Schirm geholt.
+2. **`showNormal()` löscht alle drei Zustands-Bits gemeinsam** — `iconize #f` nach
+   vorherigem `maximize #t` hätte den Maximize-Zustand mit gelöscht, statt ihn
+   (wie win32s `SW_RESTORE`, `win32/frame.rkt:596-602`) wiederherzustellen.
+
+**Empirisch bestätigt vor dem Fix** (eigenes Probe-Skript + `EnumWindows`/
+`IsWindowVisible`-Messung, s. u.): Fund 1 bestätigt — ein `frame%` mit
+`(send f maximize #t)` **vor** `(send f show #t)` erschien 1/1 als reales,
+sichtbares HWND auf dem Bildschirm (`IsWindowVisible=True`), obwohl
+`(send f is-shown?)` weiterhin `#f` meldete (Racket-seitiges Flag, nicht
+synchron mit der echten nativen Sichtbarkeit). Fund 2 bestätigt — Sequenz
+`maximize #t` → `iconize #t` → `iconize #f` lieferte `maximized=#f` statt der
+nativen Oracle-Antwort `maximized=#t`.
+
+**Korrigierte Implementierung:** direkte `Qt::WindowStates`-Bit-Manipulation über
+`setWindowState()` statt der Convenience-Methoden — setzt/löscht **nur das eine
+betroffene Bit** (`Qt::WindowMaximized`/`Qt::WindowMinimized`/`Qt::WindowFullScreen`),
+ruft nie `setVisible()`. Nach dem Fix: dieselbe Sequenz zeigt das Fenster als
+existierendes, aber `IsWindowVisible=False` HWND während der Hidden-Phase (identisch
+zur nativen Oracle-Messung), und `iconize #f` nach `maximize #t` liefert korrekt
+`maximized=#t`.
+
+**Bewusste Vereinfachung ggü. win32 (bleibt bestehen):** win32s `fullscreen`
+(`win32/frame.rkt:627-673`) manipuliert `GWL_STYLE` manuell und hält Maximize/
+Iconize/Fullscreen als drei unabhängige, kombinierbare Zustände über separate
+Felder (`hidden-zoomed?`, `pre-fullscreen-rect`) nach; Qt modelliert sie als ein
+gemeinsames `Qt::WindowStates`-Bitfeld auf demselben `QWidget`. Der Shim nutzt Qts
+natives Bitfeld direkt, statt win32s zusätzliche Hidden-State-Bücher zu duplizieren
+— nach der Korrektur ist das Verhalten für die getesteten Sequenzen (inkl.
+Maximize-vor-Show und Iconize-Restore) deckungsgleich mit win32, ohne dessen
+Buchführung nachzubauen.
+
+**FFI-Bindings (`wx/qt/utils.rkt`, gui-Submodul):** sechs neue `get-ffi-obj`-Einträge,
+direkt nach `shim_window_get_content_widget`, gleiches Muster wie bestehende
+`shim_window_*`-Bindings.
+
+**Racket-seitige Overrides (`wx/qt/frame.rkt`, gui-Submodul):** `maximize`/
+`is-maximized?`/`fullscreen`/`fullscreened?` überschreiben jetzt die
+`window.rkt`-Basis-Stubs, delegieren an die neuen Shim-Funktionen.
+`iconize` (Setter) ist — wie bei win32 (`win32/frame.rkt:599`) — ein reines
+`define/public` ohne Basis-Gegenstück (kein `override*`-Ziel, kein
+`public*`-Konflikt); `iconized?` (Getter) überschreibt die `window.rkt`-Basis.
+
+**Gate:** Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ — beide grün nach jedem Shim-Rebuild
+(`cmake --build qt-shim/build/windows-x64 --config Debug`), erneut bestätigt nach
+der Korrektur.
+
+**Live-Verifikation (drei eigene Probe-Skripte, `frame%` direkt, kein volles
+DrRacket nötig):**
+1. **Basissequenz:** `maximize #t` → `#f` → `fullscreen #t` → `#f` → `iconize #t`
+   → `#f`, nach jedem Schritt alle drei Getter abgefragt (bereits im ersten,
+   fehlerhaften Entwurf gelaufen — deckte die beiden Bugs nicht auf, weil das
+   Fenster vor der Sequenz bereits gezeigt und zwischen den einzelnen Zuständen
+   immer wieder auf „normal" zurückgesetzt wurde). Nach der Korrektur weiterhin
+   alle sechs Übergänge korrekt.
+2. **Maximize-vor-Show + Iconize-Restore** (die beiden vom Advisor konkret
+   vorgeschlagenen Regressionstests, s. o.): vor dem Fix reproduzierten beide den
+   vorhergesagten Fehler 1/1; nach dem Fix beide korrekt, Zeile-für-Zeile
+   identisch zur nativen Oracle-Sequenz (`racket` ohne `PLT_QT`, dasselbe Skript).
+3. **Sichtbarkeits-Messung** (`EnumWindows`/`GetWindowText`/`IsWindowVisible`,
+   kein Vertrauen auf `is-shown?` — das ist nur das Racket-seitige Flag): während
+   der „`maximize #t` vor `show`"-Phase per Fenstertitel-Suche der reale HWND-
+   Sichtbarkeitsstatus abgefragt (5s Wartezeit, damit die Messung sicher in die
+   offene Zeitspanne fällt) — vor dem Fix `visible=True` (Bug bestätigt), nach dem
+   Fix `visible=False`, identisch zur nativen Oracle-Messung (`visible=False`).
+
+**Zusätzlich geprüft (dritter, vom Advisor konkret angeforderter Regressionstest):
+`set-size`/`resize` während `maximize`d.** win32 (`win32/frame.rkt:399-402`) ruft
+in seinem `set-size`-Override explizit `(maximize #f)` auf, bevor die neue Größe
+angewendet wird — `qt/frame.rkt`s `set-size` (Zeile 74-77) tut das **nicht** und
+ruft `shim_window_set_size` (`resize()`) unbedingt auf, unabhängig vom
+Maximize-Zustand. Probe: `show #t` → `maximize #t` → `(send f resize 350 250)` →
+`is-maximized?`/`get-width`/`get-height` geprüft, zusätzlich der reale native
+Fensterrahmen per `GetWindowRect` verifiziert. **Kein Unterschied zur nativen
+Oracle-Sequenz gefunden** — sowohl nativ als auch unter Qt liefert `resize`
+während `maximize`d `maximized=#f` und die tatsächlich angeforderte Größe (350×250,
+`GetWindowRect` bestätigt ~366×289 inkl. Fensterrahmen) danach; Qt scheint
+`resize()` bei gesetztem `Qt::WindowMaximized`-Bit ebenso wie win32 implizit als
+Signal zu behandeln, das den Maximize-Zustand aufhebt. **Keine Divergenz, kein
+zusätzlicher Guard in `qt/frame.rkt`s `set-size` nötig** — anders als zunächst
+angenommen ist das kein offener Punkt, der durch diesen Fix neu entstanden wäre.
+
+**Nicht getestet (bewusst, außerhalb des Scopes dieser Messung):** Kombinationen
+(z. B. `fullscreen` während bereits `maximize`d — mit der `setWindowState`-Korrektur
+technisch unabhängige Bits im selben Bitfeld, aber nicht geprüft, ob/wie Qt das
+visuell darstellt), Fenster-Chrome-Interaktion (Doppelklick auf die Titelleiste,
+OS-Minimize-Button) — nur die programmatische API wurde getestet.
+
+**Wichtiger Nebeneffekt für Drei-Maschinen-Sync (Regel 7):** dies ist die erste
+Änderung dieser Sitzung, bei der das gui-Submodul **hart von einer neuen Shim-ABI
+abhängt** — `wx/qt/utils.rkt`s `get-ffi-obj`-Aufrufe für die sechs neuen Funktionen
+werfen beim Modul-Laden, wenn `racketqtshim` sie nicht exportiert. Nach einem Pull
+auf macOS/Linux **muss** `qt-shim` neu gebaut werden, **bevor** der Fork überhaupt
+lädt — sonst bricht `racket/gui` unter `PLT_QT=1` komplett (kein Modul-Ladefehler
+mit Fallback, sondern ein harter FFI-Fehler), nicht nur dieses eine Feature.
+
+**Entscheidung:** behalten (nach der Korrektur), kein Rollback nötig — der erste
+Entwurf wurde vor jedem Commit verworfen, es existiert kein Fehlversuch in der
+Historie.

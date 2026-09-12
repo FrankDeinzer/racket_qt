@@ -392,6 +392,66 @@ void* shim_window_get_content_widget(void* win)
     return static_cast<RacketWindow*>(win)->centralWidget();
 }
 
+// ---- window state (maximize/iconize/fullscreen) --------------------------
+// docs/HACKING.md §26/§27: wx/qt/frame.rkt previously had no override for
+// these at all (hardcoded #f/no-op base from window.rkt).
+//
+// Uses setWindowState() with explicit Qt::WindowStates bit manipulation,
+// NOT the showMaximized()/showMinimized()/showFullScreen()/showNormal()
+// convenience methods -- those also call setVisible(true) internally,
+// which would force a not-yet-shown frame onto the screen the moment
+// `maximize`/`iconize`/`fullscreen` is called (confirmed empirically: a
+// frame%'s own is-shown? stayed #f, as expected from Racket-side
+// bookkeeping alone, while the real HWND was visible on screen -- exactly
+// the maximize-before-show flow mred/private/mrtop.rkt uses via
+// position-for-initial-show). Toggling one bit and leaving the others
+// alone also means `iconize #f` restores whatever state (e.g. maximized)
+// was set before iconizing, instead of clobbering it back to plain
+// windowed -- matching win32's SW_RESTORE-from-WINDOWPLACEMENT semantics
+// (win32/frame.rkt:596-602) instead of diverging from it. Still simpler
+// than win32's independent tracking (its `fullscreen`, win32/frame.rkt:
+// 627-673, does manual GWL_STYLE manipulation orthogonal to real maximize/
+// minimize) since Qt's three bits share one QWidget-native windowState().
+
+void shim_window_maximize(void* win, int on)
+{
+    auto* rw = static_cast<RacketWindow*>(win);
+    Qt::WindowStates st = rw->windowState();
+    if (on) st |= Qt::WindowMaximized; else st &= ~Qt::WindowMaximized;
+    rw->setWindowState(st);
+}
+
+int shim_window_is_maximized(void* win)
+{
+    return static_cast<RacketWindow*>(win)->isMaximized() ? 1 : 0;
+}
+
+void shim_window_iconize(void* win, int on)
+{
+    auto* rw = static_cast<RacketWindow*>(win);
+    Qt::WindowStates st = rw->windowState();
+    if (on) st |= Qt::WindowMinimized; else st &= ~Qt::WindowMinimized;
+    rw->setWindowState(st);
+}
+
+int shim_window_is_iconized(void* win)
+{
+    return static_cast<RacketWindow*>(win)->isMinimized() ? 1 : 0;
+}
+
+void shim_window_fullscreen(void* win, int on)
+{
+    auto* rw = static_cast<RacketWindow*>(win);
+    Qt::WindowStates st = rw->windowState();
+    if (on) st |= Qt::WindowFullScreen; else st &= ~Qt::WindowFullScreen;
+    rw->setWindowState(st);
+}
+
+int shim_window_is_fullscreen(void* win)
+{
+    return static_cast<RacketWindow*>(win)->isFullScreen() ? 1 : 0;
+}
+
 // ---- geometry -----------------------------------------------------------
 
 // Sets absolute position and size of any child QWidget.
