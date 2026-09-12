@@ -132,19 +132,40 @@ fixen). Details: `docs/HACKING.md` §24.
   sich in praktisch jeder `wx/qt`-Widget-Klasse außer `canvas%`/`frame%`. **„Befund ist
   lokal und klein" bestätigt** — nicht das riskantere Pump-Modell. Kein Fix (Diagnose-
   Charakter). Details: `docs/HACKING.md` §23.3.
-- **Commits:** keine (nur Dokumentation — dieser Eintrag, `docs/HACKING.md` §23.3/§25,
-  `docs/2026-09-11_report-win.md`, `CLAUDE.md`-PATH-Zeile). Kein Submodul-Push, keine
-  Sync-Rückfrage fällig.
+- **Teil 4 (auf Nutzerfrage „gibt es noch mehr Stellen mit falschen Konstanten?",
+  zunächst nur dokumentiert):** systematischer Vergleich von `wx/qt/window.rkt` gegen
+  alle drei anderen Backends (win32/cocoa/gtk) zeigt: `is-shown-to-root?`/
+  `is-enabled-to-root?` sind unter Qt **nicht rekursiv** (nur lokales Flag, keine
+  Elternketten-Prüfung) — alle anderen Backends implementieren beide korrekt
+  rekursiv. Das ist die tiefere Root-Cause hinter §23.3s `is-shown? #t`-Befund, nicht
+  nur ein Einzelfall: Shared Code (`mred/private/wxwindow.rkt`, `wxpanel.rkt` —
+  **derselbe Code wie §24.5/§25.2** —, `helper.rkt`, `wxme/editor-canvas.rkt`) hängt
+  direkt von korrekter Rekursion ab. Zusätzlich zwei verwandte Lücken gefunden:
+  Enable-Kaskade (`parent-enable`) ist unter Qt ein reiner No-op, kein Widget
+  überschreibt `enable` zur Weitergabe an Kinder; `wx/qt/frame.rkt` überschreibt
+  `maximize`/`is-maximized?`/`iconized?`/`fullscreen`/`fullscreened?` gar nicht (erbt
+  hartcodierte `#f`/No-op-Basis), während win32 dafür echte Zustandsverfolgung hat.
+  Ungeprüfte Hypothese: der in §24.5 zurückgerollte Scrollbar-Fix könnte (auch) an
+  diesem `is-shown-to-root?`-Defekt gescheitert sein, da `editor-canvas.rkt` ihn im
+  Render-Pfad abfragt — nicht verifiziert. Details: `docs/HACKING.md` §26. Fix-Versuch
+  für `is-shown-to-root?`/`is-enabled-to-root?` folgt direkt im Anschluss (auf
+  Nutzerwunsch: „erst dokumentieren, dann fixen versuchen").
+- **Commits:** `1abc1f2` (Phase 2+3), `783152a` (Colors-Tab §25.2), `7d3ac9b` (§23.3
+  `is-shown?`-Lokalisierung, nach Advisor-Korrektur nachgeschärft) — alle gepusht nach
+  `origin/main` (Nutzer-Bestätigung je Regel 7 eingeholt). Kein Submodul-Push in
+  diesen dreien (nur Dokumentation, kein `wx/qt`-Code geändert).
 - **Nächster Schritt:** §21.7 (Resize/Reflow) bleibt ein zentraler offener Block für
   eine eigene künftige Session — der neue Preferences-Button-Zeilen-Befund liefert
   dafür einen zusätzlichen, sehr konkreten Reproduktionsfall (kleinste
   Preferences-Fenstergröße, kein manueller Resize nötig). Der Scroll-Block (§24.5,
   Editor-Canvas-Scrollbars) hat jetzt **zwei** unabhängige Reproduktionsfälle (Editor
-  + Colors-Tab „Color Schemes") für dieselbe eigene künftige Session. Colors-Tab
+  + Colors-Tab „Color Schemes") für dieselbe eigene künftige Session, plus eine neue,
+  ungeprüfte Verbindungshypothese zu §26. Colors-Tab
   „rechte Spalte" ist **nicht** geschlossen — sie ist Teil des offenen Scroll-Blocks.
   `test-dock-size` (§23) hat jetzt eine präzise lokalisierte Root-Cause (`wx/qt`-weites
-  `is-shown?`-Muster über mehrere Widget-Klassen) — Fix bleibt eigene künftige Session,
-  aber deutlich risikoärmer eingeschätzt als zuvor angenommen (kein Pump/Reentrancy-Terrain).
+  `is-shown?`-Muster über mehrere Widget-Klassen), jetzt vertieft auf die fehlende
+  `is-shown-to-root?`/`is-enabled-to-root?`-Rekursion (§26) — Fix-Versuch dafür direkt
+  im Anschluss dieser Sitzung.
 
 ---
 

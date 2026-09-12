@@ -2389,3 +2389,114 @@ bereithalten, keinen davon als zuverlässig annehmen.
 
 Details/Methode: `docs/2026-09-11_report-win.md`, Abschnitt „Nachtrag 2026-09-12
 (Teil 2)". Kein Commit — Root-Cause ist Shared Code, Fix bewusst nicht versucht.
+
+## 26. `is-shown-to-root?`/`is-enabled-to-root?` nicht rekursiv unter Qt — systemische Vertiefung von §23.3 (2026-09-12, nur Messung)
+
+**Kontext:** Auf Nutzerfrage nach §23.3 („gibt es noch mehr Stellen, die konstante Werte
+zurückgeben, obwohl sie das nicht sollten?"), rein durch Code-Lesen, kein Live-Test.
+
+**Befund 1 — `wx/qt/window.rkt:75-76` ist nicht rekursiv:**
+```racket
+(define/public (is-shown-to-root?)   shown?)
+(define/public (is-enabled-to-root?) enabled?)
+```
+Beide geben nur das **lokale** Flag zurück, ohne die Elternkette zu prüfen. Zum
+Vergleich implementieren **alle drei anderen Backends** dieselben Methoden korrekt
+rekursiv:
+- `wx/win32/window.rkt:323-325`: `(and shown? (send parent is-shown-to-root?))`,
+  `is-enabled-to-root?` (Zeile 320-321) analog über ein kaskadiertes
+  `parent-enabled?`-Feld.
+- `wx/cocoa/window.rkt:705-717`: rekursiv über `(send parent is-shown-to-root?)`
+  bzw. `(send parent is-enabled-to-root?)`.
+- `wx/gtk/window.rkt:708-749`: rekursiv via `augment`/`inner`-Pattern.
+
+Qt ist die einzige der vier Plattformen, bei der diese beiden Methoden nicht die
+tatsächliche Vorfahren-Sichtbarkeit/-Aktivierung widerspiegeln — nur den eigenen,
+lokalen Zustand des Widgets selbst.
+
+**Wichtige Fallstricke für einen künftigen Fix (Rekursion allein reicht nicht):**
+- **Terminierung an der Wurzel:** win32s rekursive `is-shown-to-root?`
+  (`window.rkt:323-325`, `(and shown? (send parent is-shown-to-root?))`) terminiert,
+  weil `win32/frame.rkt:406` sie für `frame%` auf `(is-shown?)` überschreibt (Frames
+  haben keinen sinnvollen Eltern-Bezug für diese Kette). `wx/qt/frame.rkt` hat
+  **keine eigene** `is-shown-to-root?`-Override — es überschreibt stattdessen
+  `is-shown?`, um `is-shown-to-root?` aufzurufen (`frame.rkt:55`). Würde die Basis in
+  `window.rkt` unverändert rekursiv gemacht, ergäbe sich für `frame%` ein Zirkel
+  (`is-shown?` → `is-shown-to-root?` → rekursiv über `parent`, der bei einem
+  Top-Level-Frame `#f` oder ein anderer Frame ist) statt einer Terminierung. Ein
+  Fix braucht daher **zwei** Änderungen, nicht eine: Rekursion in `window.rkt` **und**
+  eine eigene, terminierende `is-shown-to-root?`-Override in `qt/frame.rkt`
+  (analog zu win32s Zeile 406) — `frame.rkt:55`s bisherige `is-shown?`-Override muss
+  dabei entweder entfallen oder so umgebaut werden, dass sie nicht zirkulär wird.
+- **Rekursion allein fixt `test-dock-size` vermutlich nicht:** `panel%`s `is-shown?`
+  bleibt (§23.3) hartcodiert `#t`, und `panel%`s `direct-show` ist ein No-op
+  (`panel.rkt:57`) — das lokale `shown?`-Feld eines Panels dürfte also nie den
+  echten Zustand tragen. Eine rekursive `is-shown-to-root?` würde bei einem Panel in
+  der Kette weiterhin auf dessen (potenziell falsches) lokales Flag treffen. Diese
+  Messung/dieser Fix-Versuch ist daher bewusst auf die Rekursion selbst beschränkt
+  (Korrektheitsverbesserung), nicht auf die Entfernung der Einzel-Widget-`is-shown?`-
+  Overrides — letzteres hätte einen deutlich größeren Blast-Radius (`editor-canvas.rkt`
+  gated Rendering darauf, vgl. §24.5s Regression) und wird hier nicht versucht.
+
+**Befund 2 — Enable-Kaskade fehlt zusätzlich vollständig:** `wx/qt/window.rkt:89`
+definiert `parent-enable` als reinen No-op (`(void)`), und **kein** `wx/qt`-Widget
+überschreibt `enable`, um es an Kinder weiterzureichen (per Grep über alle
+`wx/qt/*.rkt` bestätigt — einzige Treffer für ein `enable`-artiges Override sind
+`menu.rkt`s `(enable id on?)` für Menüeinträge, unbeteiligt) — win32 kaskadiert das
+echt: `win32/panel.rkt:28-41`s `register-child` seedet neu hinzukommende Kinder per
+`(send child parent-enable (is-enabled-to-root?))`, und `win32/panel.rkt:43-46`
+überschreibt `internal-enable` (aufgerufen aus der Basis-`enable`-Methode,
+`win32/window.rkt:301-317`, inkl. `EnableWindow`-Aufruf), um den neuen Zustand an
+alle registrierten Kinder weiterzureichen. Praktische Auswirkung nicht abschließend
+geklärt: Qt könnte
+Disable-Zustand auf nativer QWidget-Ebene selbständig kaskadieren (anders als GDI/
+win32, das dafür expliziten Code braucht) — der Racket-seitige Query
+(`is-enabled-to-root?`) würde aber trotzdem falsch antworten, unabhängig vom
+nativen Verhalten.
+
+**Befund 3 — Frame-Zustand fehlt komplett:** `wx/qt/frame.rkt` überschreibt
+`maximize`, `is-maximized?`, `iconized?`, `fullscreen`, `fullscreened?` **nicht** —
+erbt die hartcodierten Basis-Stubs aus `window.rkt` (`#f`/No-op für alle fünf).
+`wx/win32/frame.rkt` hat für alle fünf echte, laufzeitverfolgte Implementierungen
+(Zeilen 584/596/608 u. a.). Unter Qt bewirkt `(send frame maximize #t)` also nichts,
+`is-maximized?` liefert unabhängig vom tatsächlichen Fensterzustand immer `#f`.
+
+**Warum das mehr ist als ein Detail — Shared-Code-Abhängigkeit bestätigt:**
+`is-shown-to-root?`/`is-enabled-to-root?` sind kein Qt-internes Implementierungsdetail,
+sondern werden von **geteiltem Code** direkt konsumiert (per Grep über
+`mred/private/*.rkt` bestätigt, nicht nur `wx/*`):
+- `mred/private/wxwindow.rkt:17,27,63,154-155` — Glue-Layer praktisch jedes Widgets;
+  berechnet daraus `visible?`/`active?` für die `on-visible`/`on-active`-Callback-
+  Dispatch.
+- `mred/private/wxpanel.rkt:45-46` — **derselbe Code wie in §24.5/§25.2** — definiert
+  `is-shown-to-root?`/`is-enabled-to-root?` für einen Panel-Mixin-Kontext als
+  `(send parent is-shown-to-root?)`/`(send parent is-enabled-to-root?)` und verlässt
+  sich also direkt auf korrekte Rekursion im Backend.
+- `mred/private/helper.rkt:297,303-304` — geteilte Sichtbarkeits-/Dispatch-Utility.
+- `mred/private/wxme/editor-canvas.rkt:95,170,454,1310` — die Editor-Canvas-
+  Rendering-Logik selbst, u. a. ein Aufruf im Render-relevanten Pfad (Zeile 1310).
+- Zusätzlich lokal in `wx/qt/window.rkt:211,220` (`dispatch-on-char`/
+  `dispatch-on-event`): Event-Dispatch an Kinder wird über `is-enabled-to-root?`
+  gegatet — ohne Elternketten-Prüfung dispatcht Qt Events an Kinder eines
+  deaktivierten Vorfahren, wo win32/cocoa/gtk das korrekt unterbinden würden.
+
+**Ungeprüfte, aber naheliegende Hypothese — mögliche Verbindung zu §24.5:** der in
+§24.5 (2026-09-11) zurückgerollte Scrollbar-Fix-Versuch hatte zur Folge, dass der
+Editor-Inhalt komplett weiß gemalt wurde. `editor-canvas.rkt` fragt an mehreren
+Stellen genau das hier als kaputt identifizierte `is-shown-to-root?` ab. Es ist
+möglich, dass die damalige Regression (auch) hierauf zurückgeht, statt (nur) auf den
+`show-scrollbars`/`set-scrollbars`-Stubs. **Nicht verifiziert** — reine Hypothese für
+eine künftige Fix-Session, aus der Grep-Korrelation abgeleitet, nicht aus einem
+tatsächlichen Nachvollzug des damaligen Fix-Versuchs.
+
+**Einordnung:** §23.3s Befund (`wx/qt/panel.rkt:58`s hartcodiertes `is-shown? #t`)
+bleibt korrekt, ist aber ein **Symptom**, nicht die tiefste Ursache — selbst wenn
+einzelne Widget-Overrides wie `panel%`s `is-shown?` künftig entfernt würden, bliebe
+die Elternketten-Rekursion in der Basis (`is-shown-to-root?`/`is-enabled-to-root?`)
+kaputt und müsste separat gefixt werden. Alle drei Befunde dieses Abschnitts sind
+`wx/qt`-lokal (keine Shared-Code-Änderung nötig für einen Fix selbst), nur ihre
+**Konsumenten** liegen teils in Shared Code.
+
+**Entscheidung:** auf Nutzerwunsch zunächst nur dokumentiert (dieser Abschnitt),
+Fix-Versuch für `is-shown-to-root?`/`is-enabled-to-root?` folgt danach in derselben
+Sitzung.
