@@ -2193,3 +2193,61 @@ Fund, Root-Cause nicht untersucht.
 
 Commits: gui-Submodul `7d1231e0` (additive FFI-Deklarationen); Umbrella `a721ac5`
 (additive Shim-Primitiven), `0e8d308` (Report).
+
+## 25. Preferences-Sweep: Editing/Warnings/General/Profiling/Tools/Background Expansion — Windows (2026-09-11_prompt, Fortsetzung 2026-09-12)
+
+**Kontext:** `docs/2026-09-11_prompt.md` Phase 2+3. Voller Bericht:
+`docs/2026-09-11_report-win.md`, Abschnitt „Fortsetzung 2026-09-12". Sechs zuvor nie
+durchgesehene Preferences-Kategorien systematisch gegen den nativen Dialog (win32, kein
+`PLT_QT`) verglichen. Kriterium: Funktion/Vollständigkeit, nicht Pixelgleichheit.
+
+**Ergebnis: keine der sechs Kategorien zeigt einen funktionalen Defekt.** Details je
+Kategorie (Sub-Tabs, geprüfte Control-Typen) in der Tabelle im Report. Bemerkenswert:
+
+- Der Slider-Value-Label-Fix aus §24.2 (Font-Size-Tab) gilt generisch für **alle**
+  `slider%`-Instanzen — im General-Tab zeigt „Number of recent items" korrekt „50".
+- `canvas%`-eigenes `on-paint`-Zeichnen funktioniert (Profiling-Tab: Farbverlaufsleiste
+  mit überlagertem Text).
+- Listbox→Textfeld-Live-Sync funktioniert (Tools-Tab: Klick auf einen Tool-Eintrag
+  aktualisiert das `Tool:`-Feld).
+- `choice%`-Dropdown-Popups öffnen/schließen sauber (Background-Expansion-Tab).
+- Deaktivierter (ausgegrauter) Zustand eines abhängigen Textfelds wird korrekt
+  angezeigt (Editing → General Editing → „Maximum character width guide").
+
+### 25.1 Neuer Befund: Preferences-Dialog öffnet mit initial unerreichbarer Button-Zeile — identifiziert als weitere Ausprägung von §21.7
+
+**Kein neuer Fix-Versuch — dieser Befund gehört zum bereits als OUT OF SCOPE
+klassifizierten §21.7-Cluster (Resize/Reflow).**
+
+Gemessen: der Preferences-Dialog öffnet unter `PLT_QT=1` bei unveränderter Größe mit
+**1076×741** (nativ: 724×567, alle Buttons sichtbar). Bei 1076×741 sind „OK"/„Undo
+Changes and Close"/„Revert All Preferences to Defaults" nicht sichtbar (unbemalter/
+schwarzer Bereich am unteren Fensterrand). Drei Diagnoseschritte: (1) Minimieren+Restore
+ändert nichts (kein reiner Stale-Paint-Fall); (2) programmatisches Vergrößern
+(`MoveWindow`, 900×1000) macht die Buttons bei fester Pixelposition (~y=751 relativ zum
+Client) sichtbar, unabhängig von der tatsächlichen Fensterhöhe; (3) **Klick-Test am
+unveränderten 1076×741-Fenster** (frischer Neustart) auf die proportional umgerechnete
+Button-Koordinate schließt den Dialog **nicht** — da 751 > 741, liegt die Button-Zeile
+beim Erststart vollständig außerhalb des sichtbaren Client-Bereichs, nicht bloß
+unbemalt-aber-klickbar (der schwarze Bereich selbst ist ein separates, nicht
+untersuchtes Render-Artefakt, kein Beleg für „vorhanden, nur ungezeichnet"). Das deckt
+sich mit §21.7s Root Cause: Kind-Controls behalten ihre beim letzten `set-size`
+berechnete absolute Position, weil der native `resizeEvent`-Pfad seit dem dortigen
+Rollback komplett unverdrahtet ist. Neu an diesem Befund: bereits die **initiale**
+Default-Größe dieses Dialogs unter Qt liegt unterhalb der festen Button-Position — die
+Zeile ist **ab dem allerersten Öffnen**, ohne jede Nutzerinteraktion, unerreichbar
+(weder sichtbar noch klickbar), bis das Fenster manuell vergrößert wird.
+
+Ein Fix müsste entweder §21.7s Live-Resize-Verdrahtung reparieren (dort bereits zweimal
+zurückgerollt, riskant) oder die initiale Seed-Size dieses Dialogs korrigieren (Shared
+Code: `framework`s Preferences-Dialog-Konstruktion) — beides fällt unter die für §21.7
+geltende OUT-OF-SCOPE-Klausel. Für den Sweep selbst wurde die Fenstergröße einmalig
+manuell auf 1076×860 gesetzt (Buttons dadurch erreichbar).
+
+**Betriebsdisziplin-Nebenfund:** die `MoveWindow`-Diagnoseschritte änderten
+`racket-prefs.rktd` (SHA-256-Hash-Diff trotz „Undo Changes and Close" — vermutlich
+Fenstergeometrie wird sofort persistiert, unabhängig vom Dialog-Ergebnis). Aus dem
+Sitzungsbeginn-Backup zurückgespielt, kein Datenverlust. Für künftige Sessions: Fenster-
+Resizes an Preferences-artigen Dialogen bergen dasselbe Präferenz-Drift-Risiko wie
+Tippen im Editor — vor jeder GUI-Automatisierungssitzung `racket-prefs.rktd` sichern und
+den Hash danach prüfen.

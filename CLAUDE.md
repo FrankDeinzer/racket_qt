@@ -65,10 +65,12 @@ cmake --build qt-shim/build/linux-x64
 
 ## Run / Smoke-Test
 
-**Windows:**
+**Windows:** `racket` liegt seit der 9.3-Migration (2026-09-11, §24.1) auf dieser
+Maschine **nicht** im Machine- oder User-PATH — immer vollen Pfad verwenden oder
+`$env:PATH` wie unten setzen.
 ```powershell
 $env:PLT_QT = "1"
-$env:PATH   = "C:\Qt\6.11.0\msvc2022_64\bin;" + $env:PATH
+$env:PATH   = "C:\Qt\6.11.0\msvc2022_64\bin;C:\Program Files\Racket;" + $env:PATH
 racket examples/hello.rkt
 ```
 
@@ -78,6 +80,8 @@ $env:PLT_QT = "1"
 $env:PATH   = "C:\Qt\6.11.0\msvc2022_64\bin;" + $env:PATH
 & "C:\Program Files\Racket\DrRacket.exe"
 ```
+Voller Pfad zu `DrRacket.exe` — deshalb hier kein `C:\Program Files\Racket`-Eintrag im
+`$env:PATH` nötig (anders als beim bloßen `racket`-Aufruf oben).
 Kein `-S`-Flag mehr nötig — der Fork ersetzt die System-`gui-lib` per Link
 (`raco pkg update --link third_party/gui/gui-lib`, einmalig, braucht Admin-Rechte).
 Gate-Test dafür: DrRacket **ohne** `PLT_QT` muss weiterhin nativ starten (kein
@@ -135,7 +139,7 @@ referenziert).
 | E – `file-selector` (get-file/put-file, Qt-eigener Dialog) | ✅ 2026-07-12, alle 3 Plattformen; Qt-eigen×nativ-Matrix (3×2) komplett 2026-07-13 (§19) |
 | E – `choice%`/`radio-box%`/`slider%` echt | ✅ 2026-07-13, alle 3 Plattformen (§20) |
 | E – `tab-panel%`/`canvas-panel%`/`group-panel%` echt (Widget-Breite abgeschlossen) | ✅ 2026-07-14, alle 3 Plattformen (§21; macOS via `tab-panel%` real + isolierter Proben für `canvas-panel%`/`group-panel%`, §21.8) |
-| E – Preferences Ende-zu-Ende | 🟡 Windows + Linux: Dialog öffnet + navigiert (Tabs/Font/Colors/Browser bestätigt). Von den 4 §21.6-Einzelbefunden sind 2 gefixt (Font-Size-Slider-Zahl; Colors-Tab-Rahmen — Rahmen-Teil, rechte Spalte weiterhin offen, 2026-09-11 Windows, §24.2/§24.3), Editor-Canvas-Scrollbars root-caused + Fix zurückgerollt/geparkt (2026-09-11 Windows, §24.5), Resize/Reflow-Bug weiterhin offen (§21.7); restliche Preferences-Kategorien nicht durchgesehen. **macOS: Menüzugang gefixt** (§22, 2026-07-14) — Preferences erscheint jetzt im Edit-Menü und öffnet den echten Dialog; Restbefunde vermutlich auch hier relevant, nicht erneut durchgesehen |
+| E – Preferences Ende-zu-Ende | 🟡 Windows: alle 9 Kategorien durchgesehen (Font/Colors/Browser bereits vorher, Editing/Warnings/General/Profiling/Tools/Background Expansion 2026-09-12, §25) — **keine der sechs neu geprüften Kategorien zeigt einen funktionalen Defekt**. Von den 4 §21.6-Einzelbefunden sind 2 gefixt (Font-Size-Slider-Zahl — generalisiert auf alle `slider%`, §24.2; Colors-Tab-Rahmen — Rahmen-Teil, rechte Spalte weiterhin offen, §24.3), Editor-Canvas-Scrollbars root-caused + Fix zurückgerollt/geparkt (§24.5), Resize/Reflow-Bug (§21.7) weiterhin offen — neuer konkreter Reproduktionsfall: Dialog öffnet initial mit unerreichbarer OK/Undo/Revert-Button-Zeile (§25.1). Linux: Stand unverändert seit 2026-07-13/14 (nur Tabs/Font/Colors/Browser bestätigt, sechs Kategorien dort nicht durchgesehen). **macOS: Menüzugang gefixt** (§22, 2026-07-14) — Preferences erscheint jetzt im Edit-Menü und öffnet den echten Dialog; Restbefunde vermutlich auch hier relevant, nicht erneut durchgesehen |
 | Windows Racket 9.2 → 9.3 Migration | ✅ 2026-09-11 (`docs/HACKING.md` §24.1) — kein gui-lib/draw-lib-Versionsangleich nötig, `raco pkg update --link` (Nutzer-elevated), Gate-Test (nativ ohne `PLT_QT`) grün |
 | htdp-Lackmustest (`2htdp/image`, big-bang, `test-engine`) | ✅ **DrRacket-auf-Qt trägt htdp** — auf allen drei Plattformen validiert (Windows/Linux 2026-07-14, macOS 2026-09-10, §23/§23.1/§23.2). `test-engine`-Dock-Crash (`test-dock-size`) reproduziert bei 1→2-Tab-Sequenz **10/10 unter Qt, 0/10 nativ** (Windows 4/4+3/3, Linux 3/3+3/3, macOS 3/3+3/3) — **kein htdp-lib-Bug, sondern echte `wx/qt`-Lücke**, auf allen drei Plattformen bestätigt/generalisiert. Root-Cause bis `on-tab-change`-Dispatch eingegrenzt, bester Fix-Ansatzpunkt `wx/qt/queue.rkt`s 50ms-Poll-Pump (kein echtes OS-Wakeup, `docs/ARCHITECTURE.md` §3) — **Fix selbst bleibt offen, eigene künftige Session**. `2htdp/universe` big-bang: Kern-Wette „Racket treibt, Pump blockiert nie" auf allen drei Plattformen bestätigt. Auf Linux zunächst nur über `racket` direkt möglich (DrRacket-Pfad durch ein `-S`/errortrace-Package-Problem blockiert, kein Qt-Bezug) — nach dem Linux-DrRacket-Link läuft big-bang auch über echtes DrRacket unter Qt sauber; auf macOS trat dieses Problem trotz weiterhin genutztem `-S`-Rezept gar nicht erst auf. `2htdp/image`: Windows + macOS einwandfrei (alle 5 Bilder sofort korrekt); Linux Interactions-REPL rendert reproduzierbar (3/3) nur die ersten 4 Top-Level-Bildwerte einer `Run`-Sitzung, danach dauerhaft nichts mehr — Pump-Hypothese widerlegt (Poll läuft unbedingt alle 50ms, erklärt keine Mehrminuten-Hänger), kein Scroll-/Compute-/Deadlock-Problem, vermutlich `framework`-Interactions-Insert-Pfad oder Qt-Canvas-Kapazitätsgrenze (§23.1), auf macOS nicht reproduziert — Fix offen für künftige Session (ggf. Shared-Code-Scope, vor Fix-Versuch Rückfrage). macOS lief auf Racket **v9.3** statt v9.2 (Homebrew-Auto-Update 2026-08-19, s. Umgebungstabelle + §23.2) — Fork neu kompiliert, Ergebnis unverändert. |
 

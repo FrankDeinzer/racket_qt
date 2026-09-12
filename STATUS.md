@@ -61,13 +61,54 @@ fixen). Details: `docs/HACKING.md` §24.
   `7d1231e0`. Umbrella (`main`) `eda3b07` (Phase-0-Doku), `ea19095`, `a721ac5`, `0e8d308`,
   `b2bb7f7` (Pointer-Bump), plus `docs/HACKING.md` §24, `CLAUDE.md` (Checkpoint +
   Umgebung + Nebenbefunde), dieser Eintrag.
-- **Nächster Schritt:** Phase 2 (systematischer Sweep der restlichen
-  Preferences-Kategorien: Editing/Warnings/General/Profiling/Tools/Background Expansion)
-  und Phase 3 (Regressions-Gate gegen die Phase-0-Baseline) stehen noch aus — eigene
-  künftige Session. Editor-Canvas-Scrollbars: nächster Ansatzpunkt ist die
+- **Nächster Schritt (Stand 2026-09-11, überholt s. Eintrag 2026-09-12 unten):** Phase 2
+  und Phase 3 standen noch aus. Editor-Canvas-Scrollbars: nächster Ansatzpunkt ist die
   Trigger-Reihenfolge zwischen der Qt-nativen Geometrieänderung (läuft außerhalb von
   Racket-`set-size`) und dem Editor-eigenen Content-Scrollbar-Rebuild. Resize/Reflow-Bug
   (§21.7) und Colors-Tab rechte Spalte weiterhin offen, je eigene Session.
+
+---
+
+## Session 2026-09-12 (Windows, Fortsetzung von 2026-09-11) — Preferences-Sweep (Phase 2) + Regressions-Gate (Phase 3): keine neuen Fixes nötig, ein Befund dem §21.7-Cluster zugeordnet
+
+**Kontext:** `docs/2026-09-11_prompt.md` Phase 2+3. Voller Bericht:
+`docs/2026-09-11_report-win.md`, Abschnitt „Fortsetzung 2026-09-12". `docs/HACKING.md`
+§25.
+
+- **Vorbereitung:** CLAUDE.md-PATH-Nachtrag aus Phase 0 nachgeholt (war entgegen der
+  09-11-Notiz nicht gelandet — `racket` ist weiterhin nicht im Windows-PATH).
+  `racket-prefs.rktd` vor jeder GUI-Interaktion gehasht/gesichert (Notwendigkeit hat sich
+  bestätigt, s. u.).
+- **Phase 2:** alle sechs offenen Kategorien (Editing inkl. 4 Sub-Tabs, Warnings, General,
+  Profiling, Tools, Background Expansion) gegen nativ (win32) durchgesehen — **keine**
+  zeigt einen funktionalen Defekt. Bestätigt: der Slider-Value-Label-Fix aus §24.2
+  generalisiert auf alle `slider%`-Instanzen (General-Tab); `canvas%`-eigenes Zeichnen
+  (Profiling-Gradient), Listbox→Textfeld-Sync (Tools) und `choice%`-Dropdown-Popups
+  (Background Expansion) funktionieren.
+- **Neuer Befund (kategorieübergreifend, kein neuer Fix):** der Preferences-Dialog öffnet
+  unter `PLT_QT=1` initial bei 1076×741 — bei dieser Größe ist die Button-Zeile
+  (OK/Undo/Revert) unsichtbar, weil sie an einer festen Pixelposition (~y=751) hängt,
+  unabhängig von der tatsächlichen Fenstergröße. Messung (Minimieren/Restore +
+  kontrolliertes Vergrößern) ordnet die Ursache eindeutig dem bereits als OUT OF SCOPE
+  geführten §21.7-Cluster (Resize/Reflow, native `resizeEvent`-Verdrahtung seit dortigem
+  Rollback komplett fehlend) zu — kein neuer Fix-Versuch, konsequent mit der
+  OUT-OF-SCOPE-Klausel für §21.7.
+- **Nebenfund (Betriebsdisziplin):** `racket-prefs.rktd` änderte sich durch die
+  Diagnose-`MoveWindow`-Aufrufe trotz „Undo Changes and Close" (Fenstergeometrie wird
+  offenbar sofort persistiert) — aus dem Sitzungsbackup zurückgespielt, kein Datenverlust.
+  Für künftige Sessions als Präferenz-Drift-Risiko vermerkt (§25 in `docs/HACKING.md`).
+- **Phase 3:** Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ. Die fünf htdp-Proben wurden bewusst
+  **nicht** erneut gelaufen — `git status` zeigt für die gesamte Fortsetzung außer dem
+  CLAUDE.md-PATH-Nachtrag keine Codeänderung, ein Rerun ohne Diff hätte keine neue
+  Aussagekraft gehabt (Begründung im Report festgehalten).
+- **Commits:** keine (nur Dokumentation — dieser Eintrag, `docs/HACKING.md` §25,
+  `docs/2026-09-11_report-win.md`, `CLAUDE.md`-PATH-Zeile). Kein Submodul-Push, keine
+  Sync-Rückfrage fällig.
+- **Nächster Schritt:** §21.7 (Resize/Reflow) bleibt der zentrale offene Block für eine
+  eigene künftige Session — der neue Preferences-Button-Zeilen-Befund liefert dafür einen
+  zusätzlichen, sehr konkreten Reproduktionsfall (kleinste Preferences-Fenstergröße, kein
+  manueller Resize nötig). Colors-Tab rechte Spalte und Editor-Canvas-Scrollbars weiterhin
+  offen, unverändert gegenüber dem 09-11-Eintrag.
 
 ---
 

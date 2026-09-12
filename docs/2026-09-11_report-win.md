@@ -366,3 +366,160 @@ unabhängiger Bug**, kein Bezug zu diesem Fund. Root-Cause nicht untersucht
 **Commits:** gui-Submodul (nur additive `utils.rkt`-FFI-Deklarationen, kein
 `canvas.rkt`-Bezug, s. u.); Umbrella (nur additive `shim.cpp`-Scrollbar-
 Primitiven).
+
+---
+
+## Fortsetzung 2026-09-12 — Phase 2 (Preferences-Sweep) + Phase 3 (Regressions-Gate)
+
+**Ausgangslage:** Phase 0/1 waren zum Sessionende 2026-09-11 vollständig committet,
+gepusht und synchron (`git status` beider Repos clean, Submodul exakt auf
+`origin/qt-backend@7d1231e0`). Diese Fortsetzung deckt Phase 2 + 3 des Prompts ab.
+
+### Vorbereitung
+
+- **CLAUDE.md-Nachtrag:** die in Phase 0 angekündigte PATH-Korrektur der Windows-
+  Run-Rezepte war entgegen der Session-Notiz **nicht** in `CLAUDE.md` gelandet (bare
+  `racket ...` stand weiterhin da, `racket` ist nach wie vor nicht im Machine-/User-PATH,
+  verifiziert per `[Environment]::GetEnvironmentVariable`). Nachgeholt: Windows-Run-Rezept
+  ergänzt um einen Hinweis + `C:\Program Files\Racket` im gezeigten `$env:PATH`.
+- **Backup `racket-prefs.rktd`** vor jeder Interaktion (SHA-256 gehasht, Kopie im
+  Scratchpad) — Notwendigkeit hat sich bestätigt (s. u.).
+
+### Methode
+
+Zwei DrRacket-Starts insgesamt (nicht pro Kategorie): einmal nativ (kein `PLT_QT`) als
+Referenz, einmal unter `PLT_QT=1`. Automatisierung: PowerShell + .NET
+(`FindWindow`/`EnumWindows` über Fenstertitel statt `MainWindowHandle` — letzteres zeigte
+sich als unzuverlässig, sobald ein Dialog ein eigenes Top-Level-Fenster ist, s. Fund
+unten), Klicks über absolute Fenster-Offsets, `SetForegroundWindow` +
+`GetForegroundWindow`-Verifikation vor jeder Eingabe (wie am 2026-09-11 etabliert).
+Zuerst die native Kategorie-/Subtab-Struktur vollständig referenz-fotografiert, danach
+erst der Qt-Durchlauf — Kategorienliste (9 Tabs: Font, Colors, Editing, Warnings, General,
+Profiling, Browser, Tools, Background Expansion) auf beiden Seiten **identisch**, keine
+fehlende Kategorie.
+
+**Automatisierungs-Fund (methodisch, kein Produktbefund):** ein Preferences-Dialog ist ein
+eigenes Top-Level-Fenster, nicht das `MainWindowHandle` des `drracket`-Prozesses — ein
+Screenshot-/Klick-Helper, der über `Get-Process -MainWindowHandle` auflöst, trifft dann
+das falsche (oder ein verdecktes) Fenster. Helper auf `EnumWindows`+Fenstertitel-Suche
+umgestellt (`winutil.ps1`, Scratchpad). Zusätzlich bestätigt: ein neuer PowerShell-Prozess
+zwischen „Menü öffnen" und „Menüpunkt klicken" lässt das offene Menü durch Fokusverlust
+zuklappen — Menü-Navigationsschritte müssen in **einem** ununterbrochenen Skript-Aufruf
+laufen.
+
+### Phase 2 — Bestandsaufnahme der sechs Kategorien
+
+Kriterium wie im Prompt: Funktion/Vollständigkeit, nicht Pixelgleichheit.
+
+| Kategorie | Sub-Tabs | Ergebnis |
+|---|---|---|
+| **Editing** | Indenting, Square Bracket, General Editing, Racket | Vollständig funktional. Alle Listboxen (Begin-/Define-/Lambda-/For-fold-/Letrec-/Local-/Cond-like Keywords) inhaltsgleich zu nativ, `Add`/`Remove`-Buttons vorhanden, `Extra regexp`-Textfelder korrekt befüllt. Checkbox „Automatically adjust opening square brackets" korrekt in beiden Sub-Tabs (Square Bracket **und** Racket) vorhanden. **Bemerkenswert:** General Editing → „Maximum character width guide"-Textfeld zeigt korrekt den **deaktivierten** (ausgegrauten) Zustand, wenn die zugehörige Checkbox unchecked ist — Disabled-State-Weiterleitung funktioniert. Keine Befunde. |
+| **Warnings** | — | 7 Checkboxen, Check-Zustände 1:1 identisch zu nativ (`Ask about normalizing strings`/`Ask about clearing test coverage`/`Show the 'evaluation terminated' dialog` an, Rest aus). Keine Befunde. |
+| **General** | — | Slider „Number of recent items" zeigt den Zahlenwert („50") — bestätigt, dass der Befund-1-Fix (§24.2, Font-Size-Slider) sich auf **alle** `slider%`-Instanzen verallgemeinert, nicht nur den Font-Tab. Alle Checkboxen + zwei Radio-Gruppen („Automatically Reload Changed Files", „Printing Mode") korrekt. Keine Befunde. |
+| **Profiling** | — | Selbstgemalte Farbverlaufs-Leiste („Profiling Color Range", Grün→Rot-Gradient mit überlagertem Beispieltext `(define (whee) (whee))`) rendert korrekt — bestätigt, dass benutzerdefiniertes `on-paint`-Zeichnen auf einem `canvas%` unter Qt funktioniert. „Low"/„High"-Farbwahl-Buttons + Radiogruppe „Profiling Color Scale" korrekt. Keine Befunde. |
+| **Tools** | — | Listbox mit 20 Einträgen (scrollbar, geprüft: Scrollen per Mausrad funktioniert, alle Einträge erreichbar), Klick auf einen Eintrag (`Optimization Coach`) selektiert korrekt **und** aktualisiert das zugehörige `Tool:`-Textfeld live (`(lib "optimization-coach/tool.rkt")`) — Listbox→Textfeld-Sync funktioniert. Radiogruppe „Load the tool when DrRacket starts?" korrekt. Keine Befunde. |
+| **Background Expansion** | — | Checkbox + zwei weitere Checkboxen korrekt, drei `choice%`-Dropdowns (Show read-level/unbound-identifier/other errors) korrekt befüllt (`in the margin`/`with gold highlighting`); Dropdown-Popup öffnet und schließt sauber bei Klick (funktional getestet). Keine Befunde. |
+
+**Ergebnis Phase 2 (Kern):** Von den sechs Kategorien zeigt **keine** einen funktionalen
+Defekt (fehlendes/unbedienbares Control, falscher Wert, kaputter Zustandsabgleich). Alle
+Control-Typen, die in den §21.6-Einzelbefunden problematisch waren (`slider%` ohne
+Readout, `panel%` ohne Rahmen), sind in den Phase-1-Fixes bereits mit abgedeckt — dieser
+Sweep bestätigt das für zusätzliche Instanzen (General-Tab-Slider) und deckt keine neue
+Instanz derselben Klasse auf.
+
+### Phase 2 — Neuer Befund: Preferences-Dialog öffnet mit unerreichbarer Button-Zeile
+
+**Status: gemessen, keinem `wx/qt`-lokalen Fix zugeführt — geordnet als weitere
+Ausprägung des bereits geparkten §21.7 (Resize/Reflow-Bug), Triage-Regel 4 analog
+angewendet (kein spekulativer Fix an einer Shared-Code-Root-Cause).**
+
+**Beobachtung:** Beim allerersten Öffnen von Edit → Preferences unter `PLT_QT=1`
+(unveränderte Fenstergröße, kein manueller Resize durch den Nutzer/die Automatisierung)
+misst `GetWindowRect` **1076×741**. Bei dieser Größe sind „OK"/„Undo Changes and
+Close"/„Revert All Preferences to Defaults" **nicht sichtbar** — der untere
+Fensterbereich ist stattdessen unbemalt/schwarz. Nativ (win32, kein `PLT_QT`) öffnet
+derselbe Dialog bei **724×567** mit allen drei Buttons sichtbar.
+
+**Gemessen (3 Diagnoseschritte, kein neuer Zyklus nötig):**
+1. Minimieren+Restore ändert nichts (schließt einen reinen Stale-Paint-Cache-Fall aus).
+2. Programmatisches Vergrößern (`MoveWindow` auf 900×1000) macht „OK" und „Revert All
+   Preferences to Defaults" bei fester Pixelposition (~y=751 relativ zum Fenster-Client)
+   sichtbar — unabhängig von der tatsächlichen Fensterhöhe.
+3. **Klick-Test gegen das unveränderte 1076×741-Fenster** (frischer Neustart, kein
+   vorheriger Resize): Klick auf die proportional zur nativen Button-Position
+   umgerechnete Koordinate (698, 714) schließt den Dialog **nicht**. Da die in Schritt 2
+   gemessene feste Position (~y=751) **größer** ist als die Default-Fensterhöhe (741),
+   liegt die Button-Zeile beim Erststart vollständig **außerhalb** des sichtbaren
+   Client-Bereichs — nicht bloß unbemalt-aber-klickbar. Der schwarze Bereich am unteren
+   Fensterrand ist damit vermutlich ein separates, nicht weiter untersuchtes
+   Render-Artefakt und **kein** Beleg für „vorhanden, nur ungezeichnet"; Schritt 3 belegt
+   nur, dass an dieser Stelle nichts Klickbares liegt.
+
+   Das deckt sich mit der in §21.7 dokumentierten Root Cause: Kind-Controls behalten die
+   beim letzten `set-size` berechnete **absolute** Position; da der native
+   `resizeEvent`-Pfad seit dem §21.7-Rollback **komplett unverdrahtet** ist, reflowen sie
+   nie relativ zur tatsächlichen Fenstergröße. Neu an diesem Befund ist, dass bereits die
+   **initiale** Default-Größe dieses Dialogs unter Qt (1076×741) kleiner ist als die
+   Position der Button-Zeile (~751 px) — die Zeile ist damit **beim allerersten Öffnen**,
+   ganz ohne jede Nutzerinteraktion, unerreichbar (weder sichtbar noch klickbar), bis
+   jemand das Fenster manuell vergrößert. Root-Cause-Cluster: identisch zu §21.7, keine
+   neue Fehlerklasse.
+
+**Bewusst nicht verfolgt:** ein Fix würde entweder (a) §21.7s Live-Resize-Verdrahtung
+selbst reparieren (der dort dokumentierte, zweimal zurückgerollte, riskante Weg) oder
+(b) die initiale Seed-Size dieses spezifischen Dialogs korrigieren (Shared Code:
+`framework`s Preferences-Dialog-Konstruktion, nicht `wx/qt/`-lokal) — beides fällt unter
+die explizite OUT-OF-SCOPE-Klausel für §21.7 in dieser Session. Kein Fix-Versuch.
+
+**Funktionale Einordnung für die Bestandsaufnahme:** dieser Befund ist **kategorieübergreifend**
+(betrifft die Preferences-Dialog-Hülle, nicht eine der sechs Sweep-Kategorien selbst) und
+wurde daher oben in der Kategorien-Tabelle nicht mitgezählt — er beeinträchtigt potenziell
+**alle** neun Tabs gleichermaßen (die Button-Zeile ist unabhängig vom aktiven Tab
+betroffen). Für den Sweep selbst wurde die Qt-Fensterrahmengröße einmalig auf 1076×860
+vergrößert (Button-Zeile dadurch erreichbar), um alle Kategorien testen zu können.
+
+### Betriebsdisziplin-Fund: `racket-prefs.rktd` änderte sich trotz „Undo Changes and Close"
+
+Nach Abschluss des Qt-Durchlaufs (Dialog über „Undo Changes and Close" geschlossen, keine
+inhaltliche Einstellung bewusst verändert) unterschied sich der SHA-256-Hash von
+`racket-prefs.rktd` vom Backup-Hash. Wahrscheinlichste Ursache: die programmatischen
+`MoveWindow`-Aufrufe während der Diagnose des Button-Zeilen-Befunds lösten (wie bei
+`framework`-Fenstern häufig) eine **sofortige**, nicht erst bei OK greifende Persistierung
+der Dialog-Fenstergröße aus — „Undo Changes and Close" bezieht sich nur auf
+Preference-**Werte**, nicht auf Fenstergeometrie. **Kein Sicherheitsproblem** (Backup
+griff wie geplant), aber ein Hinweis für künftige Sessions: Fenstergeometrie-Manipulation
+an Preferences-artigen Dialogen zählt zum selben Diszipilnrisiko wie Tippen im
+Definitions-Puffer und braucht denselben Hash-Vergleich/Restore-Schutz. Backup vor dem
+Regressions-Gate zurückgespielt (Hash danach wieder identisch zum Vor-Sweep-Stand).
+
+### Phase 3 — Regressions-Gate
+
+- `raco test tests/smoke.rkt` unter `PLT_QT=1`: **3/3 grün**.
+- `raco test tests/smoke.rkt` **ohne** `PLT_QT`: **3/3 grün** (Nativ-Gate weiterhin
+  bestanden — der 9.3-Link hält).
+- **Die fünf htdp-Proben aus 0.10 wurden in dieser Fortsetzung bewusst nicht erneut
+  gelaufen:** `git status` in Umbrella **und** Submodul zeigt für die gesamte Phase 2
+  ausschließlich `CLAUDE.md` (PATH-Nachtrag) als Änderung — kein `wx/qt/`-, `shim.cpp`-
+  oder `gui-lib`-Byte hat sich seit der in Phase 0 gemessenen Baseline verändert. Ohne
+  Code-Diff kann keine Regression gegenüber der 0.10-Baseline entstanden sein; ein
+  vollständiger Proben-Rerun hätte nur Automatisierungszeit gekostet, ohne neue
+  Aussagekraft. Diese Begründung wird hier explizit festgehalten, damit sie in der
+  nächsten Session nachvollziehbar ist.
+- **Musterabgleich über alle Befunde dieser Sitzung (2026-09-11 + Fortsetzung):** die
+  drei in Phase 1 gefixten Befunde (Font-Slider, Colors-Rahmen) und die zwei in Phase 2
+  bestätigten Negativ-/Ausschluss-Befunde (Toolbar-Timing nicht reproduziert,
+  Editor-Scrollbars geparkt) haben **keine** gemeinsame Root-Cause — mit einer Ausnahme:
+  der neue Button-Zeilen-Befund aus Phase 2 und der bereits bekannte §21.7 sind **dieselbe**
+  Ursache, keine zwei getrennte Funde.
+
+### Zusammenfassung Fortsetzung 2026-09-12
+
+- Phase 2: sechs Kategorien durchgesehen, **keine** neuen `wx/qt`-lokal fixbaren Defekte.
+- Ein neuer, präzise vermessener Befund (Preferences-Button-Zeile initial unerreichbar)
+  wurde dem bestehenden §21.7-Cluster zugeordnet, nicht neu bearbeitet (OUT OF SCOPE
+  bleibt OUT OF SCOPE, auch bei neuen Symptomen derselben Ursache).
+- `CLAUDE.md`-PATH-Nachtrag aus Phase 0 nachgeholt.
+- Phase 3: beide Regressions-Gates grün, kein Code seit der 0.10-Baseline verändert.
+- **Keine Commits in dieser Fortsetzung** (nur Dokumentation: dieser Report,
+  `docs/HACKING.md` §25, `STATUS.md`, `CLAUDE.md`) — kein Submodul-Push nötig, keine
+  Sync-Rückfrage (Regel 7) fällig, da keine Repo-Zeiger sich ändern.
