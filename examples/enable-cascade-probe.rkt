@@ -1,0 +1,23 @@
+#lang racket/gui
+; Diagnose-Probe (docs/2026-09-13_prompt.md Phase 2.2): misst, ob (send button enable #f)
+; das native Klick-Signal unterdrueckt (Vertragslueck-Fix in wx/qt/window.rkt's `enable`).
+(define clicks (box 0))
+(define f (new frame% [label "enable-cascade-probe"] [width 300] [height 150]))
+(define p (new vertical-panel% [parent f]))
+(define lbl (new message% [parent p] [label "clicks: 0"]))
+(define b (new button% [label "click-me"] [parent p]
+                [callback (lambda (b e)
+                            (set-box! clicks (add1 (unbox clicks)))
+                            (send lbl set-label (format "clicks: ~a" (unbox clicks))))]))
+(send f show #t)
+(eprintf "[probe] READY-FOR-CLICK-1 (enabled)\n")
+(sleep 8)
+(eprintf "[probe] clicks after window 1 (enabled) = ~a\n" (unbox clicks))
+(eprintf "[probe] enabled? before disable = ~a\n" (send b is-enabled?))
+(send b enable #f)
+(eprintf "[probe] enabled? after disable = ~a\n" (send b is-enabled?))
+(eprintf "[probe] READY-FOR-CLICK-2 (disabled)\n")
+(sleep 8)
+(eprintf "[probe] clicks after window 2 (disabled) = ~a\n" (unbox clicks))
+(eprintf "[probe] exiting\n")
+(exit (unbox clicks))

@@ -3027,3 +3027,121 @@ derselben Ursache — wichtiger Zusatzbefund für die künftige dedizierte
 Scroll-Fix-Session. Kein Fix-Versuch, Probe nur im Scratchpad.
 
 **Keine Commits** — alle vier Punkte waren reine Diagnose, keine Code-Änderung.
+
+## 30. Vertrags-Audit + Cluster-1-Fix: `is-shown?`-Hardcoding + Enable-Kaskade (Linux, 2026-09-13)
+
+**Kontext:** `docs/2026-09-13_prompt.md`, „Block A" — systematischer Audit aller
+`wx/qt/*.rkt`-Dateien gegen `wx/win32/`, `wx/gtk/`, `wx/cocoa/` auf drei Muster
+(hartcodierte Konstante statt echtem Zustand, No-op-Override wo native Backends echte
+Arbeit leisten, fehlender Override wo alle drei nativen Backends überschreiben). Voller
+Bericht: `docs/2026-09-13_report-linux.md` (enthält die vollständige Inventar-Tabelle,
+~20 Zeilen).
+
+**Ergebnis des Audits:** neben dem bereits bekannten `panel%`-`is-shown?`-Fund (§23.3)
+tragen **neun weitere Klassen** (`list-box%`, `tab-panel%`, `slider%`, `radio-box%`,
+`group-panel%`, `button%`, `choice%`, `check-box%`, `message%`) exakt dasselbe
+Copy-Paste-Muster (`(define/override (is-shown?) #t)`). Zusätzlich: `enable` in
+`wx/qt/window.rkt` rief nie `shim_widget_set_enabled` (nur `frame%`s `modal-enable` tat
+das, direkt und unabhängig) — ein Racket-seitig „deaktivierter" Button blieb nativ voll
+klickbar, da `button.rkt`s `click-fn` `is-enabled-to-root?` nie prüft.
+
+**Messung vor dem Fix (Kernpunkt, wie vom Prompt gefordert — Basis zuerst verifizieren,
+nicht blind Overrides löschen):** temporär instrumentiert (`PLT_QT_DEBUG_SHOWN`,
+`wx/qt/window.rkt`s `show`-Methode, seither vollständig entfernt) und eine
+Frame→`vertical-panel%`→`button%`-Probe (`examples/is-shown-probe.rkt`, bleibt als
+Diagnose-Hilfsmittel bestehen) gegen echtes DrRacket unter `PLT_QT=1` gefahren.
+Ergebnis: `show #t` feuert für Panel und Button bereits während der
+Konstruktion/Container-Einfügung — über `wxwindow.rkt`s `override* show` →
+`show-control` → `really-show` → `super show` (die Platform-Klasse) —, lange bevor der
+Frame selbst gezeigt wird. `wx/qt/window.rkt`s `shown?`-Feld ist damit die ganze Zeit
+korrekt gepflegt worden, exakt analog zu win32s Konstruktions-Convention
+`(unless (memq 'deleted style) (show #t))`. Wichtig: `is-shown-to-root?` (bereits
+§26/§26.1 rekursiv gemacht) liest das rohe `shown?`-**Feld**, nicht die (vormals
+überschriebene) `is-shown?`-**Methode** — die Rekursionskette war die ganze Zeit
+korrekt, nur der Methoden-Override selbst log. Das Entfernen der zehn Overrides
+ersetzt also keine Lüge durch eine schlimmere (`#f` für immer), sondern fällt auf den
+echten, bereits korrekt gepflegten Wert zurück.
+
+**Fix 1 (`is-shown?`, Commit `2f0755bd` im Submodul):** die zehn hartcodierten
+`is-shown?`-Overrides entfernt. **Fix 2 (Enable-Kaskade, Commit `a787b43f`):**
+`wx/qt/window.rkt`s `enable` ruft jetzt zusätzlich `shim_widget_set_enabled` auf das
+eigene Handle. **Bewusst nicht** win32s `parent-enable`-Racket-Cascade nachgebaut —
+Messung zeigte, `parent-enable` hat außerhalb von `win32/panel.rkt` selbst **keinen**
+Konsumenten (kein Shared-Code-Aufruf), ein 1:1-Nachbau wäre bloße Nachahmung von win32s
+Implementierungsstrategie gewesen, kein Fix eines echten Konsumenten. Stattdessen:
+Qt cascadet `QWidget::setEnabled()` bereits nativ auf alle Kind-Widgets
+(`qt-shim/src/shim.cpp:476-479`, reiner Delegat, Qt-Framework-Garantie) — der native
+Aufruf allein genügt, `parent-enable` bleibt ein harmloser No-op.
+
+**Akzeptanztest:** `test-dock-size`-Crash (§23/§23.1/§23.3, vorher 10/10 auf allen drei
+Plattformen), 1→2-Tab-Sequenz via `examples/htdp-tests-probe.rkt`, **n=3, 0/3 Crash**.
+Regressions-Check gegen die Session-Baseline (vier weitere htdp-Proben): keine
+Abweichung.
+
+**Nebenfund — dritte Scroll-Symptom-Ausprägung (Linux):** die für §26 nachbestellte
+Scroll-Vormessung (misst, ob der Sichtbarkeits-Fix den in §24.5 zurückgerollten
+Scrollbar-Versuch doch ermöglicht) zeigt auf Linux ein **drittes** Symptom neben
+Windows' Weißmalen (§24.5) und macOS' korrektem-aber-unscrollbarem Rendering (§29.2):
+sichtbar gestreiftes/verstümmeltes Rendering (vertikale Farbstreifen statt Text) bei
+einer isolierten `editor-canvas%`-Probe mit `'(auto-hscroll auto-vscroll)`. Deckt sich
+farblich mit dem seit §24.5 dokumentierten, bislang nur zufällig beobachteten
+„orange/blau gestreiften Rechteck"-Nebenbefund — hier erstmals gezielt reproduziert.
+Die §26-Hypothese (Sichtbarkeits-Fix könnte den Scroll-Fix ermöglichen) ist **nicht
+bestätigt** — Defekt bleibt nach dem Fix vollständig bestehen, nur mit drittem
+Erscheinungsbild. Für die künftige Scroll-Session als Hypothese vermerkt: das
+deterministische Streifenmuster könnte ein Stride-/Backing-Buffer-Mismatch sein
+(`CLAUDE.md`s Pixelformat-Hinweis: `stride` nie als `width*4` annehmen), nicht
+verifiziert.
+
+**Zusätzlicher, in der Inventartabelle dokumentierter, aber bewusst nicht gefixter
+Fund:** `menu.rkt`s FFI-Callback-Ctypes (`_callback_t` & Co.) nutzen `#:atomic? #t`
+ohne `#:async-apply`, und `canvas.rkt`s `mouse-cb`/`key-cb` bauen Event-Objekte
+innerhalb des atomaren Callbacks (vor `queue-event`) — ein Advisor-Review stellte
+fest, dass der ursprüngliche Audit-Fund (Vergleich mit cocoa) die falsche
+Vergleichsbasis nutzte (cocoas `#:async-apply`-Stellen sind Objective-C-
+Methodendefinitionen/CFRunLoop-Plumbing, ein anderer Mechanismus); die strukturell
+nähere Vergleichsstelle ist win32s `_WndProc` (`wndclass.rkt:108`), die ebenfalls ohne
+`#:async-apply` auskommt und noch mehr Racket-Arbeit synchron im atomaren Kontext
+verrichtet. Kein beobachtetes Symptom über Monate/drei Plattformen — als Kandidat-Lead
+für den geplanten Teardown-Cluster-Block vorgemerkt (Linux Crash B, macOS-Zombie),
+nicht gefixt (Regel 4).
+
+**Cross-Platform-Modell (neu, ab dieser Session):** bewusst keine Windows-/macOS-
+Validierung in dieser Sitzung — Divergenzmessung nur, wenn ein Bereich schon einmal
+Plattformunterschiede zeigte (bei Cluster 1 nicht der Fall, reine Racket-Logik im
+Fork). Validierung gebündelt für einen späteren Durchlauf zusammen mit dem Geometrie-
+und dem Scroll-Block vorgemerkt (Liste in `docs/2026-09-13_report-linux.md`).
+
+**Weiterhin Out of Scope, im Audit inventarisiert:** `filedialog.rkt`s `'dir`/`'multi`-
+Stile (liefern unconditional `#f`), `button.rkt`s `set-label`/`set-border`,
+`message.rkt`s `set-color`/`get-color`/`set-preferred-size`, `window.rkt`s
+`set-cursor`/`reset-cursor`/`skip-enter-leave-events`/`set-event-positions-wrt`/
+`get-dialog-level`, `frame.rkt`s fehlendes `set-modified`, `canvas.rkt`s
+`get-canvas-background-for-backing`/`request-canvas-flush-delay`, das gesamte
+Kontextmenü-Feature (`menu.rkt`s `popup`/`append`/`select`/`on-menu-click`) — jeweils
+eigene künftige Blöcke, kein Bezug zum Sichtbarkeits-/Enable-Cluster dieser Session.
+
+**Zwei per Advisor-Review vor Sitzungsende identifizierte, offene Punkte am
+Enable-Fix:** (1) tatsächliches Klick-Verhalten am nativen Widget nach `enable #f`
+konnte **nicht** per echtem Klick verifiziert werden — mehrere `xdotool`-Versuche
+scheiterten an einem Fokus-/Stacking-Artefakt dieser Automatisierungsumgebung
+(Klick hob reproduzierbar das Terminalfenster statt des Probe-Fensters an, obwohl
+`getactivewindow` und Screenshots das Probe-Fenster vorher als aktiv/oben bestätigten
+— dieselbe Klick-Technik funktionierte zuverlässig gegen die länger laufenden
+DrRacket-Fenster in Phase 0/Akzeptanztest, nur nicht gegen dieses kurzlebige
+Einzel-Widget-Fenster); Fix bleibt auf Code-Ebene verifiziert (`shim.cpp:476-479`,
+`QWidget::setEnabled()`), aber nicht per Beobachtung. (2) `frame%` erbt das neue
+`enable` unverändert; `frame%`s `modal-enable` schreibt denselben nativen
+`setEnabled()`-Bit über ein zweites, unabhängiges Feld (`modal-enabled?` statt
+`enabled?`) ohne Reihenfolge-Garantie — `(send frame enable #f)` gefolgt vom
+Schließen eines fremden modalen Dialogs könnte den Frame stillschweigend
+reaktivieren. Nicht gemessen, kein Fix versucht, kein beobachtetes Symptom — konkrete
+offene Kante für eine künftige Session. Details/Wortlaut: `docs/2026-09-13_report-linux.md`.
+
+**Nachtrag — Tabs-Menü-Klick-Befund umklassifiziert:** die im Akzeptanztest-Abschnitt
+des Reports zunächst als reine Automatisierungsnotiz geführte Beobachtung (Klick auf
+einen `Tabs`-Menü-Eintrag wechselt den Tab nicht) deckt sich mit dem in dieser Session
+gefundenen `menu.rkt`-`select`-No-op und der `find-top-frame`-Abhängigkeit von
+`append` — kein reines Automatisierungsartefakt, sondern ein Kandidat-Produktbefund
+für den künftigen Menü-Block (eingegrenzt auf Radiogruppen-/exklusive-Auswahl-artige
+Menüeinträge, da File→Open in derselben Session per Maus zuverlässig funktionierte).

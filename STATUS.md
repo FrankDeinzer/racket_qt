@@ -5,6 +5,43 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-13 (Linux) — Block A: Vertrags-Audit + `is-shown?`/Enable-Fix, `test-dock-size`-Crash geschlossen
+
+**Kontext:** `docs/2026-09-13_prompt.md` (neu, Linux führt erstmals statt Windows).
+Voller Bericht: `docs/2026-09-13_report-linux.md`. Details: `docs/HACKING.md` §30.
+
+- **Phase 0:** Sync-Check grün (0/0 beide Repos), Smoke 3/3+3/3, Basislinie deckt sich
+  mit der Linux-Erwartung. **Viewport-Test (§23.1) neu eingeordnet:** Bildanzahl
+  skaliert monoton mit der Fenster-Starthöhe (2→4→6/6) — kein eigenständiger Punkt
+  mehr, sondern fünfter Reproduktionsfall für den Scroll-Cluster (§24.5/§25.2).
+- **Phase 1 (Vertrags-Audit, vier parallele Subagenten):** ~20-Zeilen-Inventar aller
+  `wx/qt/*.rkt`-Dateien gegen win32/gtk/cocoa. Bestätigt: dasselbe hartcodierte
+  `is-shown? #t` wie in `panel%` (§23.3) auch in `list-box%`/`tab-panel%`/`slider%`/
+  `radio-box%`/`group-panel%`/`button%`/`choice%`/`check-box%`/`message%`; `enable`
+  cascadet nie nativ. Weitere Funde (Feature-Lücken wie `set-label`/`set-color`,
+  Kontextmenü-Funktionslosigkeit) inventarisiert, bewusst nicht gefixt (Out of Scope).
+- **Phase 2 (Fix):** zehn `is-shown?`-Overrides entfernt (Commit `2f0755bd`), nachdem
+  gemessen wurde, dass `wx/qt/window.rkt`s `shown?`-Feld bereits real gepflegt wird.
+  `enable` ruft jetzt `shim_widget_set_enabled` (Commit `a787b43f`) — Qt cascadet
+  nativ an Kinder, kein win32-Nachbau von `parent-enable` nötig (das bleibt
+  ungenutzter No-op).
+- **Akzeptanztest bestanden:** `test-dock-size`-Crash (vorher 10/10 auf allen drei
+  Plattformen) — 1→2-Tab-Sequenz **n=3, 0/3 Crash**. Regressions-Gate (vier weitere
+  htdp-Proben) grün, keine Abweichung von der Baseline.
+- **Neuer Nebenbefund (Scroll-Vormessung für §26):** dritte, eigenständige Symptom-
+  Ausprägung des Scroll-Clusters auf Linux — sichtbar gestreiftes/verstümmeltes
+  Rendering bei `'(auto-vscroll)`-`editor-canvas%` (statt Windows' Weißmalen oder
+  macOS' korrektem-aber-unscrollbarem Rendering), erstmals gezielt reproduziert,
+  passt zum seit §24.5 bekannten „orange/blau gestreiften Rechteck"-Zufallsbefund.
+  §26-Hypothese (Sichtbarkeits-Fix ermöglicht Scroll-Fix) **nicht bestätigt**.
+- **Bewusst keine Cross-Platform-Validierung diese Session** (neues Modell: nur bei
+  bekannten Plattformunterschieden, hier reine Racket-Logik) — Windows/macOS-
+  Validierung für einen späteren gebündelten Durchlauf vorgemerkt (Liste im Report).
+- Zwei Commits im Submodul (`2f0755bd`, `a787b43f`), noch nicht gepusht/synchronisiert
+  — Sync-Rückfrage (Regel 7) steht noch aus.
+
+---
+
 ## Session 2026-09-13 (macOS, Fortsetzung) — vier Zusatzprüfpunkte auf Nutzerwunsch
 
 **Kontext:** direkte Fortsetzung der macOS-Session (§29/§29.1). Details:
