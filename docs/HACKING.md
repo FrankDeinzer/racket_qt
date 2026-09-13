@@ -2702,3 +2702,68 @@ mit Fallback, sondern ein harter FFI-Fehler), nicht nur dieses eine Feature.
 **Entscheidung:** behalten (nach der Korrektur), kein Rollback nötig — der erste
 Entwurf wurde vor jedem Commit verworfen, es existiert kein Fehlversuch in der
 Historie.
+
+## 28. Racket-9.3-Migration + Fix-Validierung (Linux, 2026-09-13)
+
+**Kontext:** Folgesession zu §24/§25/§27 (Windows, 2026-09-11/12) für die Linux-
+Maschine — `docs/2026-09-11_prompt.md` (Fortsetzung), Ergebnis
+`docs/2026-09-11_report-linux.md`.
+
+**9.3 war bereits vorinstalliert** (`~/racket`, Installation „9.3", Zeitstempel
+2026-09-11 17:37 — außerhalb dieser Session, vermutlich zeitgleich mit der
+Windows-Migration), aber **noch nicht verlinkt** (Links sind pro Installation, exakt
+wie im Windows-Befund §24 erwartet). Migration nachgezogen: Backup
+(`~/racket-link-backup-2026-09-13/`), `raco pkg update --link` für
+`gui-lib`/`draw-lib` (**kein `sudo` nötig** — `~/racket` ist user-owned, der eine
+Punkt, an dem Linux einfacher ist als Windows), Nativ-Gate bestanden (Smoke 3/3 ohne
+`PLT_QT`, DrRacket-Fenstertitel „DrRacket 9.3" ohne Linklet-Mismatch).
+
+**Stale-Shim-Falle griff hier, anders als auf Windows:** `shim.cpp` war neuer als die
+gebaute `.so` (§27 hatte die sechs neuen `shim_window_*`-Funktionen erst kurz vor
+dieser Session hinzugefügt) — Rebuild via `cmake --build qt-shim/build/linux-x64`
+war zwingend, sonst hätte der Fork beim Laden mit einem harten `get-ffi-obj`-Fehler
+abgebrochen (exakt die in §27 dokumentierte Falle). Fork-Recompile (`raco setup`)
+lief bereits automatisch als Teil des Link-Schritts mit.
+
+**Alle drei Windows-Fixes auf Linux funktional bestätigt, keine Divergenz:**
+- §24.2 (Font-Size-Slider-Zahl): Slider zeigt Wert korrekt an, Label folgt
+  programmatischem `set-value` (`value-widgets-probe.rkt` + Preferences → Font +
+  Preferences → General, drei unabhängige Instanzen).
+- §24.3 (Colors-Tab-Rahmen): sichtbarer Rahmen um Zeilengruppen in Color Schemes
+  **und** HtDP Languages.
+- §27 (`frame%` maximize/iconize/fullscreen): Ad-hoc-Probe reproduziert exakt die
+  Windows-Testsequenz — `maximize #t` vor `show` hält `shown?=#f` (macht das Fenster
+  nicht fälschlich sichtbar), `iconize #f` nach `maximize #t` stellt
+  `maximized?=#t` korrekt wieder her, `fullscreen` togglet sauber. Keine
+  KWin/X11-spezifische Divergenz zu Windows' Qt/Win32-Verhalten.
+
+**Preferences-Sweep (sechs bisher auf Linux nie durchgesehene Kategorien:**
+Editing/Warnings/General/Profiling/Tools/Background Expansion**) zeigt keinen
+funktionalen Defekt — deckt sich 1:1 mit dem Windows-Befund aus §25. Kein neuer,
+Linux-spezifischer Fund.
+
+**Baseline-Abgleich (§23.1) bestätigt, keine 9.3-Regression:** `htdp-image-probe.rkt`
+(4/5) und `htdp-image-count-probe.rkt` (4/6) reproduzieren die dokumentierte
+Linux-spezifische Abweichung von der Windows-Baseline (6/6 bzw. 5/5) unverändert;
+`htdp-text-isolated-probe.rkt` und `htdp-bigbang-probe.rkt` sauber;
+`htdp-tests-probe.rkt`s 1→2-Tab-Crash byte-identisch zur dokumentierten Baseline
+reproduziert (`test-engine:test-dock-size`, `'(1)`, `test-tool.rkt:267:8`).
+
+**Bereits bekannter §21.7-Cluster-Fund reproduziert (kein neuer Befund):** der
+Preferences-Dialog öffnet auch unter Qt/Linux mit einer Anfangsgröße, bei der die
+Button-Zeile außerhalb des sichtbaren Bereichs liegt — identisch zum
+Windows-Befund §25.1.
+
+**Automatisierungs-Methode (Linux-Analogon zu Windows' PowerShell/.NET-Rezept):**
+`xdotool` (`search --name`, `mousemove`+`click`, `key`) + `spectacle -b -f -o <datei>`
+für Vollbild-Screenshots. X11-Session (`XDG_SESSION_TYPE=x11`) vorausgesetzt.
+**Notiert:** zwei X11-Fenster mit identischem `_NET_WM_NAME` können für dieselbe
+DrRacket-Instanz auftreten (vermutlich WM-Frame vs. Client) — `windowsize`/
+`windowmove` auf das falsche der beiden hatte in einem Fall keine sichtbare
+Wirkung auf den gerenderten Inhalt; das jeweils tatsächlich sichtbare Fenster ließ
+sich trotzdem zuverlässig per Klick/Scroll bedienen, keine weitere Diagnose in
+dieser Session nötig.
+
+**Ergebnis: keine Code-Änderung, kein Commit in `wx/qt/`/`qt-shim/`** — diese Session
+war reine Migration + Validierung. Beide Regressions-Gates (Smoke mit/ohne
+`PLT_QT=1`) grün, beide Repos nach der gesamten Automatisierungsrunde clean.

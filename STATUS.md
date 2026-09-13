@@ -5,6 +5,36 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-13 (Linux) — Racket-9.3-Migration + Fix-Validierung: keine Code-Änderung, keine neuen Befunde
+
+**Kontext:** `docs/2026-09-11_prompt.md` (Fortsetzung für Linux, nach Windows-Abschluss
+2026-09-11/12). Voller Bericht: `docs/2026-09-11_report-linux.md`. Details:
+`docs/HACKING.md` §28.
+
+- **Drei-Maschinen-Sync-Check zuerst** (Regel 7): Submodul war 5 Commits hinter
+  `origin/qt-backend` (Windows-Session-Commits bereits gepusht, hier nur noch nicht
+  ausgecheckt) — nach `AskUserQuestion` sauberer Fast-Forward auf `a71d2e9a`.
+- **Phase 0:** Racket 9.3 war auf dieser Maschine bereits vorinstalliert
+  (2026-09-11, außerhalb dieser Session), aber noch nicht verlinkt. Migration
+  nachgezogen: Backup, `raco pkg update --link` (kein `sudo` nötig, `~/racket` ist
+  user-owned), Nativ-Gate + Qt-Smoke 3/3 grün. **Shim-Rebuild war hier zwingend**
+  (anders als auf Windows) — `shim.cpp` neuer als die gebaute `.so` (§27-ABI).
+  Basislinie (fünf htdp-Proben) deckt sich exakt mit der dokumentierten
+  Linux-Erwartung (§23.1: 4/6 bzw. 4/5 statt Windows' 6/6 bzw. 5/5) — keine
+  9.3-Regression.
+- **Phase 1:** §24.2 (Slider-Zahl), §24.3 (Colors-Rahmen), §27 (frame%
+  maximize/iconize/fullscreen) auf Linux validiert — alle drei funktional identisch
+  zu Windows, keine KWin/X11-spezifische Divergenz.
+- **Phase 2:** Preferences-Sweep aller sechs bisher auf Linux nie durchgesehenen
+  Kategorien (Editing/Warnings/General/Profiling/Tools/Background Expansion) — keine
+  funktionalen Defekte, deckt sich 1:1 mit dem Windows-Befund.
+- **Phase 3:** beide Regressions-Gates (Smoke mit/ohne `PLT_QT`) grün, beide Repos
+  clean.
+- **Kein Commit in `wx/qt/`/`qt-shim/`** — diese Session war reine Migration +
+  Validierung, keine Code-Änderung nötig.
+
+---
+
 ## Session 2026-09-11 (Windows) — Racket-9.3-Migration + Preferences-Stabilisierung: 2 Befunde gefixt, 1 nicht reproduziert, 1 root-caused und geparkt
 
 **Kontext:** `docs/2026-09-11_prompt.md`. Voller Bericht: `docs/2026-09-11_report-win.md`.
