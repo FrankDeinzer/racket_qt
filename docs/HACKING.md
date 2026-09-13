@@ -1634,6 +1634,59 @@ echtem Preferences-Dialog, macOS via `tab-panel%` real + isolierter Proben für
 spezifisch blockiert** — nicht durch diese drei Widgets, sondern durch einen davon
 unabhängigen, neu entdeckten Menü-Bug, s. §22.
 
+### 21.9 Dritter Fix-Versuch (Linux, 2026-09-13, „Block B") — resizeEvent verdrahtet, kein Crash, aber Reflow bleibt aus
+
+Nach der Konvergenz-Vormessung (rein synchron, ohne Shim-Änderung — konvergiert
+sauber, s. `docs/2026-09-13_report-linux.md`) und expliziter Nutzer-Freigabe für
+einen vorsichtigen Versuch (nur diskrete Resizes, kein Live-Drag): `RacketWindow`
+bekam ein `resizeEvent` (Muster identisch zu `closeEvent`: nur `resize_cb`
+aufrufen), plus eine neue `shim_window_get_size`-Live-Query (nötig, weil
+`get-width`/`get-height` reine Racket-Caches waren — ohne Live-Query hätte
+`resized` einen echten nativen Resize nie bemerkt). `wx/qt/frame.rkt`s toter
+`queue-on-size`-Stub entfernt, `resize-cb` nach `close-cb`-Muster verdrahtet.
+
+**Ergebnis, anders als bei Fix-Versuch 1/2:** kein Crash, kein Hänger, keine
+Rückkopplungsschleife bei mehreren `xdotool windowsize`-Resizes (300×200 → 700×500
+→ 900×600 → 750×550) — die historische Sorge (asynchrone Rückkopplung durch
+wiederholt neu ausgelöste native Resizes) ist unter X11 mit diskreten Resizes nicht
+aufgetreten. `shim_window_get_size`s Live-Wert folgte korrekt. **Aber:** der
+eigentliche Zweck (Kind-Reflow) blieb aus — ein Test-Button behielt seine
+ursprüngliche Größe über alle Resizes hinweg. Instrumentiert präzise eingegrenzt:
+der native `resizeEvent`-Callback feuert zuverlässig, aber das über
+`qt-queue-window-event` aus ihm heraus geposteste Thunk (das `queue-on-size`
+aufrufen würde) läuft in der normalen Programmlaufzeit **nie**. Root-Cause nicht
+gefunden (Budget deutlich überschritten: FFI-Callback-Kontext, Eventspace-Ziel,
+`inherit`-Hygiene und Timing alle geprüft und ausgeschlossen). Vollständig
+zurückgerollt (kein Commit, wie bei Fix-Versuch 1/2).
+
+**Wichtige Einschränkung zur Vergleichsbehauptung („funktioniert bei `closeEvent`
+seit Monaten"):** dieser Vergleich stützte sich zunächst nur auf die
+Projekt-Historie (echtes DrRacket), nicht auf eine Messung in derselben Harness
+(bloßes `racket`-Skript, Hauptthread in einer `(sleep 1)`-Schleife). Ein
+nachträglicher Diskriminator-Test in exakt dieser Harness (`PLT_QT=1`, ein
+einzelner `(queue-callback (lambda () (eprintf ...)))` direkt nach dem Fenster-
+Show, dann 15×`(sleep 1)`) zeigt: der Thunk lief **nicht** während der 15
+Sekunden-Ticks, sondern erst im Moment des Prozess-Interrupts/Teardowns
+(SIGINT via `timeout`). D. h. in dieser konkreten Harness laufen offenbar auch
+sonstige geposteste Eventspace-Thunks nicht prompt während des normalen
+Programmbetriebs — die Asymmetrie „resizeEvent-Thunk nie, closeEvent-Thunk
+zuverlässig" ist damit **nicht in derselben Harness gegengeprüft** und könnte
+teilweise ein Artefakt des bloßen `racket`-Skript-Aufbaus sein (kein DrRacket-
+Idle-Betrieb) statt eine resize-spezifische Eigenschaft. Für eine künftige
+Session: derselbe Diskriminator, aber mit einem echten `closeEvent` in
+derselben Harness ausgelöst, würde klären, ob beide Pfade gleich betroffen
+sind oder ob resizeEvent tatsächlich eine eigene Lücke hat.
+
+**Wichtigster Unterschied zu Fix-Versuch 1/2:** dieser dritte Versuch scheiterte an
+einem „passiert nichts"-Befund, nicht an einem „geht kaputt"-Befund — das Verdrahten
+von `resizeEvent` selbst ist (zumindest für diskrete X11-Resizes) beobachtbar sicher,
+nur wirkungslos. Nächster sinnvoller Ansatzpunkt für eine künftige Session: klären,
+ob geposteste Eventspace-Thunks in der bloßen `racket`-Skript-Harness (ohne
+DrRacket) generell verzögert laufen (s. Diskriminator-Befund oben), und erst dann
+— falls nicht — gezielt nach einer resizeEvent-spezifischen Ursache in
+`wx/common/queue.rkt` suchen. Volles Detail (Log-Auszüge, geprüfte und verworfene
+Hypothesen, Diskriminator-Test): `docs/2026-09-13_report-linux.md`.
+
 ## 22. macOS: Qt reißt einen Help-Menü-Eintrag fälschlich als „Preferences" ins App-Menü (gefixt, 2026-07-14)
 
 **Symptom (reproduzierbar, 2/2):** Auf macOS existiert unter Edit **kein**

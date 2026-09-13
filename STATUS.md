@@ -5,6 +5,46 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-13 (Linux, Fortsetzung) — Block B: Resize/Reflow-Bug (§21.7), dritter Fix-Versuch — sicherer als je zuvor, aber weiterhin ungelöst
+
+**Kontext:** direkte Fortsetzung von Block A, kein eigener Prompt. Voller Bericht:
+`docs/2026-09-13_report-linux.md` (Abschnitt "Block B"). Details: `docs/HACKING.md`
+§21.9.
+
+- **Konvergenz-Vormessung (rein synchron, kein Shim-Touch):** `wxtop.rkt`s
+  Selbstkorrektur-Schleife (`resized`/`correct-size`) konvergiert sauber — jede
+  Korrektur genau ein zusätzlicher Durchlauf, in 20 unabhängigen Testfällen. Das
+  entkräftet eine der beiden historischen Sorgen (§21.7-Fix-Versuch 1).
+  Korrigierte dabei zwei Fehleinschätzungen aus der Recherche (Advisor-Review):
+  Linux' `'unix`-Sonderfall in `queue-on-size` ist kein GTK-Tuning-Knopf, sondern
+  deaktiviert `already-trying?` komplett und damit den am wenigsten abgesicherten
+  Pfad; Windows' modale Resize-Nachrichtenschleife (Root Cause 2) ist
+  Windows-spezifisch, kein Beleg dass Linux automatisch sicherer ist.
+- **Nutzer-Freigabe für einen vorsichtigen dritten Fix-Versuch** (nur diskrete
+  Resizes, kein Live-Drag, sofortiger Rollback bei Problemen).
+- **`resizeEvent` verdrahtet + neue `shim_window_get_size`-Live-Query** (nötig, weil
+  `get-width`/`get-height` reine Racket-Caches waren). **Ergebnis: kein Crash, kein
+  Hänger, keine Rückkopplungsschleife** bei mehreren nativen Resizes — anders als
+  beide historischen Versuche. **Aber:** Kind-Reflow blieb aus — ein gepostetes
+  `queue-on-size`-Thunk aus `resizeEvent` heraus läuft während des normalen
+  Programmbetriebs nie. Root-Cause nicht gefunden (Budget deutlich überschritten),
+  vollständig zurückgerollt, kein Commit.
+- **Nachträglicher Diskriminator-Test** (bloßes `queue-callback` in derselben
+  bare-`racket`-Sleep-Loop-Harness, ohne jede resizeEvent-Verdrahtung): der Thunk
+  lief ebenfalls nicht während 15s Ticks, sondern erst beim Prozess-Interrupt. Die
+  ursprünglich behauptete Asymmetrie zu `closeEvent` ("funktioniert seit Monaten")
+  stammt aus der Projekt-Historie (DrRacket), nicht aus derselben Harness — **nicht
+  gegengeprüft**, könnte teilweise ein Harness-Artefakt statt eine
+  resizeEvent-spezifische Lücke sein. Siehe `docs/HACKING.md` §21.9.
+- **Wichtigster Fortschritt:** der Bug ist jetzt als "gepostetes Thunk aus
+  `resizeEvent` läuft in dieser Harness nie" präzise eingegrenzt, statt als
+  "Rückkopplungsschleife" — ein klarerer, weniger gefährlicher Ausgangspunkt für
+  die nächste Session, aber mit offener Frage ob harness- oder resize-spezifisch.
+- Zwei neue Diagnose-Proben (`resize-reflow-probe.rkt`, `live-resize-probe.rkt`)
+  bleiben im Repo; keine Commits in `wx/qt/`/`shim.cpp` aus diesem Block.
+
+---
+
 ## Session 2026-09-13 (Linux) — Block A: Vertrags-Audit + `is-shown?`/Enable-Fix, `test-dock-size`-Crash geschlossen
 
 **Kontext:** `docs/2026-09-13_prompt.md` (neu, Linux führt erstmals statt Windows).

@@ -196,7 +196,22 @@ korrigierte Datei-Zuordnung: `mrlib/switchable-button.rkt` + `wx/qt/canvas.rkt`,
 `wx/qt/button.rkt` (§24.4). Aus §21.6 (2026-07-14, backend-generisch, auf Linux identisch
 reproduziert) weiterhin offen: Resize/Reflow-Bug (Kind-Controls wandern beim
 Fenster-Vergrößern nicht mit, reproduziert sowohl im Preferences-Dialog als auch in einer
-isolierten Probe, §21.7); Editor-Canvas-Scrollbars (2026-09-11 Windows: Fix-Versuch
+isolierten Probe, §21.7). **Dritter Fix-Versuch (Linux, 2026-09-13, §21.9):**
+`resizeEvent` verdrahtet (plus neue `shim_window_get_size`-Live-Query, da
+`get-width`/`get-height` zuvor reine Racket-Caches waren) — diesmal **kein Crash,
+kein Hänger, keine Rückkopplungsschleife** bei mehreren diskreten
+`xdotool windowsize`-Resizes (anders als Fix-Versuch 1/2), aber Kind-Reflow blieb
+trotzdem aus: ein gepostetes Thunk aus `resizeEvent` heraus läuft während des
+normalen Betriebs nie — Root-Cause nicht gefunden, vollständig zurückgerollt (kein
+Commit). Ein nachträglicher Diskriminator-Test (bloßes `queue-callback` ganz ohne
+Resize-Bezug, gleiche Harness) zeigt dasselbe „läuft erst beim Teardown"-Muster,
+d. h. die zunächst behauptete Asymmetrie zu `closeEvent` ("seit Monaten
+zuverlässig") ist **nicht in derselben Harness gegengeprüft** und könnte teilweise
+ein allgemeines Harness-Artefakt statt eine resizeEvent-spezifische Lücke sein
+(§21.9). Bug bleibt offen, aber jetzt klarer eingegrenzt als „gepostetes Thunk
+läuft in der bloßen-`racket`-Harness nicht promt" statt „Rückkopplungsschleife";
+Editor-Canvas-Scrollbars
+(2026-09-11 Windows: Fix-Versuch
 root-caused einen degenerierten Scroll-Range-Bug, der den Editor-Inhalt komplett
 weißmalt — Fix zurückgerollt/geparkt, additive Shim-Primitiven bleiben als Grundlage
 für einen zweiten Anlauf, §24.5. **Auf macOS reproduziert (2026-09-13, §29.2), aber

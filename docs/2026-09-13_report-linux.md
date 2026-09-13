@@ -419,3 +419,240 @@ mit dem Geometrie- und dem Scroll-Block):
 
 ---
 
+## Block B (Fortsetzung, direkt im Anschluss) — Resize/Reflow-Bug (§21.7): Konvergenz-Vormessung, kein Fix
+
+**Kontext:** kein eigener geschriebener Prompt — direkte Fortsetzung auf Nutzerwunsch
+("weiter mit Block B"). §21.7 (`docs/HACKING.md`) hatte diesen Bug bereits zweimal
+(Windows, 2026-07-13) angefasst und beide Male vollständig zurückgerollt — echte
+Reentrancy-Probleme in der nativen Resize-Behandlung, kein spekulativer dritter
+Versuch ohne neue Messung.
+
+### Orientierung (Fork) + Korrektur einer Fehleinschätzung aus Block A
+
+Ein Fork hat `docs/HACKING.md` §21.7 + alle Folgeerwähnungen, `wx/qt/window.rkt`/
+`frame.rkt`/`canvas.rkt`, `qt-shim/src/shim.cpp` und win32s Gegenstück gelesen.
+Bestätigt: `RacketWindow` (`shim.cpp`, `QMainWindow`-Subklasse für `frame%`) hat
+**keinen** `resizeEvent`-Handler; `wx/qt/frame.rkt:184` überschreibt `queue-on-size`
+explizit auf `(void)`. Ohne beides läuft `wxtop.rkt`s Relayout-Kette
+(`queue-on-size` → `resized`/`correct-size`) nie — Kind-Controls behalten ihre beim
+letzten `set-size` berechnete absolute Position, unabhängig von der tatsächlichen
+neuen Fenstergröße. Betroffen laut Doku: der ursprüngliche §21.6/§21.7-Fund selbst,
+§25.1 (Preferences-Dialog öffnet mit unerreichbarer Button-Zeile, identisch auf
+Windows **und** Linux reproduziert), sowie — als **positive** Divergenz, nicht als
+Fix — macOS' zufällig ausreichende initiale Seed-Größe (§29).
+
+**Advisor-Review vor jeder weiteren Messung korrigierte zwei Annahmen:**
+1. `wxtop.rkt`s `(not (eq? 'unix (system-type)))`-Sonderfall in `queue-on-size` ist
+   **kein** GTK-spezifischer Tuning-Knopf — `system-type` meldet das Betriebssystem,
+   nicht das GUI-Backend, betrifft also gtk **und** qt auf Linux gleichermaßen. Er
+   **deaktiviert** den `already-trying?`-Schutz auf Linux komplett (jeder
+   `queue-on-size`-Aufruf requeued `resized` bedingungslos) — der am
+   **wenigsten** abgesicherte Pfad, nicht ein Beleg für sichere Precedent.
+2. Root Cause 2 aus dem historischen Fix-Versuch (Windows' modale
+   `WM_ENTERSIZEMOVE`/`WM_SIZING`-Nachrichtenschleife blockiert den Pump während des
+   Ziehens, wodurch sich Resize-Schritte aufstauen und nach Loslassen "abgespielt"
+   werden) ist **Windows-spezifisch** — X11s `ConfigureNotify` kennt keine
+   vergleichbare modale Schleife. Das ist kein Beleg, dass Linux automatisch sicherer
+   ist, nur dass dieser **eine** historische Fehlermodus hier vermutlich nicht
+   zutrifft; das verbleibende Risiko (Fix-Versuch 1: Rückkopplungsschleife über
+   asynchrone natives Re-Entry) bleibt zu messen.
+
+### Messung: konvergiert die synchrone Selbstkorrektur-Schleife?
+
+Instrumentiert (`PLT_QT_DEBUG_RESIZE`, `wxtop.rkt`s `resized`/`queue-on-size`,
+temporär, seither per `git checkout` vollständig zurückgenommen — `git status`
+danach sauber). **Bewusst ohne jede Shim-/`wx/qt/`-Änderung** — der Trigger läuft
+über einen bereits bestehenden, erreichbaren Shared-Code-Pfad
+(`reflow-container` nach dynamischem Hinzufügen von Kindern → `child-redraw-request`
+→ `self-redraw-request` → `force-redraw` → `resized`), nicht über ein natives
+Resize-Event.
+
+**Probe (`examples/resize-reflow-probe.rkt`, bleibt als Diagnose-Hilfsmittel
+bestehen):** Frame 400×300, `vertical-panel%`, 20 Buttons nacheinander hinzugefügt
+(erzwingt bei jedem Schritt ein Wachstum des Panel-Minimalbedarfs über die aktuelle
+Fenstergröße hinaus). Ergebnis: **jede einzelne Korrektur konvergiert in genau einem
+zusätzlichen Durchlauf** — `resized` erkennt `new ≠ correct`, setzt `already-trying?
+#t`, korrigiert per `set-size`, setzt `already-trying? #f` zurück, ruft sich direkt
+rekursiv erneut auf, findet beim zweiten Durchlauf `new = correct` (`tried-sizes`
+kehrt von 1 zurück auf 0) — kein einziger Fall über eine Ebene Rekursion hinaus, in
+20 unabhängigen Auslösungen. **Die rein synchrone Selbstkorrektur-Schleife
+konvergiert sauber** — das war angesichts der Konstruktion von `correct-size`
+(berechnet die Zielgröße direkt in einem Schritt, kein iteratives Annähern) auch zu
+erwarten, ist damit aber empirisch bestätigt statt nur angenommen.
+
+**Was diese Messung NICHT beantwortet:** das eigentliche historische Risiko
+(Fix-Versuch 1) entsteht nicht durch diese synchrone Schleife, sondern dadurch, dass
+jeder korrigierende `set-size`-Aufruf **auch das native Fenster** verändert — sofern
+`resizeEvent` verdrahtet wäre, würde das eine **zusätzliche, asynchrone** native
+Benachrichtigung auslösen, die `resized` ein weiteres Mal von außen anstößt, **nachdem**
+`already-trying?` bereits zurückgesetzt wurde. Diese Probe ruft nie ein natives Resize
+aus und kann diesen Pfad daher strukturell nicht prüfen — er bliebe nur durch
+tatsächliches Verdrahten von `RacketWindow::resizeEvent` (Shim-ABI-Änderung, Regel
+3/Regel 8, erzwingt Rebuild auf allen drei Maschinen beim nächsten Pull) messbar.
+
+### Entscheidung: hier gestoppt, keine Shim-Änderung versucht
+
+Zwei historische volle Rollbacks, eine Shim-ABI-Änderung mit Rebuild-Zwang auf allen
+drei Maschinen, und ein verbleibendes, nur per echtem natives Resize (inkl. Live-Drag,
+der beim ersten historischen Versuch zum Rückkopplungsloop führte) messbares Risiko —
+das ist eine Architekturentscheidung mit echtem Rückschlagpotenzial, kein Kandidat für
+einen stillschweigenden dritten Versuch in derselben Sitzung. Die synchrone
+Konvergenz-Messung ist ein vollwertiges Teilergebnis (entkräftet eine der beiden
+Sorgen aus der Historie), aber **kein** Beleg, dass ein Shim-Fix diesmal glatt liefe.
+Nutzer-Rückfrage vor dem nächsten Schritt (weiter mit Shim-Wiring vs. hier parken)
+folgt separat.
+
+**Kein Commit für die Messung selbst** (Instrumentierung vollständig zurückgenommen);
+`examples/resize-reflow-probe.rkt` als neue, dauerhafte Diagnose-Probe hinzugefügt.
+
+---
+
+## Block B, Fortsetzung — dritter Fix-Versuch (`resizeEvent`), neuer Fund: kein Crash, aber Reflow bleibt aus
+
+**Nutzer-Entscheidung (nach Rückfrage):** vorsichtiger Versuch — nur diskrete Resizes
+(`xdotool windowsize`, kein Live-Drag), sofortiger Rollback bei erstem Anzeichen von
+Problemen.
+
+### Umsetzung
+
+Drei additive Änderungen, alle nach dem Muster bestehender Shim-Funktionen (Regel 2,
+kein Shared-Code-Touch):
+
+1. **`shim.cpp`:** `RacketWindow` bekommt ein `resizeEvent`, das (wie `closeEvent`)
+   nur einen Callback aufruft — `resize_cb`/`resize_ud`, gesetzt über eine neue
+   Setter-Funktion `shim_window_set_resize_cb` (Muster: `shim_canvas_set_mouse_cb`
+   & Co.), nicht über den `shim_window_create`-Konstruktor. Bewusst **kein**
+   Äquivalent zu win32s `constrained-reply`/`pre-event-sync`-Pump-Keepalive-Schleife
+   im nativen Handler — die existiert dort, um Windows' modale
+   `WM_SIZING`-Nachrichtenschleife zu überleben, die den Pump blockiert; X11-Resize
+   hat keine solche modale Schleife, `shim_pump` drainiert den normalen Qt-Event-Loop
+   während eines Resizes durchgehend weiter.
+2. **`shim.cpp`, neu — nicht ursprünglich geplant:** `shim_window_get_size` (Live-
+   Query der tatsächlichen `RacketWindow`-Größe). Nötig, weil `wx/qt/window.rkt`s
+   `get-width`/`get-height` reine Racket-seitige Caches sind, nur durch expliziten
+   `set-size`-Aufruf aktualisiert (anders als win32, das live `GetWindowRect`
+   abfragt) — ohne das würde `wxtop.rkt`s `resized` immer die veraltete, zuletzt
+   gesetzte Größe sehen und einen echten nativen Resize nie bemerken.
+3. **`wx/qt/frame.rkt`:** toten `(define/override (queue-on-size) (void))`-Stub
+   entfernt (durch `make-top-container%`s spätere Override ohnehin zur Laufzeit
+   verdeckt, aber irreführend neben dem neuen Aufrufer); `resize-cb` nach demselben
+   Muster wie `close-cb` (nur `qt-queue-window-event` posten, niemals synchron
+   aufrufen — Regel 2); `get-width`/`get-height`/`get-client-size`/`get-size`
+   überschrieben, um live über den neuen Shim-Call abzufragen (nur `frame%` —
+   Kind-Widgets haben ausschließlich Racket-gesteuerte Geometrie, kein Qt-
+   Layout-Manager beteiligt, ihr Cache kann nie veralten).
+
+Smoke 3/3 + 3/3 nach jeder der drei Änderungen einzeln geprüft, durchgehend grün.
+
+### Messung 1 — Konvergenz/Stabilität bei echtem nativen Resize: sauber, kein Crash, keine Rückkopplungsschleife
+
+`examples/live-resize-probe.rkt` (neu, bleibt bestehen): Frame 300×200,
+`vertical-panel%` (stretchbar), ein Button. Mehrere `xdotool windowsize`-Aufrufe
+(300×200 → 700×500 → 900×600 → 750×550, in verschiedenen Kombinationen über mehrere
+Testläufe), dazwischen 3–12 Sekunden Beobachtung. **In keinem Testlauf:** Hänger,
+Absturz, mehrfach nachfeuernde `resizeEvent`s, spürbare Verzögerung der übrigen
+Eventspace-Verarbeitung. `shim_window_get_size`s Live-Wert folgte dem nativen Resize
+in jedem Fall korrekt und sofort (z. B. `frame=700x500` einen Tick nach dem
+`xdotool windowsize`-Aufruf). **Die historische Sorge aus Fix-Versuch 1/2 (§21.7) —
+eine asynchrone Rückkopplungsschleife über wiederholt neu ausgelöste native Resizes —
+ist unter X11 mit diskreten (nicht gezogenen) Resizes nicht aufgetreten.**
+
+### Messung 2 — der eigentliche Zweck (Kind-Reflow) bleibt aus: neuer, unerwarteter Fund
+
+Trotz korrekt aktualisierter `get-width`/`get-height` **reflowt der Button nie** —
+er bleibt bei seiner ursprünglichen Größe (80×25), unabhängig davon, wie oft oder wie
+stark die Fenstergröße nativ geändert wird. Mit `PLT_QT_DEBUG_RESIZE`-Instrumentierung
+in `wxtop.rkt`s `resized`/`queue-on-size` (temporär, seither vollständig
+zurückgenommen) präzise eingegrenzt:
+
+- Der native `resizeEvent`-Callback (`resize-cb` in `frame.rkt`) feuert zuverlässig
+  bei jedem `xdotool windowsize` (eigener Log-Print direkt im Callback, **vor** dem
+  `qt-queue-window-event`-Aufruf).
+- Der **gepostete Thunk selbst** (der `(queue-on-size)` aufrufen würde) läuft in der
+  normalen Programmlaufzeit **nie** — sein eigener Log-Print (die allererste Zeile
+  im Thunk-Körper, noch vor jedem Aufruf von `queue-on-size`) erscheint nicht, auch
+  nach 20+ Sekunden Wartezeit nicht (mehrere Testläufe, kein Ausreißer).
+- **Einmaliger, überraschender Gegenbeleg:** in einem Testlauf erschien dieser
+  Log-Print doch noch — aber offenbar erst im Zuge des Prozess-Endes (der Thunk für
+  den allerersten, konstruktionszeitlichen `resizeEvent` lief sichtbar **nach**
+  Ablauf der eigentlichen Probe-Schleife, unmittelbar bevor der Prozess durch
+  `timeout`/Kill beendet wurde) — kein Beleg für normale Verarbeitung, eher ein
+  Hinweis auf einen möglichen Renne-erst-beim-Teardown-Mechanismus in der
+  Eventspace-/Queue-Maschinerie.
+
+**Nachträglicher Diskriminator-Test (nach Advisor-Hinweis, vor dem Doku-Commit):**
+dieser Teardown-Hinweis wurde doch noch aufgegriffen, aber gezielt minimal statt
+als neuer Hypothesen-Zyklus am `resizeEvent`-Pfad — ein eigenständiges,
+resize-loses Skript in derselben Harness (`racket`, `PLT_QT=1`, Hauptthread in
+einer `(sleep 1)`-Schleife über 15 Ticks): direkt nach dem Fenster-Show ein
+einzelnes `(queue-callback (lambda () (eprintf "QUEUED CALLBACK RAN\n")))`
+gepostet, dann 15×`(sleep 1)`, dann per `timeout 20` per SIGINT beendet. Ergebnis:
+der Print erschien **nicht** während der 15 Ticks, sondern **erst nach** Tick 15,
+unmittelbar im Zuge des `user break`/Prozessendes — exakt dasselbe Muster wie der
+einmalige Gegenbeleg oben, jetzt aber komplett ohne `resizeEvent`, `frame.rkt`- oder
+`shim.cpp`-Änderungen reproduziert. Das verschiebt die wahrscheinlichste Erklärung:
+vermutlich läuft in dieser konkreten Harness (bloßes `racket`-Skript ohne
+DrRacket-Idle-Betrieb) **generell** kein über `queue-callback`/`queue-event`
+gepostetes Thunk während des normalen Betriebs, sondern nur bei Teardown/Interrupt
+— unabhängig vom Auslöser. Die Behauptung weiter unten, ein aus `closeEvent`
+gepostetes Thunk funktioniere „seit Monaten zuverlässig", stammt aus der
+Projekt-Historie mit echtem DrRacket (anderer Harness, eigene Eventspace-Idle-
+Maschinerie) und wurde in **dieser** Harness nicht gegengeprüft. Entsprechend
+abgeschwächt in `docs/HACKING.md` §21.9/`CLAUDE.md`/`STATUS.md`: die Lücke könnte
+resizeEvent-spezifisch sein, könnte aber auch ein allgemeines Harness-Artefakt
+dieses bloßen-`racket`-Skript-Aufbaus sein — für eine künftige Session zu klären,
+z. B. mit demselben Diskriminator, aber ausgelöst durch ein echtes `closeEvent` in
+derselben Harness.
+- Der **erste** `resized`/`set-panel-size`-Durchlauf, der in jedem Log auftaucht,
+  läuft **vor** dem ersten geloggten `resizeEvent` ab — er stammt also nicht von
+  dieser neuen Verdrahtung, sondern von einem bereits bestehenden, unabhängigen
+  Konstruktions-/`add-child`-Pfad (`self-redraw-request`/`force-redraw`, s.
+  Konvergenz-Vormessung oben). Die neue Verdrahtung selbst hat in keinem
+  regulären Programmlauf einen einzigen sichtbaren Effekt erzielt.
+
+**Root Cause nicht gefunden — Budget für diesen Teilbefund klar überschritten**
+(deutlich mehr als die vorgesehenen zwei Hypothesen-Zyklen: FFI-Callback-Kontext,
+Eventspace-Ziel, Racket-Klassendispatch/`inherit`-Hygiene und Timing wurden alle
+geprüft und ausgeschlossen, ohne den eigentlichen Mechanismus zu finden, warum ein
+über `qt-queue-window-event` aus `resizeEvent` heraus gepostetes Thunk in dieser
+Harness während des normalen Betriebs nicht läuft — wobei der nachträgliche
+Diskriminator-Test unten nahelegt, dass dies teilweise ein allgemeines
+Harness-Artefakt statt eine resizeEvent-spezifische Eigenschaft sein könnte).
+**Kein spekulativer Fix** (Regel 4).
+
+**Sicherheits-Fazit (der wichtigste Teilbefund dieser Runde):** im Unterschied zu den
+beiden historischen Fix-Versuchen ist **kein neuer Crash, kein Hänger und keine
+Rückkopplungsschleife** aufgetreten — das native Verdrahten von `resizeEvent` selbst
+ist, zumindest für diskrete (nicht gezogene) Resizes unter X11, beobachtbar sicher.
+Das Scheitern dieser Runde ist ein „passiert nichts"-Befund, kein „geht kaputt"-Befund
+— ein anderer, ungefährlicherer Fehlermodus als beide Vorgänger-Versuche.
+
+### Entscheidung: vollständig zurückgerollt
+
+`shim.cpp` (`resizeEvent`, `shim_window_get_size`, `shim_window_set_resize_cb`),
+`wx/qt/frame.rkt` (Resize-Callback-Verdrahtung, Live-Geometrie-Overrides,
+`queue-on-size`-Stub-Entfernung), `wx/qt/utils.rkt` (zwei neue FFI-Deklarationen) und
+die `wxtop.rkt`-Diagnose-Instrumentierung vollständig per `git checkout`
+zurückgenommen, Shim neu gebaut, Smoke 3/3 + 3/3 danach bestätigt grün. **Kein
+Commit** — dieser Versuch bleibt vollständig ungetrackt im Git-Verlauf, exakt wie die
+beiden historischen Versuche in §21.7.
+
+`examples/live-resize-probe.rkt` (neu, bleibt als Diagnose-Probe bestehen — zeigt
+ohne die zurückgerollte Verdrahtung wieder das ursprüngliche Symptom: `get-width`
+bleibt konstant, `resizeEvent` wird nie gemeldet).
+
+**Für eine künftige Session:** der erste sinnvolle Schritt ist jetzt, den
+Diskriminator-Befund oben zu klären — mit einem echten `closeEvent` in derselben
+bloßen-`racket`-Harness prüfen, ob dessen gepostetes Thunk **ebenfalls** erst beim
+Teardown läuft (dann: allgemeines Harness-Artefakt, `resizeEvent` ist unschuldig)
+oder ob es tatsächlich prompt während des normalen Betriebs läuft (dann: die
+Asymmetrie ist real, und eine Instrumentierung von `queue-event`/
+`eventspace-queue-proc` selbst (`wx/common/queue.rkt`), nicht nur der Aufrufseite,
+sowie ein Vergleich des C++-Aufruf-Kontexts von `resizeEvent` vs. `closeEvent`
+unter Qt/X11 wären die nächsten Schritte). Die additiven, für sich genommen
+harmlosen Shim-Grundlagen (`shim_window_set_resize_cb`/`shim_window_get_size`-
+Muster) sind hier im Report dokumentiert und leicht reproduzierbar, falls ein
+künftiger Versuch sie erneut aufbauen möchte.
+
+---
+
