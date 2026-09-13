@@ -203,14 +203,20 @@ kein Hänger, keine Rückkopplungsschleife** bei mehreren diskreten
 `xdotool windowsize`-Resizes (anders als Fix-Versuch 1/2), aber Kind-Reflow blieb
 trotzdem aus: ein gepostetes Thunk aus `resizeEvent` heraus läuft während des
 normalen Betriebs nie — Root-Cause nicht gefunden, vollständig zurückgerollt (kein
-Commit). Ein nachträglicher Diskriminator-Test (bloßes `queue-callback` ganz ohne
-Resize-Bezug, gleiche Harness) zeigt dasselbe „läuft erst beim Teardown"-Muster,
-d. h. die zunächst behauptete Asymmetrie zu `closeEvent` ("seit Monaten
-zuverlässig") ist **nicht in derselben Harness gegengeprüft** und könnte teilweise
-ein allgemeines Harness-Artefakt statt eine resizeEvent-spezifische Lücke sein
-(§21.9). Bug bleibt offen, aber jetzt klarer eingegrenzt als „gepostetes Thunk
-läuft in der bloßen-`racket`-Harness nicht promt" statt „Rückkopplungsschleife";
-Editor-Canvas-Scrollbars
+Commit). **Folgesession, gezielter `closeEvent`-Diskriminator (temporärer
+`shim_window_request_close`-Shim-Hook, vollständig zurückgerollt):** `closeEvent`s
+C-Callback feuert zuverlässig, aber dessen gepostetes Thunk startet **ebenso wenig**
+während des Betriebs — widerlegt die ursprüngliche Annahme „closeEvent funktioniert
+seit Monaten zuverlässig" (nicht nur unbestätigt: gemessen und widerlegt).
+`resizeEvent` ist damit **keine Ausnahme**. Wichtiger noch: §21.7s Originalfund kam
+aus echtem, laufendem DrRacket (Preferences-Dialog), dessen Eventspace-Queue
+nachweislich sauber läuft (Menüs/Buttons/`test-dock-size` funktionieren) — der obige
+Befund erklärt das dortige Reflow-Versagen also nicht, sondern zeigt, dass das
+bare-`racket`-Sleep-Loop-Messinstrument dieser Sessions (inkl.
+`live-resize-probe.rkt`) für diese Frage ungeeignet ist. Nächste Session: erst in
+einer nachweislich sauber pumpenden Harness (echtes DrRacket oder
+yield-/eventspace-idle-basiertes Skript) neu messen, dann erst ein vierter
+Wiring-Versuch (§21.9). Bug bleibt offen; Editor-Canvas-Scrollbars
 (2026-09-11 Windows: Fix-Versuch
 root-caused einen degenerierten Scroll-Range-Bug, der den Editor-Inhalt komplett
 weißmalt — Fix zurückgerollt/geparkt, additive Shim-Primitiven bleiben als Grundlage

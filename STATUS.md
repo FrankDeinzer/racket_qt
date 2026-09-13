@@ -5,7 +5,7 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
-## Session 2026-09-13 (Linux, Fortsetzung) — Block B: Resize/Reflow-Bug (§21.7), dritter Fix-Versuch — sicherer als je zuvor, aber weiterhin ungelöst
+## Session 2026-09-13 (Linux, Fortsetzung) — Block B: Resize/Reflow-Bug (§21.7), dritter Fix-Versuch — sicherer als je zuvor, aber weiterhin ungelöst; Nachmessung zeigt defektes Messinstrument
 
 **Kontext:** direkte Fortsetzung von Block A, kein eigener Prompt. Voller Bericht:
 `docs/2026-09-13_report-linux.md` (Abschnitt "Block B"). Details: `docs/HACKING.md`
@@ -29,19 +29,39 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
   `queue-on-size`-Thunk aus `resizeEvent` heraus läuft während des normalen
   Programmbetriebs nie. Root-Cause nicht gefunden (Budget deutlich überschritten),
   vollständig zurückgerollt, kein Commit.
-- **Nachträglicher Diskriminator-Test** (bloßes `queue-callback` in derselben
-  bare-`racket`-Sleep-Loop-Harness, ohne jede resizeEvent-Verdrahtung): der Thunk
-  lief ebenfalls nicht während 15s Ticks, sondern erst beim Prozess-Interrupt. Die
-  ursprünglich behauptete Asymmetrie zu `closeEvent` ("funktioniert seit Monaten")
-  stammt aus der Projekt-Historie (DrRacket), nicht aus derselben Harness — **nicht
-  gegengeprüft**, könnte teilweise ein Harness-Artefakt statt eine
-  resizeEvent-spezifische Lücke sein. Siehe `docs/HACKING.md` §21.9.
-- **Wichtigster Fortschritt:** der Bug ist jetzt als "gepostetes Thunk aus
-  `resizeEvent` läuft in dieser Harness nie" präzise eingegrenzt, statt als
-  "Rückkopplungsschleife" — ein klarerer, weniger gefährlicher Ausgangspunkt für
-  die nächste Session, aber mit offener Frage ob harness- oder resize-spezifisch.
+- **Folgesession, gleicher Tag, Nutzer-Auftrag „Diskriminator-Test":** zwei
+  Diskriminator-Messungen, beide vollständig zurückgerollt (Hashes vor/nach
+  identisch, Shim neu gebaut, Gate grün). (1) Bloßes `queue-callback`, kein
+  Resize-/Close-Bezug: Thunk lief nicht während 15s Ticks, erst beim
+  Prozess-Interrupt. (2) Gezielt `closeEvent`: temporärer
+  `shim_window_request_close`-Hook (`QTimer::singleShot(0, ...)`, damit `close()`
+  wie ein echter Klick innerhalb von `processEvents()` läuft, nicht synchron aus
+  Racket-Code) plus Debug-Prints in `close-cb`. Ergebnis: `close_cb` (C-Callback)
+  feuert zuverlässig (7ms), aber das geposteste Thunk startet **ebenfalls nicht**
+  während des Betriebs — erst ~1s nachdem der Hauptthread seine eigene Sleep-Loop
+  beendet hatte. **Die Behauptung „closeEvent funktioniert seit Monaten
+  zuverlässig" ist damit durch Messung widerlegt** (nicht nur unbestätigt) —
+  `resizeEvent` ist keine Ausnahme, sondern folgt demselben Muster wie jedes
+  andere geposteste Thunk in dieser Harness.
+- **Wichtigste Erkenntnis (Advisor-Review):** §21.7s Original-Fund kam aus echtem,
+  laufendem DrRacket (Preferences-Dialog), dessen Eventspace-Queue nachweislich
+  sauber läuft (Menüs/Buttons/`test-dock-size` funktionieren). Der obige Befund
+  erklärt das dortige Reflow-Versagen also **nicht** — er zeigt stattdessen, dass
+  das Messinstrument dieser und der Block-B-Session (bare-`racket`-Skript mit
+  `(sleep 1)`-Hauptthread-Schleife, inkl. `live-resize-probe.rkt`) die
+  Eventspace-Queue in einem Zustand beobachtet, der mit echtem DrRacket-Betrieb
+  nicht vergleichbar ist. **Nicht das Bugfeld ist geklärt, sondern dass das
+  bisherige Instrument dafür ungeeignet ist.**
+- **Für die nächste Session:** zuerst in einer nachweislich sauber pumpenden
+  Harness (echtes DrRacket oder ein `yield`/eventspace-idle-basiertes statt
+  `sleep`-basiertes Skript) neu messen, ob `resizeEvent`/`get-width` sich anders
+  verhalten als hier beobachtet — erst danach ein vierter Wiring-Versuch. Offene
+  Kernfrage: warum reflowt der Preferences-Dialog in echtem DrRacket nicht, obwohl
+  dessen Queue nachweislich läuft? Siehe `docs/HACKING.md` §21.9.
 - Zwei neue Diagnose-Proben (`resize-reflow-probe.rkt`, `live-resize-probe.rkt`)
-  bleiben im Repo; keine Commits in `wx/qt/`/`shim.cpp` aus diesem Block.
+  bleiben im Repo, Header von `live-resize-probe.rkt` um den
+  Instrument-Vorbehalt ergänzt; keine Commits in `wx/qt/`/`shim.cpp` aus diesem
+  Block oder der Folgesession.
 
 ---
 

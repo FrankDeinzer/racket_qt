@@ -1634,7 +1634,7 @@ echtem Preferences-Dialog, macOS via `tab-panel%` real + isolierter Proben für
 spezifisch blockiert** — nicht durch diese drei Widgets, sondern durch einen davon
 unabhängigen, neu entdeckten Menü-Bug, s. §22.
 
-### 21.9 Dritter Fix-Versuch (Linux, 2026-09-13, „Block B") — resizeEvent verdrahtet, kein Crash, aber Reflow bleibt aus
+### 21.9 Dritter Fix-Versuch (Linux, 2026-09-13, „Block B") — resizeEvent verdrahtet, kein Crash, aber Reflow bleibt aus; Nachmessung entlarvt das Messinstrument selbst als defekt
 
 Nach der Konvergenz-Vormessung (rein synchron, ohne Shim-Änderung — konvergiert
 sauber, s. `docs/2026-09-13_report-linux.md`) und expliziter Nutzer-Freigabe für
@@ -1659,33 +1659,60 @@ gefunden (Budget deutlich überschritten: FFI-Callback-Kontext, Eventspace-Ziel,
 `inherit`-Hygiene und Timing alle geprüft und ausgeschlossen). Vollständig
 zurückgerollt (kein Commit, wie bei Fix-Versuch 1/2).
 
-**Wichtige Einschränkung zur Vergleichsbehauptung („funktioniert bei `closeEvent`
-seit Monaten"):** dieser Vergleich stützte sich zunächst nur auf die
-Projekt-Historie (echtes DrRacket), nicht auf eine Messung in derselben Harness
-(bloßes `racket`-Skript, Hauptthread in einer `(sleep 1)`-Schleife). Ein
-nachträglicher Diskriminator-Test in exakt dieser Harness (`PLT_QT=1`, ein
-einzelner `(queue-callback (lambda () (eprintf ...)))` direkt nach dem Fenster-
-Show, dann 15×`(sleep 1)`) zeigt: der Thunk lief **nicht** während der 15
-Sekunden-Ticks, sondern erst im Moment des Prozess-Interrupts/Teardowns
-(SIGINT via `timeout`). D. h. in dieser konkreten Harness laufen offenbar auch
-sonstige geposteste Eventspace-Thunks nicht prompt während des normalen
-Programmbetriebs — die Asymmetrie „resizeEvent-Thunk nie, closeEvent-Thunk
-zuverlässig" ist damit **nicht in derselben Harness gegengeprüft** und könnte
-teilweise ein Artefakt des bloßen `racket`-Skript-Aufbaus sein (kein DrRacket-
-Idle-Betrieb) statt eine resize-spezifische Eigenschaft. Für eine künftige
-Session: derselbe Diskriminator, aber mit einem echten `closeEvent` in
-derselben Harness ausgelöst, würde klären, ob beide Pfade gleich betroffen
-sind oder ob resizeEvent tatsächlich eine eigene Lücke hat.
+**Vergleichsbehauptung „funktioniert bei `closeEvent` seit Monaten" — durch Messung
+widerlegt (Folgesession, 2026-09-13, nach explizitem Nutzer-Auftrag).** Ein erster
+Diskriminator (bloßes `queue-callback`, kein Resize-/Close-Bezug, gleiche
+bare-`racket`-Sleep-Loop-Harness) hatte bereits gezeigt: der Thunk lief nicht während
+15 Sekunden Ticks, nur beim Prozess-Interrupt. Das allein bewies aber nur, dass
+*irgendein* gepostetes Thunk in dieser Harness verzögert läuft, nicht dass
+`closeEvent` konkret betroffen ist. Zweiter Diskriminator, gezielt auf `closeEvent`
+selbst: ein temporärer Shim-Hook `shim_window_request_close` (`QTimer::singleShot(0,
+...)` auf `RacketWindow::close()`, damit `closeEvent` — wie ein echter Titlebar-Klick
+— innerhalb von `processEvents()`/`shim_pump` ausgelöst wird, nicht synchron aus
+Racket-Code heraus) plus zwei temporäre `eprintf`s in `close-cb` (C-Callback-Eintritt,
+Thunk-Start). Ergebnis, sauber reproduziert: der native `close_cb` feuert zuverlässig
+(7 ms nach Anstoß), aber das über `qt-queue-window-event` geposteste Thunk startet
+**ebenfalls nicht** während des laufenden Programms — es lief erst rund 1 Sekunde,
+**nachdem** der Hauptthread seine eigene 20-Tick-Sleep-Schleife vollständig beendet
+hatte. Identisches Muster wie beim resize-losen Diskriminator und wie bei
+`resizeEvent`. **Die Asymmetrie „resizeEvent nie, closeEvent zuverlässig" ist damit
+für diese Harness widerlegt, nicht nur unbestätigt** — `resizeEvent` ist in der
+bare-`racket`-Sleep-Loop-Harness nicht die Ausnahme, sondern folgt demselben Muster
+wie jedes andere geposteste Thunk.
 
-**Wichtigster Unterschied zu Fix-Versuch 1/2:** dieser dritte Versuch scheiterte an
-einem „passiert nichts"-Befund, nicht an einem „geht kaputt"-Befund — das Verdrahten
-von `resizeEvent` selbst ist (zumindest für diskrete X11-Resizes) beobachtbar sicher,
-nur wirkungslos. Nächster sinnvoller Ansatzpunkt für eine künftige Session: klären,
-ob geposteste Eventspace-Thunks in der bloßen `racket`-Skript-Harness (ohne
-DrRacket) generell verzögert laufen (s. Diskriminator-Befund oben), und erst dann
-— falls nicht — gezielt nach einer resizeEvent-spezifischen Ursache in
-`wx/common/queue.rkt` suchen. Volles Detail (Log-Auszüge, geprüfte und verworfene
-Hypothesen, Diskriminator-Test): `docs/2026-09-13_report-linux.md`.
+**Das verschiebt den Befund, löst §21.7 aber nicht — im Gegenteil, es macht die
+Lage unklarer, nicht klarer (Advisor-Review):** §21.7s ursprünglicher Fund kam
+**nicht** aus einer bare-`racket`-Sleep-Loop-Probe, sondern aus echtem, laufendem
+DrRacket (Preferences-Dialog, reproduziert dort **und** in einer isolierten Probe).
+In echtem DrRacket läuft die Eventspace-Queue nachweislich — Menüs, Buttons,
+`test-dock-size` funktionieren alle über denselben Mechanismus. Der oben gemessene
+„Thunk läuft erst, wenn der Hauptthread fertig ist"-Effekt kann also **nicht** die
+eigentliche Preferences-Dialog-Reflow-Lücke erklären, sondern zeigt vor allem: **das
+Messinstrument dieser und der Block-B-Session (bare-`racket`-Skript mit
+Hauptthread-`(sleep 1)`-Schleife) beobachtet die Eventspace-Queue in einem Zustand,
+der mit echtem DrRacket-Betrieb nicht vergleichbar ist.** Das gilt explizit auch für
+`examples/live-resize-probe.rkt` (Block B) — dessen „Kind-Reflow bleibt aus"-Befund
+könnte (teilweise) durch dieselbe Instrument-Schwäche verfälscht sein, nicht nur
+durch eine echte resizeEvent-Lücke.
+
+**Für eine künftige Session, in dieser Reihenfolge:**
+1. **Erst das Instrument reparieren, dann erneut messen:** das Resize/Reflow-Verhalten
+   in einer Harness reproduzieren, die nachweislich sauber pumpt — echtes DrRacket
+   (Preferences-Dialog, wie beim ursprünglichen §21.7-Fund) oder ein Skript, das
+   statt `(sleep 1)`-Polling ein eventspace-freundliches Warten nutzt (`yield`/
+   `sync` auf einen Eventspace-Idle-Indikator statt eines reinen Timers). Erst wenn
+   diese Harness zeigt, dass Thunks prompt laufen, ist eine erneute Resize-Messung
+   aussagekräftig.
+2. Erst danach ggf. ein vierter Wiring-Versuch (`resizeEvent`) — diesmal mit einer
+   Harness, die das Ergebnis nicht durch sich selbst verfälscht.
+3. **Offene Frage, die die nächste Session zuerst beantworten sollte:** warum
+   reflowt der Preferences-Dialog in echtem DrRacket nicht, obwohl dessen
+   Eventspace-Queue nachweislich (Menüs/Buttons/`test-dock-size`) sauber läuft? Das
+   ist die eigentliche §21.7-Frage — durch diese Session nicht beantwortet, nur
+   näher eingegrenzt.
+
+Volles Detail (Log-Auszüge, beide Diskriminator-Tests, DrRacket-Widerspruch):
+`docs/2026-09-13_report-linux.md`.
 
 ## 22. macOS: Qt reißt einen Help-Menü-Eintrag fälschlich als „Preferences" ins App-Menü (gefixt, 2026-07-14)
 

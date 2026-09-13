@@ -656,3 +656,110 @@ künftiger Versuch sie erneut aufbauen möchte.
 
 ---
 
+## Block B, Folgesession (gleicher Tag) — closeEvent-Diskriminator: Asymmetrie widerlegt, Messinstrument als Verdächtiger identifiziert
+
+**Auftrag:** Nutzer bat explizit, den oben offen gelassenen Diskriminator-Test
+durchzuführen — klären, ob ein aus `closeEvent` gepostetes Thunk in derselben
+bare-`racket`-Harness tatsächlich prompt läuft (dann wäre die Asymmetrie zu
+`resizeEvent` real) oder ebenfalls erst beim Teardown (dann harness-weit).
+
+### Erster Versuch: `xdotool windowclose` — verworfen
+
+Zwei Versuche, ein echtes `closeEvent` per `xdotool windowclose` auszulösen,
+scheiterten: das Zielfenster verschwand beide Male komplett aus dem X11-Fenster-Baum
+(`xwininfo -root -tree` zeigte danach nur noch die 1×1/3×3-Qt-Hilfsfenster, keine
+`close-discriminator`-Top-Level-Zeile mehr), obwohl `RacketWindow::closeEvent`
+`e->ignore()` aufruft und `WA_DeleteOnClose` auf `false` steht — ein echter
+`WM_DELETE_WINDOW`-Roundtrip hätte das Fenster nicht zerstören dürfen. Weder der
+`can-close?`-Print (per `define/augment`, pubment-Mechanismus in `mrtop.rkt`
+korrekt identifiziert nach initialem `define/override`-Fehlversuch — `on-close`/
+`can-close?` sind `pubment*`, nicht `override*`, s. `mrtop.rkt:77-80`) noch die
+`close-cb`-Prints erschienen. Bewertung (Advisor-Review): `xdotool windowclose`
+zerstört das X-Fenster auf WM-Ebene, ohne dass ein echtes Qt-`closeEvent` je entsteht
+— dieselbe Automatisierungs-Kategorie wie die in Block A dokumentierte, ungeklärte
+X11-Stacking-Eigenheit. Kein valider Diskriminator, verworfen statt eines dritten
+WM-Trigger-Versuchs (Alt+F4/Titlebar-Klick laufen über denselben
+`_NET_CLOSE_WINDOW`-Pfad).
+
+### Zweiter Versuch: In-Prozess-Trigger über einen temporären Shim-Hook
+
+Reliabler, X11-freier Trigger: `shim_window_request_close(void* win)`
+(`qt-shim/src/shim.cpp`, temporär) ruft nicht direkt `close()` auf, sondern
+verschiebt es per `QTimer::singleShot(0, rw, [rw]{ rw->close(); })` auf den
+nächsten Event-Loop-Turn — dadurch läuft `closeEvent` unabhängig davon, welcher
+Racket-Thread den Aufruf angestoßen hat, garantiert innerhalb von
+`processEvents()`/`shim_pump`, genau wie bei einem echten Titelleisten-Klick. FFI-
+Deklaration temporär in `utils.rkt` ergänzt (Muster wie `shim_window_show`). In
+`wx/qt/frame.rkt`s `close-cb` zwei `eprintf`s ergänzt (C-Callback-Eintritt,
+Thunk-Start) sowie ein `PLT_QT_DEBUG_SELFCLOSE=<Sekunden>`-gatetes Hintergrund-
+Thread, das nach der angegebenen Verzögerung `shim_window_request_close` aufruft.
+
+Alle drei Dateien vor der Änderung gehasht (`shim.cpp`: `e1a0f7a6…`, `frame.rkt`:
+`44ce87d2…`, `utils.rkt`: `8f5b7ca0…`), nach dem Test per `git checkout --`
+zurückgerollt und Hash-Identität erneut bestätigt; Shim neu gebaut.
+
+**Testaufbau:** identische bare-`racket`-Sleep-Loop-Harness wie beim ersten
+Diskriminator (`PLT_QT=1`, Hauptthread `(sleep 1)` × 20 Ticks), `PLT_QT_DEBUG_SELFCLOSE=4`.
+
+**Ergebnis (ein Lauf, eindeutig, kein Ausreißer):**
+```
+[probe] tick 3 at 6174.267430
+[close-disc] requesting close at 7172.392992
+[probe] tick 4 at 7174.669970
+[close-disc] C callback fired at 7179.709641      ← 7ms nach Anstoß, zuverlässig
+[probe] tick 5 at 8175.404730
+...
+[probe] tick 20 at 23185.155496
+[probe] loop finished, script body done
+[close-disc] posted thunk STARTED at 24186.296078  ← ~1s NACH Hauptthread-Ende
+```
+
+Der native `close_cb` feuert zuverlässig und sofort. Das über
+`qt-queue-window-event` geposteste Thunk startet aber **nicht** während der
+verbleibenden 16 Ticks (~16 Sekunden) des laufenden Programms — es startet erst,
+nachdem der Hauptthread seine eigene Sleep-Schleife vollständig beendet hat.
+Identisches Muster wie beim ersten (resize-losen) Diskriminator und wie beim
+`resizeEvent`-Befund aus Block B.
+
+**Schlussfolgerung 1 — die Asymmetrie ist widerlegt, nicht nur unbestätigt:** die
+ursprüngliche Behauptung „ein aus `closeEvent` gepostetes Thunk funktioniert seit
+Monaten zuverlässig" hält in dieser Harness nicht. `resizeEvent` verhält sich
+identisch zu `closeEvent` — beide sind keine Ausnahme von einem harness-weiten
+Muster.
+
+**Schlussfolgerung 2 — wichtiger, per Advisor-Review (die eigentliche Pointe dieser
+Folgesession):** §21.7s ursprünglicher Befund stammt **nicht** aus einer
+bare-`racket`-Probe, sondern aus echtem, laufendem DrRacket (Preferences-Dialog,
+reproduziert dort **und** in einer isolierten Probe, s. CLAUDE.md §21.7). In echtem
+DrRacket läuft die Eventspace-Queue nachweislich — Menüs, Buttons, `test-dock-size`
+funktionieren alle über denselben Postings-Mechanismus. Der hier gemessene „Thunk
+läuft erst, wenn der Hauptthread fertig ist"-Effekt kann die Preferences-Dialog-
+Reflow-Lücke also **nicht** erklären. Er zeigt stattdessen: **das Messinstrument
+dieser und der Block-B-Session — ein bare-`racket`-Skript mit einer
+`(sleep 1)`-Hauptthread-Schleife — beobachtet die Eventspace-Queue in einem
+Zustand, der mit echtem DrRacket-Betrieb nicht vergleichbar ist.** Das gilt explizit
+auch für `examples/live-resize-probe.rkt` (Block B, identischer Sleep-Loop-Aufbau)
+— dessen „Kind-Reflow bleibt aus"-Befund könnte teilweise durch dieselbe
+Instrument-Schwäche verfälscht sein, statt ausschließlich durch eine echte
+resizeEvent-Lücke. Die Sessions haben damit **nicht die §21.7-Root-Cause
+gefunden, sondern dass das bisherige Werkzeug dafür ungeeignet ist** — ein
+Instrument-Befund, kein Bug-Befund.
+
+**Für eine künftige Session, in dieser Reihenfolge:**
+1. Zuerst das Instrument reparieren: Resize/Reflow-Verhalten in einer Harness
+   messen, die nachweislich sauber pumpt — echtes DrRacket (wie beim
+   Original-§21.7-Fund) oder ein Skript, das statt `(sleep 1)`-Polling ein
+   eventspace-freundliches Warten nutzt (`yield`/`sync` auf einen Eventspace-Idle-
+   Indikator statt eines reinen Timers).
+2. Erst danach ggf. einen vierten `resizeEvent`-Wiring-Versuch — mit einer Harness,
+   die das Ergebnis nicht selbst verfälscht.
+3. Offene Kernfrage zuerst beantworten: warum reflowt der Preferences-Dialog in
+   echtem DrRacket nicht, obwohl dessen Eventspace-Queue nachweislich sauber läuft?
+
+**Vollständig zurückgerollt** (kein Commit in `wx/qt/`/`shim.cpp`): `git status`
+im Submodul und Umbrella (nur `qt-shim/`) nach Abschluss leer, Hashes aller drei
+temporär geänderten Dateien identisch zur Baseline, Shim neu gebaut, beide
+Smoke-Gates (3/3 ohne `PLT_QT`, 3/3 mit) grün.
+
+---
+

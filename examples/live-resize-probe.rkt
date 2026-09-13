@@ -8,6 +8,15 @@
 ; eigentlich pruefen soll, ist NICHT im Baum (vollstaendig zurueckgerollt, s.
 ; docs/HACKING.md §21.9). Diese Probe zeigt deshalb aktuell absichtlich den
 ; unveraenderten Ausgangsbefund: get-width/button-Groesse bleiben eingefroren.
+; ZUSATZ-ACHTUNG (Folgesession, §21.9): dieses Skript misst durch eine
+; bare-racket-Hauptthread-(sleep 1)-Schleife -- ein closeEvent-Diskriminator-Test
+; hat gezeigt, dass GENAU dieses Harness-Muster geposteste Eventspace-Thunks
+; generell erst laufen laesst, wenn der Hauptthread fertig ist, nicht resize-
+; spezifisch. Ein "eingefrorenes" Ergebnis aus dieser Probe beweist also NICHT,
+; dass eine kuenftige resizeEvent-Verdrahtung wirkungslos waere -- es koennte
+; ebenso gut nur dieses Instrument sein. Vor einer erneuten Nutzung: gegen echtes
+; DrRacket oder eine yield-/eventspace-idle-basierte (nicht sleep-basierte)
+; Harness validieren.
 (define f (new frame% [label "live-resize-probe"] [width 300] [height 200]))
 (define p (new vertical-panel% [parent f]))
 (define b (new button% [label "resize me"] [parent p]))
