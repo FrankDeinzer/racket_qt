@@ -2826,3 +2826,120 @@ entweder zuerst den Interactions-Scroll-Blocker lösen (Teil des §24.5/§25.2-C
 und die datei-basierte Instrumentierung dann per UI verifizieren, oder die
 Permission-Frage vorab mit dem Nutzer klären (z. B. eine gezielte Bash-Regel für
 `raco make`/Schreibzugriffe unter `~/racket/share/pkgs/`).
+
+## 29. Racket-9.3-Fix-Validierung + Preferences-Sweep (macOS, 2026-09-13)
+
+**Kontext:** Folgesession zu §24/§25/§27 (Windows, 2026-09-11/12) und §28 (Linux,
+2026-09-13) für die macOS-Maschine — `docs/2026-09-11_prompt.md` (Fortsetzung),
+Ergebnis `docs/2026-09-11_report-macos.md`.
+
+**Kein Racket-Versionswechsel nötig** — diese Maschine lief bereits seit dem
+Homebrew-Auto-Update vom 2026-08-19 (außerhalb jeder Session, s. §23.2) auf v9.3.
+Sync-Check zeigte das Submodul 5 Commits hinter `origin/qt-backend` (dieselben
+Windows-Session-Commits, die Linux in §28 bereits nachgezogen hatte) — nach
+`AskUserQuestion` (Regel 7) sauberer Fast-Forward auf `a71d2e9a`.
+
+**Stale-Shim-Falle griff wie auf Linux:** `shim.cpp` (13.09.) massiv neuer als
+`libracketqtshim.dylib` (14.07., aus einer früheren Session) — Rebuild via
+`cmake --build qt-shim/build/macos-arm64` zwingend. **Fork-Recompile ist auf macOS
+ein eigener, expliziter Schritt** (anders als bei Linux, wo er implizit über
+`raco pkg update --link` mitläuft) — macOS konsumiert den Fork weiterhin per
+`-S`-Override, kein Link-Schritt. `racket -S ... -l raco -- make <die 5 geänderten
+.rkt-Dateien>` nachgeholt, `.zo`-Zeitstempel danach neuer als die Quelldateien.
+
+**Alle drei Windows-Fixes auf macOS funktional bestätigt, keine Divergenz:**
+- §24.2 (Font-Size-Slider-Zahl): Slider zeigt „20"/„15"/„50" korrekt an (drei
+  unabhängige Instanzen: `value-widgets-probe.rkt`, Preferences → Font, → General),
+  Rückklicktest (`set-value 75 via code`) bestätigt Label-Update **und** Track-Sync.
+- §24.3 (Colors-Tab-Rahmen): sowohl per eigenständiger Standalone-Probe
+  (`panel-border-probe.rkt`, zwei `vertical-panel%` mit/ohne `'(border)`-Style,
+  keine Dialog-Navigation nötig) als auch in der echten Preferences → Colors →
+  Color Schemes bestätigt — sichtbarer dunkler Rahmen um jede Schema-Zeile.
+- §27 (`frame%` maximize/iconize/fullscreen): Ad-hoc-Probe reproduziert exakt die
+  Windows/Linux-Testsequenz, keine Cocoa-spezifische Divergenz.
+
+**Automatisierungs-Blocker: Accessibility/Bedienungshilfen (gelöst, mit Lehre für
+künftige Sessions).** `osascript`/System Events verweigerte anfangs jeden
+UI-Element-Klick (`click button ... of window`, Fehler `-1719`), obwohl
+`claude`/`iTerm` bereits in den Bedienungshilfen-Einstellungen aktiviert waren.
+**Root-Cause (plausibel, nicht offiziell dokumentiert, aber empirisch bestätigt):**
+TCC prüft die Berechtigung offenbar zum Startzeitpunkt des verantwortlichen
+App-Prozesses (hier: `iTerm.app`, ermittelt über die Prozesskette `iTerm2 →
+iTermServer → login → zsh → claude`) — die laufende iTerm-Instanz war vor der
+Freigabe gestartet worden. Nach Neustart von iTerm (Nutzer-Aktion) funktionierten
+UI-Element-Klicks sofort, inklusive `entire contents of window`-Introspektion.
+**Für künftige Sessions:** nach einer frischen Bedienungshilfen-Freigabe einen
+Prozess-Neustart des Terminal-Hosts einplanen, bevor UI-Scripting als „nicht
+möglich" verworfen wird — reine Apple-Events-Abfragen (`name of every process`)
+funktionieren auch ohne die Freigabe, nur echte UI-Element-Interaktion braucht sie.
+
+**Positive Divergenz zu Windows/Linux (kein Befund, sondern eine Abwesenheit des
+bekannten §21.7-Symptoms):** der Preferences-Dialog öffnet auf macOS bei
+Initialgröße **1060×625** bereits mit sichtbarer Button-Zeile
+(„Revert All Preferences to Defaults"/„Undo Changes and Close"/„OK") — anders als
+Windows/Linux, wo dieselbe Zeile beim Erststart außerhalb des sichtbaren Bereichs
+lag (§25.1). Nicht weiter untersucht (kein Negativbefund, der eine Diagnose
+rechtfertigt) — vermutlich schlicht eine großzügigere macOS-seitige Seed-Size- oder
+Font-Metrik-Berechnung. Für eine künftige §21.7-Session als zusätzlicher
+Datenpunkt festgehalten: die Root-Cause (kein `resizeEvent`-Handler) ist
+plattformübergreifend, aber die **initiale** Seed-Size scheint es nicht
+gleichermaßen zu treffen.
+
+**Bekannter Nebenbefund reproduziert: „8 statt 9 Menüs".** Die macOS-Menüleiste
+zeigte in dieser Session konsistent (mehrfach abgefragt, kein Timing-Artefakt) nur
+8 App-eigene Menüs (`racket, File, Edit, View, Language, Racket, Insert, Scripts,
+Help`) — **„Windows" fehlte**, anders als in der 2026-09-10-Session (§23.2s
+Menü-Sanity-Check zeigte dort alle 9 inkl. „Windows"). Deckt sich mit dem in
+`CLAUDE.md` seit Langem vermerkten, intermittierenden Befund („Windows-Menü fehlt
+manchmal, Ursache offen"). **Nicht weiter verfolgt** (kein Budget in dieser Session
+dafür vorgesehen, gehört laut Prompt zum Folge-Prompt/Backlog) — als weiterer
+Reproduktionsdatenpunkt festgehalten (n=1 diese Session: fehlend; frühere Session:
+vorhanden — bestätigt „intermittierend", keine neue Erkenntnis zur Root-Cause).
+
+**Preferences-Sweep (sechs bisher auf macOS nie durchgesehene Kategorien:
+Editing/Warnings/General/Profiling/Tools/Background Expansion) zeigt keinen
+funktionalen Defekt** — deckt sich 1:1 mit dem Windows-Befund aus §25 und dem
+Linux-Befund aus §28. Kein neuer, macOS-spezifischer Fund.
+
+**Automatisierungs-Grenze (nicht abschließend geklärt): Tools-Listbox-Klick.** Der
+in §25 (Windows) und §28 (Linux) erfolgreich durchgeführte Test „Klick auf eine
+Listbox-Zeile (`Optimization Coach`) selektiert und aktualisiert das `Tool:`-Textfeld
+live" ließ sich auf macOS **nicht verifizieren**: drei verschiedene
+Klick-Strategien (`click row N of list 1`, `click at {x,y}` auf die per
+Accessibility ermittelte Zeilenposition, `perform action "AXPress" of row N`)
+zeigten keine sichtbare Selektions-Hervorhebung, und das `Tool:`-Textfeld selbst
+ist **nicht** als eigenes Accessibility-Element auffindbar (nur das
+`static text "Tool: "`-Label existiert im UI-Baum — kein `AXTextField`-Gegenstück,
+anders als bei den vier Editing→Indenting-Listboxen, die *überhaupt keine*
+`list`/`row`-Accessibility-Elemente exponieren). Da alle anderen in dieser Session
+verwendeten Klick-Strategien (Tab-Wechsel, Radio-Buttons, Dropdown-Öffnen/Schließen)
+zuverlässig funktionierten, ist unklar, ob es sich um eine reine
+UI-Scripting-Automatisierungsgrenze bei diesem einen Listenwidget-Typ handelt oder
+um einen echten, macOS-spezifischen Funktionsdefekt der Listbox-Selektion unter Qt.
+**Nicht als Befund gewertet** (Triage-Regel 4: Budget mit drei Versuchen
+ausgeschöpft, keine eindeutige Root-Cause) — Inhalt/Struktur der Listbox selbst
+(20 Einträge, korrekt befüllt) ist identisch zu Windows/Linux und screenshot-bestätigt.
+**Für eine künftige Session:** manuelle (nicht automatisierte) Verifikation, ob ein
+echter Mausklick eines Menschen die Selektion auslöst — das würde die
+UI-Scripting-Hypothese von einem echten Produktbefund trennen.
+
+**Betriebsdisziplin:** `org.racket-lang.prefs.rktd` (macOS-spezifischer
+Preference-Pfad, ermittelt via `(find-system-path 'pref-file)` — **nicht**
+`racket-prefs.rktd` wie der generische Name auf Windows/Linux) vor jeder
+Interaktion gehasht (SHA-256) und gesichert; Hash änderte sich nach der
+Preferences-Session wie erwartet (Recently-Opened-Liste etc.), nach sauberem
+`Quit racket` (Menü, kein Absturz, kein Zombie-Prozess) zurückgespielt (`command
+cp -f`, da ein `cp`-Alias in dieser Shell interaktiv nachfragt), Hash danach wieder
+identisch zum Vor-Sitzungs-Stand. `git status` beider Repos nach der gesamten
+Automatisierungsrunde: beide clean (nur der neue, gewollte
+`docs/2026-09-11_report-macos.md`).
+
+**Ergebnis: keine Code-Änderung, kein Commit in `wx/qt/`/`qt-shim/`** — diese
+Session war reine Sync + Validierung + Sweep. Beide Regressions-Gates (Smoke
+mit/ohne `PLT_QT=1`) grün.
+
+**Offener Punkt (keine Entscheidung in dieser Session):** macOS' `-S`→Link-Parität
+(Angleich an Windows/Linux Installation-Scope-Link) wurde dem Nutzer erklärt
+(Versionscheck, Backup, `raco pkg update --link`, Nativ-Gate, eigenes
+Rollback-Profil), aber noch nicht freigegeben oder verschoben — offen für die
+nächste Session.

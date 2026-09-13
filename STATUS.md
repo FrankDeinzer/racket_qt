@@ -5,6 +5,42 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-13 (macOS) — Fix-Validierung + Preferences-Sweep: keine Code-Änderung, keine neuen Befunde
+
+**Kontext:** `docs/2026-09-11_prompt.md` (Fortsetzung für macOS, nach Windows-Abschluss
+2026-09-11/12 und Linux 2026-09-13). Voller Bericht: `docs/2026-09-11_report-macos.md`.
+Details: `docs/HACKING.md` §29.
+
+- **Kein Racket-Versionswechsel nötig** — Maschine lief bereits seit 2026-08-19
+  (Homebrew-Auto-Update, §23.2) auf v9.3.
+- **Drei-Maschinen-Sync-Check zuerst** (Regel 7): Submodul war 5 Commits hinter
+  `origin/qt-backend` (dieselben Windows-Session-Commits, die Linux bereits
+  nachgezogen hatte) — nach `AskUserQuestion` sauberer Fast-Forward auf `a71d2e9a`.
+- **Shim-Rebuild zwingend** (wie Linux, anders als Windows) — `shim.cpp` massiv
+  neuer als die gebaute `.dylib` aus einer früheren Session. **Fork-Recompile
+  (`raco make`) ist auf macOS ein eigener expliziter Schritt** (kein Link wie bei
+  Linux) — nachgeholt, Nativ-Gate + Qt-Smoke 3/3 grün.
+- **§24.2 (Slider-Zahl), §24.3 (Colors-Rahmen), §27 (frame% maximize/iconize/
+  fullscreen)** auf macOS validiert — alle drei funktional identisch zu Windows/
+  Linux, keine Cocoa-spezifische Divergenz.
+- **Preferences-Sweep** (sechs bisher auf macOS nie durchgesehene Kategorien) —
+  keine funktionalen Defekte; ein Punkt (Tools-Listbox-Klick-Selektion) bleibt
+  automatisierungsbedingt unklar (drei UI-Scripting-Strategien ohne sichtbare
+  Wirkung, keine Root-Cause-Zuordnung möglich — s. §29).
+- **Positive Divergenz:** Preferences-Button-Zeile ist auf macOS bereits bei
+  Initialgröße erreichbar (anders als Windows/Linux, §25.1-Cluster).
+- **Bekannter Nebenbefund reproduziert:** Menüleiste zeigt 8 statt 9 Menüs
+  („Windows"-Menü fehlt) — deckt sich mit dem seit Langem vermerkten,
+  intermittierenden Backlog-Item, nicht weiter verfolgt.
+- **Automatisierungs-Lehre:** Bedienungshilfen-Freigabe für den Terminal-Host
+  (hier: iTerm) griff erst nach einem Prozess-Neustart — TCC prüft offenbar zum
+  Startzeitpunkt des verantwortlichen App-Prozesses.
+- **Kein Commit in `wx/qt/`/`qt-shim/`** — diese Session war reine Sync +
+  Validierung + Sweep, analog zu Linux. `-S`→Link-Parität dem Nutzer erklärt,
+  Entscheidung noch offen für eine künftige Session.
+
+---
+
 ## Session 2026-09-13 (Linux) — Racket-9.3-Migration + Fix-Validierung: keine Code-Änderung, keine neuen Befunde
 
 **Kontext:** `docs/2026-09-11_prompt.md` (Fortsetzung für Linux, nach Windows-Abschluss
