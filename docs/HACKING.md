@@ -2938,8 +2938,53 @@ Automatisierungsrunde: beide clean (nur der neue, gewollte
 Session war reine Sync + Validierung + Sweep. Beide Regressions-Gates (Smoke
 mit/ohne `PLT_QT=1`) grün.
 
-**Offener Punkt (keine Entscheidung in dieser Session):** macOS' `-S`→Link-Parität
-(Angleich an Windows/Linux Installation-Scope-Link) wurde dem Nutzer erklärt
-(Versionscheck, Backup, `raco pkg update --link`, Nativ-Gate, eigenes
-Rollback-Profil), aber noch nicht freigegeben oder verschoben — offen für die
-nächste Session.
+### 29.1 macOS `-S`→Link-Parität nachgezogen (2026-09-13, Fortsetzung derselben Session)
+
+**Auslöser:** Nutzer-Rückfrage, warum die zunächst als „eigene Session" empfohlene
+`-S`→Link-Migration nicht direkt jetzt gemacht wird — auf Windows/Linux war der
+Link-Status ohnehin nie eine bewusste Session-Entscheidung, sondern schlicht der
+Ist-Zustand. Die ursprüngliche Advisor-Empfehlung („eigene Session") war eine
+Scope-Bündelungs-Präferenz, kein echtes Risiko — nach Prüfung der eigentlichen
+Voraussetzungen (Versionscheck, Schreibrechte) stand dem nichts entgegen.
+
+**Voraussetzungen gemessen, alle grün:**
+- Installierte `gui-lib`/`draw-lib` (`/Applications/Racket v9.3/share/pkgs/`, via
+  `(get-info/full ...)`, nicht per Info.rkt-`#:version`-Grep — der liefert
+  Dependency-Constraints, nicht die Paket-eigene Version): **1.80**/**1.24**,
+  identisch zum Fork. Sweep über alle installierten Pakete (korrigierte
+  `#:version`-Extraktion, `assoc` schlug an der `(#:version "...")`-Listenform
+  fehl — Keyword-Suche in der Dep-Liste statt `assoc` nötig): höchste geforderte
+  Version 1.80/1.23, beide vom Fork erfüllt. Kein Angleich nötig, identisch zum
+  Windows/Linux-Befund.
+- Schreibrechte: `/Applications/Racket v9.3/share/pkgs/gui-lib` ist
+  `deinzer:staff`-owned, beschreibbar ohne `sudo` — anders als ursprünglich
+  angenommen (Analogieschluss von Windows' `Program Files`-Bedarf war falsch;
+  Homebrew installiert nach `/Applications`, nicht nach einem Systempfad mit
+  Root-Ownership).
+
+**Backup:** `~/racket-link-backup-2026-09-13/` (`gui-lib/`, `draw-lib/`,
+`pkgs.rktd`, 29 MB) — Präzedenzfall Windows `docs/2026-07-02_report.md`, Linux
+`~/racket-link-backup-2026-07-14/`.
+
+**Link-Schritt vom Auto-Mode-Classifier blockiert** (`raco pkg update --link ...`,
+Grund „Irreversible Local Destruction" — dieselbe Blocker-Klasse wie §28.1 auf
+Linux). Kein Workaround versucht (Anweisung: Verweigerungen nicht umgehen);
+stattdessen dem Nutzer den exakten Befehl zur Selbstausführung gegeben. Nutzer
+führte aus (Hintergrund-Task, >120s Laufzeit für den vollen `raco setup`-Durchlauf,
+exit 0).
+
+**Gate-Tests nach dem Link (beide grün, `-S` vollständig entfernt):**
+- `raco test tests/smoke.rkt` **ohne** `PLT_QT`: 3/3.
+- Natives DrRacket (`racket -l drracket`, kein `PLT_QT`): startet sauber (Fenstertitel
+  „Untitled - DrRacket", Racket-Version-Banner „9.3 [cs]" im Interactions-Fenster),
+  kein Linklet-/Versions-Mismatch, sauber per Menü beendet.
+- `raco test tests/smoke.rkt` **mit** `PLT_QT=1`: 3/3 (bekannte
+  `QThreadStorage`-Nebenausgabe, vorbestehend).
+- Echtes DrRacket unter `PLT_QT=1` (`racket -l drracket`, **kein** `-S` mehr):
+  startet sauber unter Qt, sauber per Menü beendet, kein Zombie-Prozess.
+
+**Ergebnis:** macOS konsumiert `gui-lib`/`draw-lib` jetzt wie Windows/Linux per
+Installation-Scope-Link — alle drei Plattformen sind bezüglich Link-vs.-`-S`
+angeglichen. `CLAUDE.md`-Run-Rezepte entsprechend aktualisiert (kein `-S` mehr in
+den macOS-Beispielen). Kein Commit im gui-Submodul nötig (reine
+Installations-Änderung, kein Source-Diff).

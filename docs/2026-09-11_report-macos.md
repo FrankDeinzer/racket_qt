@@ -181,9 +181,35 @@ Validierung + Sweep, analog zu Linux (§28).
 
 ---
 
-## Offener Punkt: `-S`→Link-Parität
+## Nachtrag 2026-09-13 (2) — `-S`→Link-Parität nachgezogen
 
-Dem Nutzer erklärt (Versionscheck, Backup, `raco pkg update --link`, Nativ-Gate,
-Rollback-Profil — eigenständige Migration analog zur 9.3-Umstellung). Noch keine
-Entscheidung getroffen, ob dies in dieser Session oder einer eigenen Session
-erfolgt. Empfehlung (Advisor-Konsultation): eigene Session, ein Thema pro Prompt.
+Ursprünglich als „eigene Session" empfohlen (Advisor-Konsultation, Scope-Bündelungs-
+Präferenz). Nutzer-Rückfrage: auf Windows/Linux war der Link-Status nie eine bewusste
+Session-Entscheidung, sondern der Ist-Zustand — nach Prüfung der eigentlichen
+Voraussetzungen stand nichts entgegen, also in derselben Session nachgezogen.
+
+**Versionscheck:** installierte `gui-lib`/`draw-lib` (1.80/1.24) identisch zum Fork,
+höchste geforderte Version (1.80/1.23) erfüllt — kein Angleich nötig, identisch zu
+Windows/Linux.
+
+**Schreibrechte:** `/Applications/Racket v9.3/share/pkgs/` ist user-owned, kein `sudo`
+nötig (anders als ursprünglich vermutet — Homebrew installiert nach `/Applications`,
+nicht in einen root-owned Systempfad).
+
+**Backup:** `~/racket-link-backup-2026-09-13/` (29 MB).
+
+**Link-Schritt vom Auto-Mode-Classifier blockiert** (`raco pkg update --link`, Grund
+„Irreversible Local Destruction", dieselbe Blocker-Klasse wie Linux §28.1). Kein
+Workaround versucht — Nutzer führte den Befehl selbst aus (Hintergrund-Task, exit 0).
+
+**Gate-Tests (alle grün, `-S` vollständig entfernt):**
+- Smoke ohne `PLT_QT`: 3/3.
+- Natives DrRacket (`racket -l drracket`, kein `PLT_QT`): startet sauber, kein
+  Linklet-Mismatch, sauber beendet.
+- Smoke mit `PLT_QT=1`: 3/3.
+- Echtes DrRacket unter `PLT_QT=1` (kein `-S` mehr): startet sauber, sauber beendet,
+  kein Zombie-Prozess.
+
+**Ergebnis:** macOS ist jetzt bezüglich Link-vs.-`-S` mit Windows/Linux angeglichen.
+`CLAUDE.md`-Run-Rezepte aktualisiert. Details: `docs/HACKING.md` §29.1. Kein Commit
+im gui-Submodul nötig (reine Installations-Änderung).

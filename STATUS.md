@@ -36,8 +36,13 @@ Details: `docs/HACKING.md` §29.
   (hier: iTerm) griff erst nach einem Prozess-Neustart — TCC prüft offenbar zum
   Startzeitpunkt des verantwortlichen App-Prozesses.
 - **Kein Commit in `wx/qt/`/`qt-shim/`** — diese Session war reine Sync +
-  Validierung + Sweep, analog zu Linux. `-S`→Link-Parität dem Nutzer erklärt,
-  Entscheidung noch offen für eine künftige Session.
+  Validierung + Sweep, analog zu Linux.
+- **Nachtrag: `-S`→Link-Parität nachgezogen** (§29.1) — Versionscheck grün (1.80/1.24
+  identisch zum Fork), kein `sudo` nötig (Homebrew-Pfad user-owned). Link-Befehl vom
+  Auto-Mode-Classifier blockiert („Irreversible Local Destruction", wie Linux §28.1);
+  Nutzer führte ihn selbst aus. Beide Gates (nativ + Qt, DrRacket und Smoke) danach
+  grün, `-S` vollständig aus den macOS-Run-Rezepten entfernt — alle drei Plattformen
+  jetzt bezüglich Link-vs.-`-S` angeglichen.
 
 ---
 
