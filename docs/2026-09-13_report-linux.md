@@ -208,12 +208,17 @@ Fokus-Problem dieser Automatisierungsumgebung: `xdotool getactivewindow` bestät
 dem Klick zuverlässig das Probe-Fenster als aktiv/im Vordergrund (auch per Screenshot
 visuell verifiziert), aber der synthetische Klick selbst (`mousemove`+`click` **und**
 separat `mousedown`/`mouseup`) hebt reproduzierbar stattdessen das Terminalfenster
-(„racket_qt : claude — Konsole") an — der Klick landet office nicht auf dem
-Button, sondern scheint auf X11-Stacking-Ebene ein anderes Fenster zu treffen als das,
-was der Compositor sichtbar oben zeigt (vermutlich ein X11/Wayland-Stacking-
-Diskrepanz-Artefakt dieser spezifischen Sitzung — dieselbe Klick-Technik funktionierte
-zuverlässig gegen die deutlich länger laufenden DrRacket-Fenster in Phase 0/Akzeptanztest,
-nur nicht gegen dieses sehr kurzlebige Einzel-Widget-Fenster). Klickzähler blieb in
+(„racket_qt : claude — Konsole") an — der Klick landet offenbar nicht auf dem
+Button, sondern trifft ein anderes Fenster als das, was `xdotool getactivewindow`
+und der Screenshot unmittelbar zuvor als aktiv/oben bestätigt hatten. **Korrektur
+(nachträglich verifiziert):** die Sitzung lief unter **X11** (`XDG_SESSION_TYPE=x11`,
+`loginctl` bestätigt), **nicht** Wayland/XWayland — eine zunächst vermutete
+Wayland-Kompositor-vs-X11-Stacking-Diskrepanz scheidet damit als Erklärung aus. Die
+tatsächliche Ursache des Fokus-Sprungs bleibt ungeklärt (dieselbe Klick-Technik
+funktionierte zuverlässig gegen die deutlich länger laufenden DrRacket-Fenster in
+Phase 0/Akzeptanztest, nur nicht gegen dieses sehr kurzlebige Einzel-Widget-Fenster —
+möglicherweise eine reine Timing-/Kurzlebigkeits-Eigenheit dieses Fensters, nicht
+X11 oder Wayland an sich). Klickzähler blieb in
 allen Versuchen bei 0, sowohl vor als auch nach `enable #f` — kein Unterschied
 zwischen den beiden Zuständen gemessen, also **kein** Beleg weder für noch gegen den
 Fix aus dieser Teilverifikation. **Ergebnis:** Klick-Verhalten bleibt unverifiziert;
