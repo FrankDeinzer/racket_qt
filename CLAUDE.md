@@ -160,7 +160,13 @@ referenziert).
 
 **Offene Nebenbefunde, je eigene Session:** macOS-Menüleiste zeigt teils 8 statt 9
 Einträge (`Windows`-Menü fehlt manchmal, Ursache offen — evtl. verwandt mit §22, nicht
-bestätigt, durch den §22-Fix nicht berührt); **gefixt 2026-07-14 (§22):**
+bestätigt, durch den §22-Fix nicht berührt). **Präzisiert 2026-09-13 (§29.2):**
+innerhalb einer einzelnen Session ist der Zustand stabil (3/3 Neustarts identisch 8
+Menüs) — die Intermittenz zeigt sich vermutlich nur **zwischen** Sessions, nicht
+während einer laufenden. **Zombie-Prozess beim Schließen des letzten Fensters
+explizit reproduziert** (§29.2, 2026-09-13): Fenster schließt, Prozess läuft >13s
+unverändert weiter, kein Crash — deckt sich mit dem unten dokumentierten Befund.
+**gefixt 2026-07-14 (§22):**
 macOS-App-Menü-Eintrag an der „Preferences"-Stelle löste den falschen Callback aus
 (DrRackets Help-Menü-Punkt „Configure Command Line for Racket…" statt
 `preferences:show-dialog`) — behoben durch `setMenuRole(NoRole)` in `shim.cpp` +
@@ -193,7 +199,10 @@ Fenster-Vergrößern nicht mit, reproduziert sowohl im Preferences-Dialog als au
 isolierten Probe, §21.7); Editor-Canvas-Scrollbars (2026-09-11 Windows: Fix-Versuch
 root-caused einen degenerierten Scroll-Range-Bug, der den Editor-Inhalt komplett
 weißmalt — Fix zurückgerollt/geparkt, additive Shim-Primitiven bleiben als Grundlage
-für einen zweiten Anlauf, §24.5); Colors-Tab rechte Spalte (Rahmen-Teil 2026-09-11
+für einen zweiten Anlauf, §24.5. **Auf macOS reproduziert (2026-09-13, §29.2), aber
+mit abweichendem Symptom:** Inhalt rendert korrekt, nur das Scrollen selbst bleibt
+wirkungslos — zwei plattformspezifische Symptome derselben Root-Cause, wichtiger
+Zusatzbefund für den künftigen Scroll-Fix); Colors-Tab rechte Spalte (Rahmen-Teil 2026-09-11
 gefixt, §24.3). Font-Size-Slider-Zahl **gefixt 2026-09-11** (§24.2). Neuer Nebenbefund
 (2026-09-11, inzident entdeckt, vorbestehend/unabhängig von den Scrollbar-Änderungen,
 per `git stash` bestätigt): grafischer Störeffekt (orange/blau gestreiftes Rechteck) nahe

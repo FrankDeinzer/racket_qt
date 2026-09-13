@@ -213,3 +213,129 @@ Workaround versucht — Nutzer führte den Befehl selbst aus (Hintergrund-Task, 
 **Ergebnis:** macOS ist jetzt bezüglich Link-vs.-`-S` mit Windows/Linux angeglichen.
 `CLAUDE.md`-Run-Rezepte aktualisiert. Details: `docs/HACKING.md` §29.1. Kein Commit
 im gui-Submodul nötig (reine Installations-Änderung).
+
+---
+
+## Nachtrag 2026-09-13 (3) — Vier zusätzliche Prüfpunkte (auf Nutzerwunsch)
+
+### A — htdp-Proben-Regressionscheck nach dem `-S`→Link-Umbau
+
+Alle fünf Proben über echtes DrRacket (`racket -l drracket --`, kein `-S` mehr) erneut
+gelaufen, um den Link-Wechsel gegen die 2026-09-10-Baseline zu prüfen.
+
+- **`htdp-image-probe.rkt`:** 5/5 Bilder korrekt — identisch zur Baseline, keine
+  Regression durch den Link-Wechsel.
+- **`htdp-text-isolated-probe.rkt`:** rendert sofort korrekt — Baseline bestätigt.
+- **`htdp-bigbang-probe.rkt`:** Tick-Zähler lief sichtbar hoch (2 → 33 in 3s) — Kern-
+  Wette bestätigt, keine Regression.
+- **`htdp-tests-probe.rkt`:** `test-dock-size`-Crash byte-identisch reproduziert
+  (`preferences:set: ... pref symbol: 'test-engine:test-dock-size, given: '(1)`),
+  Prozess überlebt — erwartete, bereits dokumentierte Baseline.
+- **`htdp-image-count-probe.rkt` — neuer Datenpunkt, kein Regressionsbefund:** diese
+  Probe wurde auf macOS **nie zuvor ausgeführt** (per Grep über alle bisherigen
+  Reports bestätigt — nur Windows/Linux hatten sie in ihren jeweiligen Sessions).
+  Ergebnis: **5 von 6** Bildern rendern (die letzten beiden reinen Kreise, Bild 6
+  fehlt dauerhaft, stabil über >10s beobachtet). Das ist eine **dritte Variante**
+  desselben bekannten §23.1-Bugs — Windows zeigt 6/6, Linux 4/6, macOS jetzt 5/6.
+  Da die Probe nie zuvor auf macOS lief, ist dies **kein Beleg für eine Regression**
+  durch den heutigen Link-Wechsel, sondern ein neuer Datenpunkt für die bestehende,
+  plattformübergreifende Untersuchung.
+
+**Ergebnis A: keine Regression durch den `-S`→Link-Umbau.** Ein neuer, unabhängiger
+Datenpunkt für §23.1 (macOS: 5/6 statt Windows 6/6 / Linux 4/6).
+
+### B — Zombie-Prozess-Test (Schließen des letzten Fensters statt „Quit")
+
+Bekannter Backlog-Punkt (`CLAUDE.md`: „nach dem §22-Voll-Gating beendet das
+Schließen des letzten Fensters den Prozess nicht"). Bisher nie explizit in dieser
+Sessionreihe direkt gemessen (frühere Sessions beendeten stets über „Quit").
+
+**Test:** einziges offenes DrRacket-Fenster über die native Schließen-Schaltfläche
+(rot, `AXCloseButton`) geschlossen, nicht über das Menü.
+
+**Ergebnis: bestätigt reproduziert.** Fenster verschwindet sofort (kein Eintrag mehr
+in der Fensterliste), der `racket`-Prozess läuft aber **unverändert weiter** (per
+`ps` bestätigt, >13s nach dem Schließen, keine Anzeichen eines verzögerten Exits).
+Deckt sich exakt mit dem dokumentierten Backlog-Befund. Kein Root-Cause-Versuch
+(bleibt Teil des bestehenden, geparkten Clusters), Prozess danach manuell beendet
+(`kill -9`).
+
+### C — Tools-Listbox-Klick-Ambiguität: nicht auflösbar in dieser Session
+
+Geplanter Kontroll-Test: Finder-Fenster in Listenansicht öffnen, per `osascript`
+denselben Klick-Mechanismus gegen ein bekannt funktionierendes natives Listenwidget
+testen, um zu unterscheiden ob die aus §29 bekannte Ambiguität eine
+UI-Scripting-Automatisierungsgrenze oder ein echter Produktbefund ist.
+
+**Blockiert:** `tell application "Finder" to make new Finder window ...` lief in ein
+`-1712`-Timeout (AppleEvent-Zeitüberschreitung) — dieselbe Art
+Henne-Ei-Berechtigungsproblem wie bei der Accessibility-Freigabe zu Sessionbeginn.
+Der zugrunde liegende `„iTerm.app“ möchte … „Finder.app“ steuern`-Dialog (TCC-
+Automation-Berechtigung, Prozess `UserNotificationCenter`) tauchte **erst 20+ Minuten
+später**, während einer völlig anderen Aktion (Scroll-Cluster-Probe, s. u.), sichtbar
+auf — das Timeout trat auf, **bevor** der Dialog überhaupt gerendert wurde, kein
+Klick war zum ursprünglichen Zeitpunkt möglich. Per Koordinatenklick (`click at`)
+später abgelehnt (`Nicht erlauben`), um die Automatisierungsgrenze nicht künstlich zu
+erweitern.
+
+**Ergebnis: kein Kontroll-Test möglich, Ambiguität bleibt ungeklärt** (Budget für
+diesen Punkt ausgeschöpft — dieselbe Diagnoseklasse wie C bereits in §29, kein
+weiterer Versuch in dieser Session). Für eine künftige Session: entweder die
+Finder-Automation-Freigabe vorab (nicht mitten in einer anderen Aktion) einholen,
+oder einen manuellen (nicht automatisierten) Klicktest durch den Nutzer als
+Alternative erwägen.
+
+### D — „8 statt 9 Menüs": innerhalb dieser Session konsistent, nicht intermittierend
+
+Drei aufeinanderfolgende, unabhängige DrRacket-Neustarts (`racket -l drracket --`,
+je eigener Prozess), Menüleiste nach jedem Start abgefragt.
+
+**Ergebnis: 3/3 identisch** — `Apple, racket, File, Edit, View, Language, Racket,
+Insert, Scripts, Help` (8 App-eigene Menüs, „Windows" fehlt in allen drei Läufen).
+Innerhalb dieser Session ist der Befund also **stabil reproduzierbar**, nicht
+zufällig intermittierend — das in `CLAUDE.md` vermerkte „manchmal" bezieht sich
+vermutlich auf Unterschiede **zwischen** Sessions (z. B. 2026-09-10 zeigte 9/9), nicht
+auf Streuung innerhalb einer laufenden Session. Kein Root-Cause-Versuch (bleibt
+Backlog-Item).
+
+### E — Scroll-Cluster (§24.5/§25.2) auf macOS reproduziert, mit abweichendem Symptom
+
+Bisher nie auf macOS gemessen (nur Windows/Linux). Eigenständige Probe
+(`editor-canvas%` mit `'(auto-hscroll auto-vscroll)`-Style, 100 Zeilen Testinhalt,
+Scratchpad, nicht committet).
+
+**Ergebnis — teilweise abweichend von Windows:**
+- **Inhalt rendert korrekt** (Zeilen 0–17 sichtbar, lesbar) — **anders als der
+  Windows-Befund** (§24.5: Inhalt komplett weiß, nur Caret sichtbar). Das ist ein
+  echter, neuer Divergenzpunkt.
+- **Scrollen ist jedoch komplett wirkungslos:** 40× Pfeil-runter (`key code 125`)
+  nach Fokus-Klick in den Editor bewegt die sichtbare Zeile nicht von der Stelle
+  (weiterhin Zeilen 0–17 sichtbar, keine der 100 Zeilen jenseits davon erreichbar).
+  Kein sichtbares Scrollbar-Element im Fenster.
+- **Einordnung:** dieselbe Root-Cause-Familie wie §24.5 (`show-scrollbars`/
+  `set-scrollbars` unter `wx/qt` nicht funktionsfähig) reproduziert sich auch auf
+  macOS — aber das **Symptom unterscheidet sich plattformspezifisch**: Windows
+  verliert den kompletten Textinhalt, macOS zeigt den Inhalt korrekt, verliert aber
+  die Fähigkeit, über den sichtbaren Ausschnitt hinaus zu navigieren. Für die
+  künftige dedizierte Scroll-Fix-Session ist das ein wichtiger zusätzlicher
+  Datenpunkt (zwei unterschiedliche Symptome derselben Ursache, nicht nur zwei
+  Reproduktionsfälle wie bisher angenommen).
+
+**Kein Fix-Versuch** (konsistent mit der bestehenden Parken-Entscheidung für diesen
+Cluster). Probe-Datei nur im Scratchpad, nicht committet.
+
+### Zusammenfassung Nachtrag (3)
+
+- **A:** kein Regressionsbefund durch den `-S`→Link-Umbau; ein neuer, unabhängiger
+  Datenpunkt für §23.1 (macOS 5/6 bei `image-count-probe`).
+- **B:** Zombie-Prozess-Backlog-Item explizit reproduziert (Fenster-Schließen ≠
+  Prozess-Ende).
+- **C:** Kontroll-Test an Automation-Berechtigungsgrenze gescheitert, Ambiguität
+  bleibt offen.
+- **D:** „8 statt 9 Menüs" ist innerhalb einer Session stabil (3/3), nicht
+  zufallsbedingt — Streuung vermutlich nur zwischen Sessions.
+- **E:** Scroll-Cluster auf macOS reproduziert, aber mit einem von Windows
+  abweichenden Symptom (Inhalt bleibt lesbar, nur Navigation fehlt) — wichtiger
+  Datenpunkt für die künftige Scroll-Fix-Session.
+- Keine Commits nötig (reine Diagnose, keine Code-Änderung). `git status` beider
+  Repos nach diesem Nachtrag: Umbrella nur mit Doku-Änderungen, Submodul clean.

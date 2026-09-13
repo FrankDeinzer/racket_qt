@@ -5,6 +5,29 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-13 (macOS, Fortsetzung) — vier Zusatzprüfpunkte auf Nutzerwunsch
+
+**Kontext:** direkte Fortsetzung der macOS-Session (§29/§29.1). Details:
+`docs/HACKING.md` §29.2, `docs/2026-09-11_report-macos.md` Nachtrag (3).
+
+- **A (htdp-Regressionscheck nach `-S`→Link-Umbau):** keine Regression. Neuer
+  Datenpunkt: `htdp-image-count-probe.rkt` erstmals auf macOS gelaufen — 5/6 (dritte
+  Variante des §23.1-Bugs neben Windows 6/6, Linux 4/6).
+- **B (Zombie-Prozess):** Backlog-Item explizit reproduziert — Fenster über
+  Schließen-Button (nicht „Quit") geschlossen, Prozess läuft unverändert weiter.
+- **C (Tools-Listbox-Klick):** Kontroll-Test an Finder scheiterte an einer
+  TCC-Automation-Berechtigung, die erst 20 Minuten verzögert als Dialog auftauchte —
+  Ambiguität bleibt ungeklärt, bewusst nicht weiterverfolgt.
+- **D (8 statt 9 Menüs):** 3/3 Neustarts identisch 8 Menüs — innerhalb einer Session
+  stabil, Intermittenz vermutlich nur zwischen Sessions.
+- **E (Scroll-Cluster §24.5):** erstmals auf macOS reproduziert, aber mit
+  abweichendem Symptom — Inhalt rendert korrekt (anders als Windows' Weißmalen),
+  Scrollen selbst bleibt komplett wirkungslos. Wichtiger Zusatzdatenpunkt für die
+  künftige Scroll-Fix-Session.
+- **Keine Commits** — reine Diagnose, keine Code-Änderung.
+
+---
+
 ## Session 2026-09-13 (macOS) — Fix-Validierung + Preferences-Sweep: keine Code-Änderung, keine neuen Befunde
 
 **Kontext:** `docs/2026-09-11_prompt.md` (Fortsetzung für macOS, nach Windows-Abschluss

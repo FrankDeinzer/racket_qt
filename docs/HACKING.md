@@ -2988,3 +2988,42 @@ Installation-Scope-Link — alle drei Plattformen sind bezüglich Link-vs.-`-S`
 angeglichen. `CLAUDE.md`-Run-Rezepte entsprechend aktualisiert (kein `-S` mehr in
 den macOS-Beispielen). Kein Commit im gui-Submodul nötig (reine
 Installations-Änderung, kein Source-Diff).
+
+### 29.2 Vier zusätzliche Prüfpunkte (2026-09-13, Fortsetzung, auf Nutzerwunsch)
+
+**A — htdp-Regressionscheck nach dem Link-Umbau:** alle fünf Proben erneut gelaufen,
+keine Regression. Neuer Datenpunkt: `htdp-image-count-probe.rkt` lief **erstmals**
+auf macOS (Grep über alle bisherigen Reports bestätigt: vorher nur Windows/Linux) —
+Ergebnis **5/6** (dritte Variante des §23.1-Bugs neben Windows 6/6 und Linux 4/6, kein
+Regressionsbefund, da keine macOS-Baseline existierte).
+
+**B — Zombie-Prozess-Backlog-Item explizit reproduziert:** einziges DrRacket-Fenster
+über die native Schließen-Schaltfläche (nicht „Quit") geschlossen — Fenster
+verschwindet, Prozess läuft >13s unverändert weiter. Deckt sich exakt mit dem
+längst dokumentierten, aber bisher nie in dieser Sessionreihe direkt gemessenen
+Backlog-Punkt.
+
+**C — Tools-Listbox-Klick-Ambiguität (§29) nicht auflösbar:** geplanter Kontroll-Test
+gegen Finder (bekannt funktionierendes natives Listenwidget) scheiterte an einer
+TCC-Automation-Berechtigung (`iTerm → Finder`), die erst mit ~20 Minuten Verzögerung
+und während einer unabhängigen Aktion als Dialog erschien (Prozess
+`UserNotificationCenter`) — zum ursprünglichen Zeitpunkt lief die Anfrage in ein
+`-1712`-AppleEvent-Timeout, kein Klick möglich. Bewusst abgelehnt statt nachträglich
+genehmigt, um die Automatisierungsgrenze nicht zu erweitern. Ambiguität bleibt offen.
+
+**D — „8 statt 9 Menüs" ist innerhalb einer Session stabil:** 3/3 unabhängige
+DrRacket-Neustarts zeigten identisch 8 Menüs (`Windows` fehlt in allen drei Läufen).
+Die in `CLAUDE.md` vermerkte Intermittenz bezieht sich vermutlich auf Unterschiede
+**zwischen** Sessions (z. B. 2026-09-10 zeigte 9/9), nicht auf Streuung während einer
+laufenden Session.
+
+**E — Scroll-Cluster (§24.5) auf macOS reproduziert, mit abweichendem Symptom:**
+Standalone-Probe (`editor-canvas%`, `'(auto-hscroll auto-vscroll)`, 100 Zeilen) zeigt:
+Inhalt rendert **korrekt** (anders als Windows' Weißmal-Symptom), aber Scrollen ist
+komplett wirkungslos (40× Pfeil-runter nach Fokus-Klick bewegt die Ansicht nicht).
+Gleiche Root-Cause-Familie (`show-scrollbars`/`set-scrollbars` unter `wx/qt`
+nicht funktionsfähig), aber **zwei unterschiedliche plattformspezifische Symptome**
+derselben Ursache — wichtiger Zusatzbefund für die künftige dedizierte
+Scroll-Fix-Session. Kein Fix-Versuch, Probe nur im Scratchpad.
+
+**Keine Commits** — alle vier Punkte waren reine Diagnose, keine Code-Änderung.
