@@ -241,6 +241,39 @@ Die ersten Sekunden (`ps %cpu`) zeigen 50–90 % — das ist Bytecode-Kompilatio
 Instantane CPU nach ~12s: ~1 %. Vor CPU-Messungen Bytecodes vorkompilieren:
 `PLT_QT=1 raco make -v third_party/gui/gui-lib/mred/mred.rkt`.
 
+### GUI-Automatisierung: Werkzeuge und Fallen (Stand 2026-09-14)
+
+Vorhanden auf dieser Maschine: `xdotool`, `spectacle`, `xwd`, `python3` mit PIL.
+**Nicht** vorhanden: ImageMagick (`convert`/`import`), `wmctrl`, `scrot`,
+`gnome-screenshot`. Sitzungstyp ist `x11` (bei Wayland gölte nichts hiervon).
+
+```bash
+xdotool search --name "<Fenstertitel>"        # Fenster-ID
+eval $(xdotool getwindowgeometry --shell $W)  # setzt X/Y/WIDTH/HEIGHT
+xdotool windowactivate $W
+xdotool mousemove <x> <y> click 1             # Klick,  4/5 = Rad hoch/runter
+spectacle -b -a -n -o shot.png                # aktives Fenster, ohne GUI
+spectacle -b -f -n -o shot.png                # Vollbild
+python3 -c "from PIL import Image; ..."       # zuschneiden/vergroessern
+```
+
+Vier Fallen, jede hat 2026-09-14 real eine Fehlmessung erzeugt:
+
+1. **Klickkoordinaten nie aus dem Screenshot schätzen.** Die Probe soll die
+   Bildschirmmitte ihrer Controls per `client->screen` selbst melden (Muster:
+   `examples/enable-cascade-probe.rkt`, `examples/panel-scroll-probe.rkt`). Geschätzte
+   Koordinaten treffen daneben und sehen aus wie „Widget nicht klickbar" (§21.10, §34.5).
+2. **Ctrl-Akzeleratoren erreichen DrRacket hier nicht** (`ctrl+o`, `ctrl+t` per
+   `xdotool` lösen nichts aus; `F5` schon). Nur der **Menüklick** ist zuverlässig
+   (§34.7).
+3. **Ausgegraute Menüeinträge sind kein Zustandsbeweis** — DrRackets Tabs-Menü zeigt
+   „Previous/Next Tab" auch bei zwei offenen Tabs ausgegraut (§34.7). Als Zustandssonde
+   ist der **Fenstertitel** billig und verlässlich: `xdotool getwindowname $W`.
+4. **`pkill -f <muster>` killt die eigene Shell**, sobald das Muster in der eigenen
+   Kommandozeile vorkommt (Exit 144, das Kommando läuft nie). Der Bracket-Trick
+   (`'drrack[e]t'`) hilft nur, solange im **selben** Compound-Kommando nicht auch der
+   echte Startbefehl steht — sonst matcht der. Kill und Start in getrennte Aufrufe legen.
+
 ### Event-Loop (dritter Datenpunkt)
 
 `shim_pump(0)` (kein Blockieren) funktioniert auf Linux mit Qt's glib/epoll-Backend genauso
@@ -3872,6 +3905,19 @@ erreichbar **und** klickbar (getrennt prüfen)".
 | geklickt werden sie auch | `panel-scroll-probe` | ✅ **3/3** (Revert, Design, Names) |
 | dasselbe im echten Ziel | DrRacket Preferences → Colors → Color Schemes | ✅ Scrollbar da, alle drei Buttons sichtbar; „Style & Color Names" geklickt → Dialog „color names:" öffnet |
 
+**Zwei Beobachtungen aus dem echten Colors-Tab, nicht weiterverfolgt** (kein Defekt
+belegt, hier nur festgehalten, damit sie nicht verlorengehen):
+
+- **Das Mausrad über dem Colors-Panel bewegt es kaum** — 40 Rasten ergaben etwa 53 px
+  statt der erwarteten ~1000. Naheliegende Erklärung: der Zeiger stand über den
+  farbigen Beispiel-Canvases (`canvas:color%`), die das Rad als eigenen Scroll-Input
+  verbrauchen, bevor es das äußere Panel erreicht; über den Scrollbar gesteuert
+  funktioniert das Panel einwandfrei (Tabelle oben). **Ob nativ dasselbe passiert, ist
+  ungemessen** — das wäre der Diskriminator, falls jemand das für einen Defekt hält.
+- **Kurze senkrechte dunkle Segmente** links neben dem echten Scrollbar (etwa 19 px
+  weiter innen), auf Höhe der einzelnen Schema-Einträge. Vermutlich Rahmen der inneren
+  Canvases, nicht untersucht.
+
 Die Klickkoordinaten stammen **nicht** aus dem Screenshot, sondern aus
 `client->screen` der Probe selbst (Lehre aus §21.10, Vorbild
 `enable-cascade-probe`) — eine erste Runde mit aus dem Bild geschätzten Koordinaten
@@ -3942,3 +3988,63 @@ werden nicht aktualisiert) — hier nicht untersucht.
   das der Ort, an dem es fehlt.
 - **Das ausgegraute Tabs-Menü** (34.7 Punkt 2) — eigener Befund, eigene Sitzung.
 - **Kein Cross-Platform-Durchlauf** (gebündeltes Modell).
+
+---
+
+## 35. Übereinander gezeichnete Toolbar-Controls im DrRacket-Editorfenster (Linux, beobachtet 2026-09-14) — Startpunkt einer eigenen Sitzung
+
+**Status: beobachtet und belegt, NICHT untersucht. Insbesondere ist nicht gemessen, ob
+der Befund überhaupt Qt-spezifisch ist** — das ist die erste Pflichtmessung der nächsten
+Sitzung (s. 35.3). Der Abschnitt existiert, damit diese Sitzung nicht bei null anfängt.
+
+### 35.1 Was zu sehen ist
+
+Direkt unter der Toolbar-Zeile, **oben links** im DrRacket-Editorfenster, werden zwei
+Controls an derselben Stelle gezeichnet:
+
+- der Tab-/Dateinamen-Knopf — Text `Untitled` bzw. der Dateiname, schwarz, größer;
+- darüber ein zweites Control mit dem Text `Undock` — blau mit orangefarbenen Anteilen,
+  kleiner.
+
+Rechts daneben sitzt korrekt und unbeschädigt `(define ...)▾` samt den beiden
+Toolbar-Icons. Belegbild (Ausschnitt, vergrößert):
+`docs/2026-09-14-3_toolbar-overlap-linux.png`.
+
+**Reproduktion:** DrRacket unter `PLT_QT=1` starten (Rezept in `CLAUDE.md`) und den
+Bereich unmittelbar unter der Menüzeile am linken Rand ansehen. Es braucht **kein**
+Run, keinen zweiten Tab und keine Interaktion — der Effekt steht sofort nach dem Start
+im leeren `Untitled`-Puffer. Er überlebt Tab-Wechsel; der schwarze Text darunter
+wechselt dabei mit dem Dateinamen mit, der blaue `Undock`-Text bleibt.
+
+Beobachtet in **jedem** DrRacket-Screenshot der Sitzung vom 2026-09-14 (3. Sitzung),
+über mehrere Prozessstarts hinweg — also stabil, nicht sporadisch.
+
+### 35.2 Zwei Hypothesen (beide ungeprüft)
+
+1. **Das ist derselbe Befund wie der bisher nur beiläufig notierte „grafische
+   Störeffekt (orange/blau gestreiftes Rechteck) nahe dem oberen Rand des
+   DrRacket-Editor-Fensters"** (Nebenbefund in §24.5, Windows 2026-09-11, Root-Cause nie
+   untersucht). Dafür spricht die Farbkombination (blau/orange) und die Lage (oberer
+   Rand). Wäre das bestätigt, schlösse ein Fix beide Einträge. **Nicht belegt** — der
+   Windows-Befund ist als „Rechteck" beschrieben, hier ist es lesbarer Text.
+2. **Es geht um dieselbe Maschinerie wie der Toolbar-Save-Icon-Befund**, dessen
+   Datei-Zuordnung §24.4 auf `mrlib/switchable-button.rkt` + `wx/qt/canvas.rkt`
+   korrigiert hat. Zu prüfen wäre zuerst schlicht, ob das `Undock`-Control überhaupt ein
+   `switchable-button%` ist.
+
+### 35.3 Was die nächste Sitzung zuerst messen muss
+
+1. **Der Nativ-Gate — vor allem anderen.** DrRacket **ohne** `PLT_QT` starten und
+   denselben Bereich vergleichen. Zeigt GTK dieselbe Überlappung, ist es **kein**
+   `wx/qt`-Befund und die Sitzung ist an dieser Stelle zu Ende. Diese Messung ist
+   2026-09-14 **nicht** gemacht worden; ohne sie ist jede Ursachensuche im Backend
+   verfrüht (dieselbe Lehre wie §24.5s Stride-Verdacht und §21.10s Instrumentenartefakt).
+2. **Wem gehören die beiden Widgets, und welche Geometrie bekommen sie?** Das
+   Instrumentarium dafür liegt seit §32 bereit und ist verlässlich. Die interessante
+   Unterscheidung: bekommen beide Controls dieselbe Geometrie zugewiesen (echter
+   Layout-Fehler), oder bekommt eines **gar keine** und sitzt deshalb auf seiner
+   Default-Position 0,0 (fehlender `set-size`-Aufruf — genau das Muster, das §33 beim
+   fehlenden `on-size` gefunden hat)?
+
+Reihenfolge nicht tauschen: Punkt 2 ist nur dann etwas wert, wenn Punkt 1 den Befund als
+Qt-spezifisch bestätigt hat.

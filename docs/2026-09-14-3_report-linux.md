@@ -161,6 +161,20 @@ Alle Probenläufe mit `PUMP OK` im Log; ohne den ist eine Probenmessung ungülti
 Das ausgegraute Tabs-Menü ist damit ein **neuer, offener Nebenbefund** (Menü-Enable-
 States werden unter diesem Backend nicht nachgeführt), hier nicht untersucht.
 
+## Beobachtet, aber nicht weiterverfolgt
+
+Vollständigkeitshalber festgehalten (kein Defekt belegt, Details §34.5/§9):
+
+- **Mausrad über dem echten Colors-Panel bewegt es kaum** (40 Rasten ≈ 53 px). Naheliegend:
+  die farbigen Beispiel-Canvases unter dem Zeiger verbrauchen das Rad. Über den Scrollbar
+  gesteuert funktioniert das Panel einwandfrei. Nativ ungemessen — das wäre der
+  Diskriminator.
+- **Kurze senkrechte dunkle Segmente** links neben dem Scrollbar im Colors-Tab,
+  vermutlich Rahmen der inneren Canvases.
+- **Werkzeuge und Fallen der GUI-Automatisierung** auf dieser Maschine sind jetzt in
+  §9 gesammelt (was installiert ist, und vier Fallen, von denen heute jede einmal
+  zugeschlagen hat).
+
 ## Nebenarbeit
 
 - **§25.2 korrigiert statt nur ergänzt.** Die dort notierte Vermutung ist durch die
@@ -205,10 +219,27 @@ zugehörigen Sitzungen offen bleibt:
   Zeilennummern nach Run + File→Open). In dieser Sitzung bei 3 `test-dock-size`-Läufen
   nicht aufgetreten. Wenn er wiederkommt: `PLT_QT_SCROLL_DEBUG=1` mitlaufen lassen.
 - Der **gebündelte Cross-Platform-Durchlauf** auf Windows und macOS — inzwischen mit
-  drei Sitzungen Rückstand (§31/§32/§33/§34) und **einem** fälligen `qt-shim`-Rebuild.
+  vier Sitzungen Rückstand (§31/§32/§33/§34) und **einem** fälligen `qt-shim`-Rebuild.
 - **Neu:** DrRackets Tabs-Menü führt seine Enable-States nicht nach (§34.7) — ein
   Menü-Befund, kein Scroll-Befund, eigene Sitzung.
+- **Neu und als Nächstes vorgesehen (Nutzerentscheidung): §35 — übereinander
+  gezeichnete Toolbar-Controls** oben links im DrRacket-Editorfenster (`Untitled` und
+  `Undock` an derselben Stelle). In jedem Screenshot dieser Sitzung sichtbar, über
+  mehrere Prozessstarts stabil, kein Run und keine Interaktion nötig. Belegbild:
+  `docs/2026-09-14-3_toolbar-overlap-linux.png`. **Nicht untersucht** — insbesondere ist
+  offen, ob der Befund überhaupt Qt-spezifisch ist; der Nativ-Gate (DrRacket ohne
+  `PLT_QT`) ist die erste Pflichtmessung, s. §35.3.
 - Aus dem weiteren Bestand unverändert offen: der Zombie-Prozess beim Schließen des
   letzten Fensters (§29.2), die macOS-Menüleiste mit 8 statt 9 Einträgen, Linux Crash B
-  (Teardown), der Linux-Interactions-Bildbefund (§23.1) und `panel%`s hartcodiertes
-  `is-shown?` als Rest von §23.3.
+  (Teardown), der grafische Störeffekt am oberen Rand des Editor-Fensters (§24.5s
+  Nebenbefund, Root-Cause nie untersucht — möglicherweise derselbe Befund wie §35,
+  Hypothese 1 dort).
+
+**Korrektur an einer ersten Fassung dieses Abschnitts:** hier standen zunächst
+zusätzlich „der Linux-Interactions-Bildbefund (§23.1)" und „`panel%`s hartcodiertes
+`is-shown?` als Rest von §23.3". **Beides ist längst erledigt** — der Bildbefund durch
+§32 (in `docs/2026-09-14-2_report-linux.md`, Phase 0, als „Fall 4" nachgemessen: bei
+600×500 sind 4 von 6 Bildern sichtbar, nach dem Vergrößern alle 6, reiner
+Viewport-Effekt), und `panel%`s `is-shown?` durch §30, das genau diesen Override samt
+neun weiteren entfernt hat. Genau die Sorte veralteter Notiz, gegen die dieser Report
+zwei Absätze weiter oben argumentiert.
