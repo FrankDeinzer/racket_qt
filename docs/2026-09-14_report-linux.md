@@ -316,6 +316,54 @@ diesen Irrweg beschritt, wurde wieder entfernt statt committet.
 müssen `qt-shim` nach dem Pull neu bauen**, sonst schlägt bereits das Laden fehl
 (`get-ffi-obj`). Gleiche Klasse wie §27.
 
+## Vormessung für den Scroll-Block (nur Messung, kein Fixversuch)
+
+**Warum jetzt:** Der Scroll-Cluster war in der 13.09.-Planung ausdrücklich **hinter** die
+Geometrie gestellt worden, mit der Begründung, der Windows-Fixversuch (§24.5) habe
+gemessen, dass `do-set-scrollbars` einmal bei 30×30 feuert, eine degenerierte
+1×1-Range einfriert und beim Wachsen auf 400×300 **nie wieder** feuert — „das ist die
+fehlende Resize-Benachrichtigung, nicht der Scrollbar-Code". Genau die gibt es seit §32.
+Zusätzlich hatte §26 vermutet, der Fixversuch sei (auch) am Sichtbarkeitsvertrag
+gescheitert. Drei Vorbedingungen haben sich also seit der letzten Messung geändert —
+damit ist „hat sich das Symptom bewegt?" eine echte neue Frage.
+
+**Probe:** `examples/scroll-probe.rkt` (neu, dauerhaft): isolierter `editor-canvas%` mit
+`'(auto-hscroll auto-vscroll)`, `text%` mit 100 absichtlich breiten Zeilen, Frame
+400×300. `PUMP OK (0,5 ms)` im Log — Messung gültig.
+
+| Aspekt | vorher (Linux, 2026-09-13) | **jetzt** |
+|---|---|---|
+| Rendering | farblich verstümmelt/gestreift, nur ein Fragment oben links | **sauber** — schwarzer Text auf weiß, Zeilen 0–11 lesbar |
+| Reflow beim Vergrößern | (nicht messbar, Resize unverdrahtet) | **funktioniert** — 400×300 → 900×600 zeigt Zeilen 0–24 in voller Zeilenbreite |
+| Scrollbar sichtbar | nein | **nein** |
+| Mausrad (8×) | wirkungslos | **wirkungslos** (weiterhin Zeile 0 oben) |
+| PageDown (2×) | wirkungslos | **wirkungslos** |
+| Scrollen nach Resize | — | **weiterhin wirkungslos** (6× Mausrad nach dem Vergrößern) |
+
+**Einordnung — das vereinfacht den Block erheblich:**
+
+1. **Die Rendering-Hälfte des Linux-Symptoms ist weg.** Das gestreifte Bild war kein
+   eigener Stride-/Backing-Buffer-Defekt (die in der Vorsession notierte Hypothese),
+   sondern Folge der falschen Geometrie. Der dort empfohlene Stride-Verdacht ist damit
+   **erledigt und nicht weiterzuverfolgen**.
+2. **Linux und macOS zeigen jetzt dasselbe Symptom:** Inhalt rendert korrekt, Scrollen
+   wirkungslos. Aus drei plattformspezifischen Ausprägungen ist **eine** geworden.
+   (Windows — „Inhalt komplett weiß" — ist nach dem Rebuild gegenzuprüfen; die
+   Erwartung ist, dass es sich ebenfalls angleicht, da derselbe Geometriefehler dort
+   ebenso wirkte.)
+3. **Was übrig bleibt, ist eine schlichte Lücke, kein Rätsel.**
+   `wx/qt/canvas.rkt:300-307` führt sämtliche Scroll-Methoden als ausdrückliche Stubs
+   („Scroll stubs — no scrollbars in the spike"): `get/set-scroll-pos`,
+   `get/set-scroll-page`, `get/set-scroll-range`, `show-scrollbars` — alle `(void)`
+   bzw. `0`. Es ist **keine kaputte Implementierung, sondern eine fehlende**.
+4. **Die Shim-Primitiven liegen bereits bereit:** `shim_scrollbar_create`,
+   `shim_scrollbar_set_range`, `shim_scrollbar_set_value`, `shim_scrollbar_get_value`
+   (Commit `7d1231e0`, damals bewusst als ungenutzte Grundlage stehen gelassen).
+   **Der Block braucht daher voraussichtlich keine Shim-ABI-Änderung** — anders als §32.
+
+**Kein Fixversuch** (Auftrag war reine Messung; der Block gehört in eine eigene Sitzung
+mit frischem Kontext).
+
 ## Methodische Lehre — Vorschlag für die Triage-Regel im nächsten Prompt
 
 Der Instrumentenfehler war zwei Sessions lang unsichtbar, obwohl er in vier Zeilen
