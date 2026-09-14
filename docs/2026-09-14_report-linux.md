@@ -191,7 +191,10 @@ eine defekte Automatisierung dasselbe Bild erzeugt.
 1. **Die eigentliche §21.7-Kernfrage:** warum reflowt der Preferences-Dialog in echtem
    DrRacket nicht, obwohl dessen Eventspace-Queue nachweislich sauber läuft? Echtes
    DrRacket war nie vom Instrumentenfehler betroffen — dieser Befund steht unverändert
-   und ist jetzt der einzige belastbare Ausgangspunkt.
+   und ist jetzt der einzige belastbare Ausgangspunkt. **Wichtig für die Abgrenzung:
+   dieser Schritt braucht weder `live-resize-probe.rkt` noch eine Shim-Änderung** — die
+   Harness ist echtes DrRacket. „Instrument repariert" ist ausdrücklich **kein**
+   Freibrief, direkt zum Wiring-Versuch zu springen.
 2. Erst danach ggf. der vierte `resizeEvent`-Wiring-Versuch, mit `live-resize-probe.rkt`
    als nun tragfähigem Messmittel (Pump-Gate muss im Log stehen) — **Nutzerentscheidung
    wegen Shim-ABI**.

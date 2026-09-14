@@ -1779,7 +1779,15 @@ Diagnose-Probe ab jetzt nutzt:
   erkennbar, statt als Produktbefund missdeutet zu werden.
 
 Repariert: `enable-cascade-probe.rkt`, `live-resize-probe.rkt`, `is-shown-probe.rkt`,
-`resize-reflow-probe.rkt`.
+`resize-reflow-probe.rkt`. Beide Zweige des Gates sind ausgeführt verifiziert
+(`PUMP OK` in allen vier Proben; `PUMP FAIL` über eine Scratchpad-Variante, in der
+`wait/pump` wieder `sleep` statt `sleep/yield` benutzt).
+
+**Grenze des Gates, bewusst so:** gemeldet wird erst beim **ersten** `wait/pump`-Aufruf,
+und nur wenn `pump-gate!` vorher lief. **Schweigen ist deshalb kein `PUMP FAIL`** — eine
+Probe, die vor ihrem ersten `wait/pump` hängt oder aussteigt, oder die `pump-gate!`
+vergisst, druckt gar keine Gate-Zeile. Bei der Auswertung gilt: **nur ein explizites
+`PUMP OK` beweist ein gültiges Ergebnis**, nicht das Ausbleiben von `PUMP FAIL`.
 
 **Klick-Automatisierung: Block As „X11-Stacking-Rätsel" ist aufgeklärt.** Die
 Automatisierung muss die Zielkoordinaten kennen; die Probe meldet sie jetzt selbst per
