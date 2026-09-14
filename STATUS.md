@@ -65,6 +65,17 @@ zurückgespielt.
 Windows/macOS-Durchlauf hat jetzt **fünf** Sitzungen Rückstand (§31/§32/§33/§34/§35) und
 **einen** fälligen `qt-shim`-Rebuild.
 
+**Nachtrag nach Abschluss — neuer, ungefixter Befund: die Zwischenablage ist unter Qt
+funktionslos.** Entstanden aus der Frage nach den nächsten Linux-Aufgaben, also nach dem
+§35-Commit. `wx/qt/platform.rkt:151`s `clipboard-driver%` ist ein reiner No-op-Stub;
+gemessen liefert `set-clipboard-string` + `get-clipboard-string` nativ
+`"HALLO-QT-TEST"`, unter Qt `#f`. **Copy/Paste in DrRacket unter Qt ist damit tot**, im
+Editor wie zu anderen Programmen. Alte Lücke, von keiner Änderung dieser Sitzung
+verursacht — in den bisherigen Sweeps wurde nur nie kopiert. Im selben Zug als Stubs
+erhoben (Quelltext-Bestandsaufnahme, nicht untersucht): `cursor-driver%`, `gauge%`,
+`get-current-mouse-state`, `printer-dc%`. Tabelle im Report, Abschnitt „Nachtrag nach
+Abschluss".
+
 ---
 
 ## Session 2026-09-14 (Linux, 3) — Scroll-Block Fall 2 gefixt: `'(auto-vscroll)`-Panels bewegen ihre Kind-Widgets (§34)

@@ -248,6 +248,18 @@ Colors-Tab-Rahmen-Teil 2026-09-11 gefixt, §24.3. Font-Size-Slider-Zahl **gefixt
 (2026-09-11, inzident entdeckt, vorbestehend/unabhängig von den Scrollbar-Änderungen,
 per `git stash` bestätigt): grafischer Störeffekt (orange/blau gestreiftes Rechteck) nahe
 dem oberen Rand des DrRacket-Editor-Fensters, Root-Cause nicht untersucht.
+**Neu und ungefixt (2026-09-14, gemessen): die Zwischenablage ist unter Qt funktionslos.**
+`wx/qt/platform.rkt:151`s `clipboard-driver%` ist ein reiner No-op-Stub;
+`set-clipboard-string` + `get-clipboard-string` liefert nativ den String, unter Qt `#f`.
+Damit ist **Copy/Paste in DrRacket unter Qt tot**, im Editor wie zu anderen Programmen.
+Alte Lücke, nicht neu verursacht — in den bisherigen Sweeps nur nie kopiert worden.
+Braucht einen Shim-Zusatz (`QClipboard`), sonst klar abgegrenzt. Im selben Zug erhoben:
+`cursor-driver%` (`platform.rkt:164`, kein I-Beam/Warte-Cursor), `gauge%`
+(`platform.rkt:96`, zeichnet nichts), `get-current-mouse-state` (`platform.rkt:192`,
+fest `(0,0)`), `printer-dc%` (`platform.rkt:115`, Drucken tut nichts) sind ebenfalls
+Stubs. Bestandsaufnahme aus dem Quelltext, nicht untersucht — Details und Tabelle:
+`docs/2026-09-14-4_report-linux.md`, Abschnitt „Nachtrag nach Abschluss".
+
 Die übereinander gezeichneten Toolbar-Controls (`Untitled`/`Undock`) sind **2026-09-14
 gefixt (§35)** — Nativ-Gate bestand, Ursache war der unter Qt nie beachtete Fensterstil
 `'deleted`; §35-Hypothese 2 (`switchable-button%`) ist damit erledigt, Hypothese 1 (das

@@ -188,6 +188,41 @@ und danach bitgleich zurückgespielt (`diff` grün).
   nehmen oder die Aufrufe absichern. Kostete hier zwei Fehlstarts; kein Qt-Bezug,
   gilt auch nativ.
 
+## Nachtrag nach Abschluss — die Zwischenablage ist unter Qt ein No-op
+
+Entstanden aus der Frage „was können wir unter Linux noch tun?", also **nach** dem
+§35-Commit; hier festgehalten, weil die Messung in dieser Sitzung gemacht wurde.
+
+`wx/qt/platform.rkt:151` definiert `clipboard-driver%` als reinen Stub —
+`get-data`/`get-text-data` liefern `#f`, `set-data`/`set-text-data` sind No-ops.
+Gemessen mit einem Dreizeiler (`set-clipboard-string` + `get-clipboard-string`):
+
+```
+=== NATIV ===  zurueckgelesen: "HALLO-QT-TEST"
+=== QT ===     zurueckgelesen: #f
+```
+
+**Damit ist Copy/Paste in DrRacket unter Qt funktionslos** — innerhalb des Editors
+ebenso wie zu anderen Programmen. Das ist bisher in keinem Report aufgetaucht, weil in
+den Preferences-Sweeps und Scroll-Sitzungen nie kopiert wurde; die Lücke ist alt, nicht
+neu, und von keiner Änderung dieser Sitzung verursacht (der Stub steht unverändert seit
+der Anlage von `platform.rkt`).
+
+Bei der Gelegenheit die übrigen Stubs in `platform.rkt` erhoben — das ist die Liste
+dessen, was auf Linux ohne Cross-Platform-Abhängigkeit noch zu tun ist:
+
+| Stub | Fundstelle | Wirkung |
+|---|---|---|
+| `clipboard-driver%` | `platform.rkt:151` | Copy/Paste tot (s. o.) |
+| `cursor-driver%` | `platform.rkt:164` | kein I-Beam über Text, kein Warte-Cursor |
+| `gauge%` | `platform.rkt:96` | hält nur Racket-Zustand, zeichnet nichts |
+| `get-current-mouse-state` | `platform.rkt:192`, bereits mit ⚑ markiert | liefert fest `(0,0)`/keine Knöpfe |
+| `printer-dc%` | `platform.rkt:115` | Drucken tut nichts |
+| `has-x-selection?`, `hide-cursor`, `bell`, `flush-display` | `platform.rkt:188–191` | No-ops bzw. feste `#f` |
+
+Keiner dieser Punkte ist untersucht — die Tabelle ist eine Bestandsaufnahme aus dem
+Quelltext plus die eine Messung zur Zwischenablage, kein Befundbericht.
+
 ## Nicht gemacht (bewusst)
 
 - **Kein Cross-Platform-Durchlauf** (gebündeltes Modell). Die Mechanik dahinter — Qts
