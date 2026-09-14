@@ -3583,3 +3583,158 @@ nächsten Pull neu bauen**, sonst schlägt schon das Laden fehl (`get-ffi-obj`).
 Klasse wie §27; Bauanleitung je Plattform steht in `CLAUDE.md`.
 
 Volles Detail: `docs/2026-09-14_report-linux.md`.
+
+## 33. Scroll-Block Fall 1 gefixt: `canvas%` bekommt echte Scrollbars (Linux, 2026-09-14)
+
+**Ausgangslage** war die Übergabe am Ende von `docs/2026-09-14_report-linux.md`:
+`wx/qt/canvas.rkt:300-307` führte sämtliche Scroll-Methoden als ausdrückliche Stubs
+(„Scroll stubs — no scrollbars in the spike"). Der Block war damit **keine kaputte
+Implementierung, sondern eine fehlende**.
+
+### 33.1 Die eigentliche Root-Cause von §24.5 — ein fehlender Aufruf, kein Scrollbar-Bug
+
+§24.5 (Windows, 2026-09-11) hatte einen Scrollbar-Fixversuch gebaut, gemessen, dass
+`do-set-scrollbars` **genau einmal bei 30×30 feuert und danach nie wieder**, den
+Editor-Inhalt weiß gerendert bekommen und alles zurückgerollt. Diese Messung hat eine
+schlichte Erklärung, die dort nicht gefunden wurde:
+
+| Backend | ruft `on-size` aus `set-size`? |
+|---|---|
+| `wx/win32/canvas.rkt:306-309` | ja (plus `reset-auto-scroll`) |
+| `wx/gtk/canvas.rkt:450-454` | ja (plus `reset-auto-scroll`) |
+| `wx/qt/canvas.rkt` (vorher) | **nein** |
+
+`editor-canvas%`s `on-size`-Override (`wxme/editor-canvas.rkt:313`) ist der **einzige**
+Auslöser für `maybe-reset-size` → `reset-size` → den kompletten
+`set-scroll-range`/`set-scroll-page`/`set-scroll-pos`-Block (Z. 900-941). Ohne den
+Aufruf erfährt der Editor nie, dass er nicht mehr 30×30 groß ist.
+
+**Vorab isoliert gemessen, bevor eine einzige Zeile Scrollbar-Code entstand** (nur der
+`on-size`-Aufruf verdrahtet, die Stubs lediglich mit `eprintf` instrumentiert):
+
+| | vorher (§24.5) | nach dem `on-size`-Aufruf |
+|---|---|---|
+| bei 400×300 | `h-len=1 v-len=1`, eingefroren bei 30×30 | `show-scrollbars #t #t`, h-range **109**, v-range **89**, v-page **10** |
+| nach Resize auf 900×600 | — (feuert nie erneut) | feuert erneut: h-range **0**, v-range **77**, page **23**, `show-scrollbars #f #t` |
+
+Erst danach wurde implementiert. **Methodisch der Kern dieser Sitzung:** der billige,
+strukturell risikolose Diskriminator zuerst — hätte er nichts bewegt, wäre das Modell
+widerlegt gewesen, bevor Aufwand entsteht.
+
+### 33.2 Warum die Implementierung eine eigene Mixin-Schicht braucht
+
+`wx/qt`s Klassenkette ist gegenüber win32/gtk **invertiert**: dort ist
+`canvas-autoscroll-mixin` eine *Oberklasse* der Plattform-Canvas, hier wird sie **über**
+`base-canvas%` gelegt (`(canvas-mixin (canvas-autoscroll-mixin base-canvas%))`). Folgen:
+
+1. `do-set-scrollbars`/`reset-dc-for-autoscroll`/`get-virtual-{h,v}-pos` sind dort
+   `define/public` und können von `base-canvas%` aus nicht überschrieben werden
+   (`public*`/`override*`-Invariante, §1). §24.5 hatte dieselbe Schicht
+   (`qt-canvas-scroll-mixin`) schon aus demselben Grund eingeführt.
+2. **Neu gegenüber §24.5:** der `set-size`-Hook muss ebenfalls dort liegen. `set-size`
+   wird aus `base-canvas%`s Konstruktor heraus aufgerufen (Seed-Aufruf), also *während*
+   des `super-new` der Mixin-Schicht — die Felder von `canvas-autoscroll-mixin`
+   existieren zu diesem Zeitpunkt noch nicht. Erster Versuch scheiterte genau daran:
+   `auto-scroll?: undefined; cannot use field before initialization`. Lösung ist ein
+   `scroll-ready?`-Flag, **vor** `super-new` definiert (damit es während des Seed-Aufrufs
+   lesbar ist) und danach gesetzt — dasselbe Muster wie gtks `dc`-Feld.
+
+### 33.3 Aufbau
+
+QScrollBar-Kinder des Canvas-Widgets, über die seit `7d1231e0` bereitliegenden
+Primitiven (`shim_scrollbar_create/set_range/set_value/get_value`) — **keine
+Shim-ABI-Änderung für die Scrollbars selbst**. Strukturunterschied zu den anderen
+Backends, der beachtet werden muss: win32 bekommt seine Scrollbars aus
+`WS_HSCROLL`/`WS_VSCROLL` (Non-Client-Bereich), gtk packt sie als Geschwister in eine
+Box — **in beiden schrumpft der Client von allein**. Als Kinder des Canvas-Widgets muss
+`get-client-size` ihre Dicke selbst abziehen (Dicke aus `shim_widget_get_size_hint`,
+nicht hartkodiert).
+
+Übernommen wurde die Gating-Semantik von win32/gtk unverändert: in `auto-scroll`-Modus
+liefert die Canvas-Scroll-API 0 und `get-virtual-*-pos` übernimmt — `editor-canvas%`
+verlässt sich darauf. `shim_scrollbar_set_range`/`set_value` blocken das
+`valueChanged`-Signal bereits per `QSignalBlocker`, gtks `as-scroll-change`-Unterdrückung
+hat hier deshalb **kein** Gegenstück und wurde bewusst nicht nachgebaut. Der
+Callback-Lifetime-Fix aus §24.5 (Closure an ein Objektfeld binden statt Inline-Lambda an
+den Shim) ist als Konvention wieder angewendet.
+
+### 33.4 Mausrad — die einzige Shim-ABI-Änderung
+
+`RacketCanvas` hatte gar keinen `wheelEvent`-Handler; racket/gui liefert das Rad als
+`key-event%` mit Key-Code `'wheel-up`/`'wheel-down`/`'wheel-left`/`'wheel-right` plus
+`wheel-steps` (`wxme/editor-canvas.rkt:483-506`, Vorbild `wx/gtk/window.rkt`s
+`connect-scroll`). Neu: `shim_canvas_set_wheel_cb` (`dx`, `dy` als Qt-`angleDelta`,
+eine Raste = 120, `dy > 0` = nach oben). Bewusst als **eigener Export** statt als
+Sentinel-Key durch den bestehenden `key_cb` — ein vergessener Rebuild soll laut und
+sofort scheitern, genau die Eigenschaft, die §32 ausdrücklich verifiziert hat.
+
+### 33.5 Verifikation (Akzeptanzkriterium aus der Übergabe, wörtlich)
+
+Alle Messungen mit `PUMP OK` im Log (§21.10), `examples/scroll-probe.rkt`:
+
+| Prüfung | Ergebnis |
+|---|---|
+| vertikaler **und** horizontaler Scrollbar sichtbar | ja |
+| Mausrad | Zeile 0 → 10 bei 10 Rasten (1 Zeile/Raste) |
+| PageDown | Zeile 10 → 40 bei 3× `Next` |
+| Zeile 99 erreichbar | ja, per Thumb-Drag |
+| horizontal | Zeilenenden („…gescrollt werden muss") per Drag sichtbar |
+| echtes DrRacket (Fall 3) | Definitions- **und** Interactions-Pane haben Scrollbars, Inhalt rendert sauber |
+| Preferences „Example Text"-Canvas | beide Scrollbars vorhanden |
+
+**Regressionswache:** Smoke 3/3 mit und ohne `PLT_QT`; `live-resize-probe` 296 → 696 →
+896; `minsize-resize-probe` Korrektur 300×200 → 300×348 in genau einem Schritt;
+`test-dock-size`-Sequenz (Run, dann File→Open als 2. Tab) **3× crashfrei**;
+§31-Akzeptanztest **3/3 PASS bei unverändertem 1060×663**.
+
+### 33.6 Ausdrücklich nicht gemacht: Fall 2 (`'(auto-vscroll)`-Panels, §25.2)
+
+`canvas-panel%` bekommt **gar keine** Scrollbars (`(not (is-panel?))`-Gate bei
+`want-h?`/`want-v?`). Grund: dessen Inhalt sind echte Kind-Widgets, die ein
+Zeichen-Offset nicht bewegt — win32 verschiebt dafür ein separates `content-hwnd`
+(`reset-dc-for-autoscroll`), dieses Backend hat kein solches Fenster
+(`wx/qt/canvas.rkt:336-353`). Ein Scrollbar ohne Kind-Repositionierung wäre sichtbar,
+aber wirkungslos — schlechter als der Status quo. Colors-Tab ist nachgemessen und
+**unverändert**. §25.2 bleibt offen, eigene Sitzung; sie braucht ein eigenes
+Content-QWidget (`shim_panel_create` + `shim_widget_set_geometry` mit negativem Offset,
+voraussichtlich ebenfalls ohne ABI-Änderung), ändert aber die Handle-Identität für alle
+Panel-Kinder — eigenes Risiko.
+
+### 33.7 Ein Befund, der sich nicht reproduzieren ließ — ehrlich offen
+
+**Einmalig beobachtet:** nach Run + File→Open eines 2. Tabs zeigte die
+Definitions-Ansicht Zeilennummern 160-193 für eine 16-Zeilen-Datei, danach 1023-1056,
+zuletzt leeren Text bei korrekten Nummern 1-16. **In drei anschließenden Durchläufen
+derselben Sequenz nicht wieder aufgetreten** (mit und ohne vorheriges Run), Basislinie
+(ohne diese Änderung) an derselben Stelle sauber.
+
+Zwei Hypothesen wurden gemessen und **beide widerlegt**:
+
+1. *„Inhalt passt in den Viewport → Scrollbars werden versteckt → weiß"*: isolierte
+   Probe mit 5 kurzen Zeilen rendert korrekt.
+2. *„`on-size` ohne Dedup hält die Layout-Schleife am Leben"* (§32-Lehre, Advisor-
+   Vorschlag): der dafür verdächtigte transiente Client-Wert (`1020x797` statt
+   `1020x396`) tritt **mit** Dedup genauso oft auf wie ohne (284 vs. 270 Zeilen) — und
+   auch in Durchläufen, die korrekt rendern. Der Dedup wurde deshalb **wieder entfernt**
+   statt als unbegründeter Zustand stehenzubleiben; win32 meldet `on-size` ebenfalls
+   bedingungslos, und `editor-canvas%` dedupliziert in `maybe-reset-size` ohnehin selbst.
+
+**Was aus dem Fund tatsächlich folgte:** beim Vergleich gegen win32 fiel ein echter
+Defekt auf — `show-scrollbars` invalidierte die Backing-Bitmap, forderte aber **keinen
+Repaint** an. win32 macht beides in einem (`reset-dc`, `canvas.rkt:276-285`, aufgerufen
+aus `show-scrollbars` bei Z. 426). Ein invalidiertes Backing ohne Repaint ist genau ein
+weißes Canvas. Derselbe fehlende `refresh` in `reset-dc-for-autoscroll` ist mit
+korrigiert. Das ist **kein Beweis**, dass damit der einmalige Befund erklärt ist —
+nur, dass ein Mechanismus derselben Form gefunden und beseitigt wurde.
+
+Für die nächste Sitzung: `PLT_QT_SCROLL_DEBUG=1` schaltet eine pro-Canvas getaggte
+Ablaufverfolgung aller Scroll-Aufrufe an (bewusst **nicht** an `PLT_QT_DEBUG` gehängt,
+dessen Paint-Logging die Scroll-Sequenz zudeckt).
+
+### ⚠ Shim-ABI-Änderung
+
+`shim_canvas_set_wheel_cb` ist neu — **zusätzlich** zu §32s
+`shim_window_set_resize_cb`. Windows und macOS brauchen weiterhin genau einen
+`qt-shim`-Rebuild nach dem Pull; er deckt jetzt beide Funktionen ab.
+
+Volles Detail: `docs/2026-09-14-2_report-linux.md`.

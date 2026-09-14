@@ -4,8 +4,13 @@
 ; beide Richtungen groesser ist als das Fenster -- der kleinstmoegliche Fall, in
 ; dem wx/qt einen funktionierenden Scroll-Mechanismus liefern muesste.
 ;
-; Bekannte Symptome VOR den Fixes vom 2026-09-14 (je Plattform verschieden,
-; dieselbe Fundstelle):
+; SEIT §33 (2026-09-14) ist das die Akzeptanzprobe des Scroll-Blocks, nicht
+; mehr die Symptomprobe. Erwartet wird: beide Scrollbars sichtbar, Mausrad und
+; PageDown bewegen den Inhalt, Zeile 99 ueber den Thumb erreichbar, horizontal
+; analog.
+;
+; Bekannte Symptome VOR §33 (je Plattform verschieden, dieselbe Fundstelle --
+; wx/qt/canvas.rkt hatte die Scroll-Methoden ueberhaupt nicht implementiert):
 ;   Windows (§24.5): Inhalt komplett weiss, nur blinkender Caret.
 ;   macOS   (§29.2): Inhalt rendert korrekt, Scrollen bleibt wirkungslos.
 ;   Linux   (§21.10-Session, Phase 3.4): Inhalt farblich verstuemmelt/gestreift,

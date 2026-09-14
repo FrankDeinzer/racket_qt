@@ -27,6 +27,7 @@
 #include <QShowEvent>
 #include <QCloseEvent>
 #include <QMouseEvent>
+#include <QWheelEvent>
 #include <QKeyEvent>
 #include <QFocusEvent>
 #include <QEnterEvent>
@@ -55,6 +56,12 @@ typedef void (*shim_mouse_cb_t)(void* ud, int type, int x, int y, int buttons, i
 typedef void (*shim_key_cb_t)(void* ud, int type, int key, int text_char, int mods);
 // Focus: gained(1=in, 0=out)
 typedef void (*shim_focus_cb_t)(void* ud, int gained);
+// Mouse wheel: dx/dy are Qt's angleDelta in eighths of a degree (one notch =
+// 120), dy > 0 meaning "away from the user" = scroll up. Racket turns this
+// into a key-event% with key-code 'wheel-up/'wheel-down/'wheel-left/
+// 'wheel-right, which is how racket/gui delivers the wheel (see
+// wxme/editor-canvas.rkt's on-char and wx/gtk/window.rkt's connect-scroll).
+typedef void (*shim_wheel_cb_t)(void* ud, int dx, int dy, int mods);
 
 // Reports a native top-level resize. Carries the new size so Racket needs no
 // live geometry query: wx/qt/window.rkt's w/h cache is the source of truth
@@ -107,6 +114,8 @@ public:
     void*           key_ud    = nullptr;
     shim_focus_cb_t focus_cb  = nullptr;
     void*           focus_ud  = nullptr;
+    shim_wheel_cb_t wheel_cb  = nullptr;
+    void*           wheel_ud  = nullptr;
 
     RacketCanvas(QWidget* parent, shim_callback_t cb, void* ud)
         : QWidget(parent), expose_cb(cb), expose_ud(ud)
@@ -194,6 +203,22 @@ protected:
         QWidget::leaveEvent(e);
         if (mouse_cb)
             mouse_cb(mouse_ud, 4, 0, 0, 0, 0);
+    }
+
+    // ---- wheel ----------------------------------------------------------
+
+    // Without a handler the event would propagate to the parent widget, which
+    // is why the wheel was inert over a canvas before this existed. Only
+    // accept it when a callback is actually wired, so an unwired canvas keeps
+    // the default propagation.
+    void wheelEvent(QWheelEvent* e) override {
+        if (wheel_cb) {
+            QPoint d = e->angleDelta();
+            wheel_cb(wheel_ud, d.x(), d.y(), encodeMods(e->modifiers()));
+            e->accept();
+        } else {
+            QWidget::wheelEvent(e);
+        }
     }
 
     // ---- keyboard -------------------------------------------------------
@@ -577,6 +602,13 @@ void shim_canvas_set_focus_cb(void* canvas_ptr, shim_focus_cb_t cb, void* ud)
     auto* c = static_cast<RacketCanvas*>(canvas_ptr);
     c->focus_cb = cb;
     c->focus_ud = ud;
+}
+
+void shim_canvas_set_wheel_cb(void* canvas_ptr, shim_wheel_cb_t cb, void* ud)
+{
+    auto* c = static_cast<RacketCanvas*>(canvas_ptr);
+    c->wheel_cb = cb;
+    c->wheel_ud = ud;
 }
 
 void shim_canvas_blit_argb(void*          canvas_ptr,

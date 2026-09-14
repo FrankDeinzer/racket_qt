@@ -5,6 +5,63 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-14 (Linux, 2) — Scroll-Block Fall 1 gefixt: `canvas%` bekommt echte Scrollbars (§33)
+
+**Kontext:** Fortsetzung des in `docs/2026-09-14_report-linux.md` übergebenen
+Scroll-Blocks. Volles Detail: `docs/2026-09-14-2_report-linux.md`, Technik
+`docs/HACKING.md` §33.
+
+**Zwei Vorabmessungen der Übergabe (auf der Basislinie, eigene Änderung gestasht):**
+- **Fall 3** (DrRacket-Editor, auf Linux vorher „gestreift"): **rendert sauber** —
+  §31/§32 haben das erledigt.
+- **Fall 4** (Interactions zeigt nur 4/6 Bilder, §23.1): **durch §32 erledigt.** Bei
+  600×500 sind 4 von 6 sichtbar; Fenster **ohne erneutes Run** vergrößert → alle 6.
+  Reiner Viewport-Befund, kein eigener Befund mehr.
+
+**Root-Cause von §24.5 gefunden — und es war kein Scrollbar-Problem:**
+`wx/qt/canvas.rkt`s `set-size` rief, anders als win32 (`canvas.rkt:306-309`) und gtk
+(`canvas.rkt:450-454`), **nie `on-size`** auf. Dessen Override in `editor-canvas%`
+(`wxme/editor-canvas.rkt:313`) ist der einzige Auslöser der gesamten
+Scrollbar-Buchführung. Das erklärt §24.5s Kernmessung („`do-set-scrollbars` feuert
+einmal bei 30×30 und nie wieder") vollständig. **Vorab isoliert nachgewiesen**, bevor
+Implementierungsaufwand entstand: nur der Aufruf verdrahtet, Stubs instrumentiert →
+`h-range=109`, `v-range=89` bei realen 400×300, und erneutes Feuern beim Resize.
+
+**Implementiert (Fall 1):** eigene Mixin-Schicht `qt-canvas-scroll-mixin` mit echten
+QScrollBar-Kindern über die seit `7d1231e0` bereitliegenden Primitiven, vollständige
+wx-Scroll-API mit win32/gtk-identischem Gating, `get-client-size` zieht die
+Scrollbar-Dicke ab (`shim_widget_get_size_hint`, nicht hartkodiert), Mausrad über den
+**neuen** Export `shim_canvas_set_wheel_cb`.
+
+**Akzeptanzkriterium der Übergabe wörtlich erfüllt** (alle Läufe mit `PUMP OK`):
+beide Scrollbars sichtbar, Mausrad Zeile 0→10, PageDown 10→40, Zeile 99 per Thumb
+erreichbar, horizontal analog. In echtem DrRacket haben Definitions- und
+Interactions-Pane jetzt Scrollbars.
+
+**Regressionswache grün:** Smoke 3/3 mit und ohne `PLT_QT`; `live-resize-probe`
+296→696→896; `minsize-resize-probe` 300×200→300×348 in einem Schritt;
+`test-dock-size`-Sequenz **3× crashfrei**; §31-Akzeptanztest **3/3 PASS** bei
+unverändertem 1060×663.
+
+**Fall 2 (`'(auto-vscroll)`-Panels, Colors-Tab) bewusst nicht angefasst** —
+Nutzerentscheidung nach Vorlage der Aufteilung. Dessen Inhalt sind echte Kind-Widgets,
+die ein Zeichen-Offset nicht bewegt; `canvas-panel%` bekommt deshalb gar keine
+Scrollbars (ein sichtbarer, aber wirkungsloser Scrollbar wäre schlechter als der
+Status quo). Colors-Tab nachgemessen: unverändert. Bleibt offen, eigene Sitzung.
+
+**Ein Befund offen und ehrlich als unreproduzierbar notiert:** einmalig zeigte ein
+zweiter DrRacket-Tab falsche Zeilennummern; in drei Wiederholungen derselben Sequenz
+nicht erneut, Basislinie sauber. Zwei Hypothesen gemessen und **beide widerlegt** (u. a.
+ein versuchsweiser `on-size`-Dedup, der nichts änderte und deshalb **wieder entfernt**
+wurde). Dabei fiel aber ein echter Defekt auf und wurde behoben: `show-scrollbars`
+invalidierte die Backing-Bitmap ohne Repaint-Anforderung (win32 macht beides in
+`reset-dc`) — ein invalidiertes Backing ohne Repaint ist genau ein weißes Canvas.
+
+**⚠ Zweite Shim-ABI-Änderung des Tages:** `shim_canvas_set_wheel_cb` — zusätzlich zu
+§32s `shim_window_set_resize_cb`. **Ein** Rebuild auf Windows/macOS deckt beide ab.
+
+---
+
 ## Session 2026-09-14 (Linux) — Messinstrument repariert: `(sleep n)` dispatcht keine Events; Enable-Kaskade endlich per echtem Klick verifiziert
 
 **Kontext:** Schritt 1 der Empfehlung aus §21.9 — erst das Instrument reparieren, dann

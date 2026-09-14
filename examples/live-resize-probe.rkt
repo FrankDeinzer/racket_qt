@@ -4,10 +4,12 @@
 ; Kind-Controls tatsaechlich neu positioniert (resizeEvent -> queue-on-size ->
 ; wxtop.rkt's resized/correct-size). Stretchbarer Panel-Inhalt: ein Button soll
 ; nach dem Resize die neue Fensterbreite fuellen.
-; ACHTUNG: die resizeEvent/shim_window_get_size-Verdrahtung, die diese Probe
-; eigentlich pruefen soll, ist NICHT im Baum (vollstaendig zurueckgerollt, s.
-; docs/HACKING.md §21.9). Diese Probe zeigt deshalb aktuell absichtlich den
-; unveraenderten Ausgangsbefund: get-width/button-Groesse bleiben eingefroren.
+; STAND SEIT 2026-09-14 (§32): die resizeEvent-Verdrahtung ist im Baum, und
+; diese Probe ist damit von der Ausgangsbefund-Probe zur Regressionswache
+; geworden -- erwartet wird jetzt, dass der Button der Fensterbreite folgt
+; (gemessen 296 -> 696 -> 896). Der frueher hier stehende Hinweis "Verdrahtung
+; ist NICHT im Baum" stammte aus dem zurueckgerollten Versuch 3 (§21.9) und war
+; seit §32 falsch.
 ; REPARIERT 2026-09-14 (docs/HACKING.md §21.10): die Vorversion wartete mit
 ; (sleep 1) im Hauptthread -- der IST der Handler-Thread des Eventspace, und
 ; (sleep n) dispatcht keine Events. Geposteste Thunks (u.a. der resize-cb aus
