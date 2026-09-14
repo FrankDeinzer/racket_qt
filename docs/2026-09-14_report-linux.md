@@ -199,6 +199,54 @@ eine defekte Automatisierung dasselbe Bild erzeugt.
    als nun tragfähigem Messmittel (Pump-Gate muss im Log stehen) — **Nutzerentscheidung
    wegen Shim-ABI**.
 
+## Schritt 1 ausgeführt — §25.1 gefixt, und es war nie ein §21.7-Fall
+
+Nach der Instrumenten-Reparatur direkt die §21.9-Kernfrage angegangen: Preferences-Reflow
+in **echtem DrRacket** (die Harness, die nachweislich pumpt — und die vom
+Instrumentenfehler nie betroffen war). Details: `docs/HACKING.md` §31.
+
+**Messung (frischer Start, keine Interaktion außer Öffnen):** Dialog **1060×641**,
+Button-Zeile nur als Pixelstreifen am unteren Rand — §25.1 auf Linux exakt reproduziert.
+Die bereits vorhandene `PLT_QT_DEBUG`-Ausgabe in `shim.cpp` lieferte die Zahl ohne jede
+Codeänderung: `mb.height=22 … central.geom=(0,22 1060x619)`. Fenster 641 hoch,
+**nutzbarer Client 619** — Defizit exakt die Menüleistenhöhe. `wx/qt/window.rkt:61`
+liefert für `get-client-size` aber dasselbe wie `get-size`.
+
+**Root Cause, zwei Defekte aus einer Ursache:** `wxtop.rkt:302` leitet die
+Chrome-Reserve als `(- (get-height) f-client-h)` ab — unter Qt immer 0. Dadurch wird
+(1) die Mindesthöhe des Frames zu klein berechnet, das Fenster wächst gar nicht erst auf
+die nötige Höhe, und (2) `set-panel-size` reicht 641 statt 619 durch, die untersten
+22 px des Panels liegen außerhalb des sichtbaren Bereichs. **Kein Resize beteiligt** —
+§25.1 war unter §21.7 falsch einsortiert und lag deshalb zwei Sessions hinter dessen
+OUT-OF-SCOPE-Zaun.
+
+**Fix:** `wx/qt/frame.rkt` merkt sich das QMenuBar-Handle und zieht dessen
+`sizeHint().height()` in `get-client-size` ab — über das **bereits existierende**
+`shim_widget_get_size_hint`, also **keine Shim-ABI-Änderung und kein Rebuild-Zwang auf
+Windows/macOS**. Lazy statt gecacht, weil die Bar zum `set-menu-bar`-Zeitpunkt noch
+keine Actions hat und `sizeHint.h=0` meldet (gemessen). gtks zusätzlicher
+`(send this resized)`-Aufruf ist unter Qt nicht nötig — `correct-size` greift den Wert
+von allein auf.
+
+| Prüfung | Ergebnis |
+|---|---|
+| Dialoghöhe | 1060×641 → **1060×663** (+22 px) |
+| Button-Zeile sichtbar **und** klickbar (OK schließt) | ja, beim ersten Öffnen, ohne manuelles Vergrößern |
+| Akzeptanztest | **n=3, 3/3 PASS**, Maß in allen Läufen identisch |
+| `test-dock-size`-Regressionswache | **2/2 crashfrei** (§30-Fix intakt) |
+| DrRacket-Hauptfenster | unverändert 600×650 — minimaler Wirkradius |
+| Smoke | 3/3 mit und ohne `PLT_QT` |
+
+**Abgrenzung, ausdrücklich:** §21.7 bleibt offen — Kind-Controls wandern beim
+Fenster-Vergrößern weiterhin nicht mit, dafür fehlt nach wie vor die
+`resizeEvent`-Verdrahtung. Dieser Fix behebt die **initiale** Fehlgeometrie jedes Frames
+mit Menüleiste, nicht das Live-Resize-Verhalten.
+
+**Nachtrag zum §30-Audit:** `get-client-size` ist Muster 3 (fehlender Override, den alle
+drei nativen Backends haben) und wurde dort übersehen, weil das Audit nur
+Zustands*abfragen* wie `is-shown?` als Kandidaten geführt hat. Für ein künftiges Audit:
+auch Geometrie-/Maß-Methoden gegen die nativen Backends prüfen.
+
 ## Methodische Lehre — Vorschlag für die Triage-Regel im nächsten Prompt
 
 Der Instrumentenfehler war zwei Sessions lang unsichtbar, obwohl er in vier Zeilen
@@ -256,3 +304,12 @@ Unverändert aus `docs/2026-09-13_report-linux.md` übernommen, plus:
   Durchlauf ebenfalls `PUMP OK` zeigen (billiger Mitnahme-Check).
 - Die Klick-Verifikation der Enable-Kaskade (3/3 PASS) lief nur auf Linux; auf
   Windows/macOS im gebündelten Durchlauf mit `enable-cascade-probe.rkt` nachziehen.
+- **§31-`get-client-size`-Fix:** auf Windows/macOS prüfen, dass der Preferences-Dialog
+  dort ebenfalls mit sichtbarer, klickbarer Button-Zeile öffnet. **Erwartete
+  Plattformdifferenz beachten:** die Menüleistenhöhe unterscheidet sich (Linux 22 px),
+  und macOS zeigte die Button-Zeile laut §29 **bereits vorher** erreichbar — dort ist
+  zu prüfen, ob der Abzug jetzt zu einem unnötig hohen Dialog führt. macOS nutzt
+  zudem eine native Menüleiste (`isNativeMenuBar`), die gar keinen Client-Platz
+  verbraucht; sollte `sizeHint().height()` dort trotzdem > 0 melden, wäre ein
+  `isNativeMenuBar`-Guard nötig. **Auf Linux nicht prüfbar — ausdrücklich als Risiko
+  für den macOS-Durchlauf vermerkt, nicht als erledigt.**

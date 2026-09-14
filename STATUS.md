@@ -40,9 +40,27 @@ wieder messen. Voller Bericht: `docs/2026-09-14_report-linux.md`. Details:
   durchlaufen. Risiko **ungeprüft, nicht entkräftet**.
 - **Weiterhin gültig:** Konvergenz-Messung (synchron), `is-shown?`-Basisfeldmessung
   (synchron), `test-dock-size` 0/3 (lief in echtem DrRacket), beide Block-A-Commits.
+- **Danach Schritt 1 ausgeführt (§31): §25.1 gefixt — und es war nie ein §21.7-Fall.**
+  Preferences-Reflow in echtem DrRacket gemessen: Dialog 1060×641, nutzbarer Client
+  laut Shim-Debug aber nur 619 — Defizit exakt die Menüleistenhöhe (22 px).
+  `wx/qt/window.rkt:61` liefert für `get-client-size` dasselbe wie `get-size`, dadurch
+  ist `wxtop.rkt:302`s Chrome-Reserve `(- (get-height) f-client-h)` unter Qt **immer 0**:
+  die Frame-Mindesthöhe wird zu klein berechnet **und** das Panel 22 px zu hoch gesetzt.
+  **Kein Resize beteiligt** — die Einordnung unter §21.7 war falsch und hat den Befund
+  zwei Sessions hinter dessen OUT-OF-SCOPE-Zaun gehalten. Fix in `wx/qt/frame.rkt`:
+  Menüleistenhöhe lazy per **bereits existierendem** `shim_widget_get_size_hint`
+  abziehen — **keine Shim-ABI-Änderung, kein Rebuild-Zwang auf Windows/macOS**.
+  Dialog wächst auf 1060×663, Button-Zeile sichtbar **und** klickbar beim ersten Öffnen;
+  Akzeptanztest **n=3, 3/3 PASS**, `test-dock-size`-Regressionswache **2/2 crashfrei**,
+  DrRacket-Hauptfenster unverändert 600×650. Muster 3 aus dem §30-Audit, dort
+  übersehen, weil nur Zustandsabfragen geprüft wurden — künftige Audits sollten auch
+  Geometrie-/Maß-Methoden einschließen.
+- **§21.7 bleibt offen:** Kind-Controls wandern beim Vergrößern weiterhin nicht mit
+  (fehlende `resizeEvent`-Verdrahtung). Der §31-Fix betrifft nur die **initiale**
+  Geometrie von Frames mit Menüleiste.
 - **Nicht gemacht:** kein vierter `resizeEvent`-Wiring-Versuch (Shim-ABI,
-  Nutzerentscheidung), keine Cross-Platform-Validierung. Nur `examples/` + `docs/`
-  angefasst, kein `wx/qt`-/Shim-Touch. Smoke 3/3 mit und ohne `PLT_QT`.
+  Nutzerentscheidung), keine Cross-Platform-Validierung. Smoke 3/3 mit und ohne
+  `PLT_QT`.
 
 ---
 

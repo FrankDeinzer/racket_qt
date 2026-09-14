@@ -2505,6 +2505,16 @@ Kategorie (Sub-Tabs, geprüfte Control-Typen) in der Tabelle im Report. Bemerken
 
 ### 25.1 Neuer Befund: Preferences-Dialog öffnet mit initial unerreichbarer Button-Zeile — identifiziert als weitere Ausprägung von §21.7
 
+> **GEFIXT 2026-09-14 — und die Einordnung unten war falsch (s. §31).** Dieser Befund
+> gehört **nicht** zum §21.7-Cluster: es ist kein Resize beteiligt. Root Cause ist, dass
+> `wx/qt/window.rkt`s `get-client-size` das Außenmaß statt des Clients liefert und damit
+> die Menüleistenhöhe unterschlägt — `wxtop.rkt`s `correct-size` berechnet die
+> Chrome-Reserve als `(- (get-height) client-h)` und bekommt unter Qt immer 0. Fix rein
+> Racket-seitig in `wx/qt/frame.rkt`, kein Shim, Akzeptanztest 3/3. **Die
+> Fehleinordnung unter §21.7 ist der Grund, warum dieser Befund zwei Sessions lang
+> hinter dessen OUT-OF-SCOPE-Zaun lag** — der Rest dieses Abschnitts bleibt als
+> Messprotokoll gültig, seine Schlussfolgerung nicht.
+
 **Kein neuer Fix-Versuch — dieser Befund gehört zum bereits als OUT OF SCOPE
 klassifizierten §21.7-Cluster (Resize/Reflow).**
 
@@ -3356,3 +3366,98 @@ gefundenen `menu.rkt`-`select`-No-op und der `find-top-frame`-Abhängigkeit von
 `append` — kein reines Automatisierungsartefakt, sondern ein Kandidat-Produktbefund
 für den künftigen Menü-Block (eingegrenzt auf Radiogruppen-/exklusive-Auswahl-artige
 Menüeinträge, da File→Open in derselben Session per Maus zuverlässig funktionierte).
+
+## 31. `get-client-size` ignorierte die Menüleiste — §25.1 gefixt, war nie ein §21.7-Fall (Linux, 2026-09-14)
+
+**Ausgangspunkt:** Schritt 1 der §21.9-Empfehlung — die §21.7-Kernfrage in echtem
+DrRacket messen (die Harness, die nachweislich pumpt; s. §21.10). Ergebnis: der
+Preferences-Befund §25.1 hat mit `resizeEvent`/Resize **nichts** zu tun und ist rein
+Racket-seitig fixbar.
+
+### Messung
+
+Preferences-Dialog unter `PLT_QT=1`, Linux, frischer DrRacket-Start, keine
+Nutzerinteraktion außer dem Öffnen. Fenster **1060×641**, Button-Zeile („OK" / „Undo
+Changes and Close" / „Revert All Preferences to Defaults") nur als Pixelstreifen am
+unteren Rand — identisch zu §25.1s Windows-Beobachtung.
+
+Die bereits vorhandene `PLT_QT_DEBUG`-Instrumentierung in `shim.cpp` liefert die
+entscheidende Zahl ohne jede Codeänderung:
+
+```
+(c) after show: mb.height=22 mb.sizeHint.h=22 mb.visible=1 actions=1
+                central.geom=(0,22 1060x619)
+```
+
+Fenster 641 hoch, **nutzbarer Client aber nur 619** — Defizit exakt 22 px = Höhe der
+QMenuBar (der Dialog hat eine eigene `Tabs`-Menüleiste). `wx/qt/window.rkt:61` liefert
+für `get-client-size` aber **exakt dasselbe** wie `get-size`, den rohen `w`/`h`-Cache,
+ohne jeden Abzug.
+
+### Root Cause — zwei Fehler aus einer Ursache
+
+`wxtop.rkt` leitet die Fenster-Chrome-Reserve genau aus dieser Differenz ab:
+
+```racket
+;; wxtop.rkt:302-310 (correct-size)
+[delta-w (max 0 (- (get-width)  f-client-w))]
+[delta-h (max 0 (- (get-height) f-client-h))]
+[min-w   (+ delta-w (child-info-x-min panel-info))]
+[min-h   (+ delta-h (child-info-y-min panel-info))]
+```
+
+Unter Qt ist `delta-h` damit **immer 0**. Daraus folgen zwei Defekte gleichzeitig:
+
+1. **Die Mindesthöhe des Frames wird zu klein berechnet** — es wird nie Platz für die
+   Menüleiste eingeplant, `correct-size` lässt das Fenster also gar nicht erst auf die
+   nötige Höhe wachsen.
+2. **Das Panel wird zu hoch gesetzt** — `set-panel-size` (`wxtop.rkt:333`) reicht
+   `f-client-h` unverändert durch, also 641 statt 619. Die untersten 22 px des Panels
+   (die Button-Zeile) liegen außerhalb des sichtbaren Central-Widgets.
+
+Kein Resize beteiligt, kein `resizeEvent` beteiligt. **§25.1 war unter §21.7 falsch
+einsortiert** und lag dadurch zwei Sessions lang hinter dessen OUT-OF-SCOPE-Zaun.
+
+Native Gegenstücke, beide vorhanden: gtk zieht die Menüleistenhöhe in `set-menu-bar`
+per `adjust-client-delta` ab (`wx/gtk/frame.rkt:291`, mit dem Kommentar „so that we
+make better assumptions about the client size and more quickly converge to the right
+size of the frame based on its content"); win32 hält `client-dw`/`client-dh` und
+überschreibt `get-client-size` auf dem Frame (`wx/win32/frame.rkt:694`). Es ist damit
+**Muster 3 aus dem §30-Vertrags-Audit** (fehlender Override, den alle nativen Backends
+haben) — dort durchgerutscht, weil das Audit `get-client-size` nicht als
+Zustandsmethode geführt hat.
+
+### Fix (`wx/qt/frame.rkt`, reines Racket, keine Shim-Änderung)
+
+`set-menu-bar` merkt sich das QMenuBar-Handle; `get-client-size` zieht dessen
+`sizeHint().height()` über das **bereits existierende** `shim_widget_get_size_hint`
+ab. **Lazy statt gecacht, und das ist wesentlich:** zum Zeitpunkt von `set-menu-bar`
+hat die Bar noch keine Actions und meldet `sizeHint.h=0` (gemessen, s. Debug-Zeile
+`(b)` oben) — ein dort gecachter Wert wäre dauerhaft falsch. Ein Frame ohne Menüleiste
+liefert unverändert `h` (Null-Handle wird nie an den Shim gereicht).
+
+gtk ruft nach `adjust-client-delta` zusätzlich `(send this resized)`, um das Layout
+sofort neu zu rechnen. Unter Qt ist das **nicht** nötig — gemessen: `correct-size`
+greift den korrigierten Wert von allein auf, der Dialog wächst ohne Zusatzaufruf auf
+die richtige Höhe.
+
+### Verifikation
+
+| Prüfung | Ergebnis |
+|---|---|
+| Preferences-Dialoghöhe | **1060×641 → 1060×663** (exakt +22 px = Menüleistenhöhe) |
+| Button-Zeile sichtbar | ja, vollständig, beim allerersten Öffnen ohne manuelles Vergrößern |
+| Button-Zeile **klickbar** | ja — OK-Klick schließt den Dialog (§25.1s eigener Diskriminator: „sichtbar, aber nicht klickbar" war dort ein eigener Fehlermodus) |
+| Akzeptanztest n=3 | **3/3 PASS**, Dialogmaß in allen drei Läufen identisch |
+| `test-dock-size`-Regressionswache (1→2-Tab-Sequenz) | **2/2 crashfrei** — der §30-Fix bleibt intakt |
+| DrRacket-Hauptfenster | unverändert 600×650 (stretchbar, `correct-size` erzwingt kein Wachstum) — minimaler Wirkradius |
+| Smoke | 3/3 mit **und** ohne `PLT_QT` |
+| Proben gegen Basislinie | `is-shown-probe` und `resize-reflow-probe` unverändert (400×300 → 400×609) |
+
+**Was dieser Fix nicht ist:** er behebt **nicht** §21.7 (Kind-Controls wandern beim
+Fenster-Vergrößern weiterhin nicht mit — dafür fehlt weiterhin die
+`resizeEvent`-Verdrahtung, s. §21.9/§21.10). Er behebt die **initiale** Fehlgeometrie
+jedes Frames mit Menüleiste. Beides sah in §25.1 wie dasselbe Problem aus und ist es
+nicht.
+
+Volles Detail: `docs/2026-09-14_report-linux.md`.
