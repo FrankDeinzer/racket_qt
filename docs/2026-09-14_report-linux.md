@@ -313,3 +313,15 @@ Unverändert aus `docs/2026-09-13_report-linux.md` übernommen, plus:
   verbraucht; sollte `sizeHint().height()` dort trotzdem > 0 melden, wäre ein
   `isNativeMenuBar`-Guard nötig. **Auf Linux nicht prüfbar — ausdrücklich als Risiko
   für den macOS-Durchlauf vermerkt, nicht als erledigt.**
+
+  **Zwei benachbarte Risiken wurden auf Linux geprüft und sind erledigt — im
+  gebündelten Durchlauf nicht erneut herzuleiten:**
+  - *Frame mit dauerhaft leerer Menüleiste verliert Zeilen?* **Nein.** Gemessen, drei
+    Fälle nebeneinander: ohne Menüleiste `client=400x300`, mit **leerer** Menüleiste
+    `client=400x300` (unverändert), mit einem Menü `client=400x278`. Der
+    `(positive? mh)`-Guard greift, weil eine actionlose QMenuBar `sizeHint 0` meldet.
+  - *`get-scaled-client-size` (frame.rkt:143) erbt die Korrektur — will das jeder
+    Konsument?* Die Frage stellt sich nicht: der einzige Shared-Code-Aufrufer
+    (`mrcanvas.rkt:61`) ruft die Methode auf **`canvas%`**, das sie in
+    `wx/qt/canvas.rkt:272` selbst definiert. Die Frame-Variante hat keinen betroffenen
+    Konsumenten.
