@@ -247,6 +247,52 @@ drei nativen Backends haben) und wurde dort übersehen, weil das Audit nur
 Zustands*abfragen* wie `is-shown?` als Kandidaten geführt hat. Für ein künftiges Audit:
 auch Geometrie-/Maß-Methoden gegen die nativen Backends prüfen.
 
+## Schritt 2 ausgeführt — §21.7 gefixt (vierter Anlauf, der erste der hält)
+
+Auf Nutzerwunsch direkt im Anschluss. Volles Detail: `docs/HACKING.md` §32.
+
+**Was den Unterschied machte — keine neue Messtechnik, sondern ein Blick in
+`wx/gtk/window.rkt`:** GTKs `remember-size` meldet einen Resize nur weiter, wenn er die
+Größe **tatsächlich** ändert, und `set-size` schreibt den Cache **bevor** es das native
+Fenster resized. Das Echo des eigenen `set-size` findet den Cache damit schon gleich und
+läuft ins Leere — genau dort, wo Fix-Versuch 1 endlos lief. `wx/qt/frame.rkt:75-77` hatte
+diese Reihenfolge längst; es fehlte nur der Dedup. **Nebeneffekt:** Versuch 3s zweite
+Shim-Funktion (`shim_window_get_size`) entfällt, weil der Cache die Wahrheit ist, sobald
+`remember-size` ihn pflegt — eine neue Shim-Funktion statt zweier.
+
+**Messungen, in der vom Risiko diktierten Reihenfolge** (alle mit `PUMP OK` im Log —
+erst dadurch zulässig):
+
+1. **Diskrete Resizes, stretchbar:** Button folgt 296 → 696 → 896 → 496 px, jede Größe
+   stabil. Erstmals in vier Versuchen reflowt der Inhalt. *(Die Probe brauchte dafür eine
+   Korrektur: ihr Button war nicht stretchbar und hätte auch bei perfektem Reflow
+   konstant 80×25 gemeldet.)*
+2. **Korrekturzweig durch echtes natives Resize** (Versuch 1s Todesfall), instrumentiert
+   in `wxtop.rkt` und danach zurückgerollt: `new=300x200 correct=300x348` →
+   `KORREKTUR-ZWEIG: set-size 300x348` → `new=300x348 correct=300x348`. **Genau eine
+   Korrektur**, das Echo vom Dedup geschluckt.
+3. **Live-Drag mit echtem Mausziehen** (Versuch 1 *und* 2 starben hier): stretchbar 9
+   Resizes live nachgeführt, 0 Korrekturen; unter die Mindestgröße gezogen 24 Resizes,
+   6 Korrekturen bei 8 Drag-Schritten, jede mit genau einem sauberen Recheck. Prozess
+   lebt, Eventspace tickt weiter, **kein „Nachspielen" nach dem Loslassen** — Versuch 2s
+   Symptom blieb aus, wie erwartet (X11 hat keine modale Resize-Schleife wie Windows).
+4. **Echtes DrRacket:** Preferences-Dialog 1060×663 → 1200×820 gezogen, Tab-Zeile,
+   rechte Feldspalte und Button-Zeile folgen alle; OK klickt an seiner **neuen**
+   Position.
+
+**Gate:** Smoke 3/3 beide Wege, drei Proben unverändert, `test-dock-size` 2/2 crashfrei,
+§31-Akzeptanztest 3/3 PASS bei unverändertem Dialogmaß.
+
+**Nebenfund für künftige Proben:** der Korrekturzweig lässt sich **nicht** über
+`[stretchable-width #f]` an einem eigenen Panel erzwingen — das implizite Top-Panel des
+Frames bleibt stretchbar (gemessen `stretch=#t/#t`). Zuverlässig ist nur: Inhalt mit
+großer Mindestgröße bauen und das Fenster von außen darunter ziehen. Eine Probe, die
+diesen Irrweg beschritt, wurde wieder entfernt statt committet.
+
+**⚠ Shim-ABI-Änderung:** `shim_window_set_resize_cb` ist neu — **Windows und macOS
+müssen `qt-shim` nach dem Pull neu bauen**, sonst schlägt bereits das Laden fehl
+(`get-ffi-obj`). Gleiche Klasse wie §27.
+
 ## Methodische Lehre — Vorschlag für die Triage-Regel im nächsten Prompt
 
 Der Instrumentenfehler war zwei Sessions lang unsichtbar, obwohl er in vier Zeilen
@@ -325,3 +371,15 @@ Unverändert aus `docs/2026-09-13_report-linux.md` übernommen, plus:
     (`mrcanvas.rkt:61`) ruft die Methode auf **`canvas%`**, das sie in
     `wx/qt/canvas.rkt:272` selbst definiert. Die Frame-Variante hat keinen betroffenen
     Konsumenten.
+- **§32-`resizeEvent`-Fix — der Punkt mit dem höchsten Validierungsbedarf:**
+  **Zwingend zuerst `qt-shim` neu bauen** (neue Funktion `shim_window_set_resize_cb`,
+  sonst scheitert schon `get-ffi-obj`). Zu prüfen ist vor allem das **Live-Drag** auf
+  Windows und macOS, denn genau dort liegt die bekannte Plattformdifferenz: Windows'
+  natives Resize läuft in einer **modalen** `WM_ENTERSIZEMOVE`/`WM_SIZING`-Schleife, die
+  den Pump blockiert — auf X11 gibt es das nicht, und Fix-Versuch 2 ist historisch
+  genau daran gescheitert („Resize-Schritte spielen sich nach dem Loslassen ab").
+  **Das auf Linux gemessene saubere Drag-Verhalten überträgt sich deshalb ausdrücklich
+  nicht auf Windows.** win32 löst das mit `constrained-reply`/`pre-event-sync` direkt im
+  Message-Handler (`wx/win32/frame.rkt:340-345`); sollte sich das Symptom auf Windows
+  zeigen, ist das die Stelle, an der ein Qt-Äquivalent ansetzen müsste. macOS ist
+  unbekanntes Terrain (weder X11 noch Win32-Modalschleife).

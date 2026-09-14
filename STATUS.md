@@ -55,9 +55,24 @@ wieder messen. Voller Bericht: `docs/2026-09-14_report-linux.md`. Details:
   DrRacket-Hauptfenster unverändert 600×650. Muster 3 aus dem §30-Audit, dort
   übersehen, weil nur Zustandsabfragen geprüft wurden — künftige Audits sollten auch
   Geometrie-/Maß-Methoden einschließen.
-- **§21.7 bleibt offen:** Kind-Controls wandern beim Vergrößern weiterhin nicht mit
-  (fehlende `resizeEvent`-Verdrahtung). Der §31-Fix betrifft nur die **initiale**
-  Geometrie von Frames mit Menüleiste.
+- **✅ §21.7 GEFIXT im vierten Anlauf (§32) — der seit Juli offene Resize/Reflow-Bug.**
+  Entscheidend war kein neues Messverfahren, sondern `wx/gtk/window.rkt`s
+  `remember-size`: einen Resize nur weitermelden, wenn er die Größe **wirklich** ändert
+  — und `set-size` schreibt den Cache **vor** dem nativen Resize, sodass das Echo des
+  eigenen `set-size` ins Leere läuft. Genau dort lief Fix-Versuch 1 endlos.
+  `wx/qt/frame.rkt:75-77` hatte die Reihenfolge längst, es fehlte nur der Dedup.
+  Versuch 3s zweite Shim-Funktion (`shim_window_get_size`) entfällt dadurch.
+  Verifiziert in vier Stufen: diskrete Resizes (Button folgt 296→696→896→496),
+  Korrekturzweig durch echtes natives Resize (**genau eine** Korrektur, Echo
+  geschluckt), **echtes Mausziehen** (stretchbar 9 Resizes/0 Korrekturen; unter die
+  Mindestgröße 24 Resizes/6 Korrekturen bei 8 Schritten, je ein sauberer Recheck; kein
+  „Nachspielen" nach dem Loslassen — Versuch 2s Symptom blieb aus, X11 hat keine modale
+  Resize-Schleife), und **echtes DrRacket** (Preferences 1060×663 → 1200×820, alle
+  Kinder folgen, OK klickt an neuer Position). Gate: Smoke 3/3 beide Wege, Proben
+  unverändert, `test-dock-size` 2/2 crashfrei, §31-Akzeptanztest 3/3.
+- **⚠ SHIM-ABI-ÄNDERUNG:** `shim_window_set_resize_cb` ist neu. **Windows und macOS
+  müssen `qt-shim` nach dem nächsten Pull neu bauen**, sonst schlägt bereits das Laden
+  fehl (`get-ffi-obj`). Gleiche Klasse wie §27.
 - **Nicht gemacht:** kein vierter `resizeEvent`-Wiring-Versuch (Shim-ABI,
   Nutzerentscheidung), keine Cross-Platform-Validierung. Smoke 3/3 mit und ohne
   `PLT_QT`.

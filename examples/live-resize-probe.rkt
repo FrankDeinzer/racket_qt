@@ -18,7 +18,10 @@
 (require "pump-gate.rkt")
 (define f (new frame% [label "live-resize-probe"] [width 300] [height 200]))
 (define p (new vertical-panel% [parent f]))
-(define b (new button% [label "resize me"] [parent p]))
+; stretchable-width MUSS gesetzt sein: ein button% ist per Default nicht
+; stretchbar und wuerde auch bei perfektem Reflow konstant 80x25 bleiben --
+; eine unstretchbare Probe kann Reflow grundsaetzlich nicht nachweisen.
+(define b (new button% [label "resize me"] [parent p] [stretchable-width #t]))
 (send f show #t)
 (pump-gate!)
 (let loop ([n 0])

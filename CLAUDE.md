@@ -214,12 +214,16 @@ das Thunk sofort. **Korrektur an §21.9:** „kein Crash/kein Hänger" bleibt g�
 das Thunk läuft und `set-size` aufruft; der Pfad wurde nie durchlaufen, das Risiko
 ist ungeprüft, nicht entkräftet. Repariert: neues `examples/pump-gate.rkt`
 (`wait/pump` + `pump-gate!`), vier Proben umgestellt, **jede loggt jetzt
-`PUMP OK (n ms)` als eigenen Gültigkeitsbeweis**. Unverändert gilt: §21.7s
-Originalfund kam aus echtem, laufendem DrRacket (Preferences-Dialog), dessen
-Eventspace-Queue nachweislich sauber läuft — **die offene Kernfrage für die nächste
-Session ist deshalb, warum der Preferences-Dialog dort nicht reflowt**; erst danach
-ggf. ein vierter Wiring-Versuch (Shim-ABI, Nutzerentscheidung). Bug bleibt offen;
-Editor-Canvas-Scrollbars
+`PUMP OK (n ms)` als eigenen Gültigkeitsbeweis**. **✅ §21.7 gefixt 2026-09-14 im vierten Anlauf (§32), Shim-ABI-Änderung:**
+entscheidend war nicht neue Messtechnik, sondern gtks `remember-size`-Dedup
+(`wx/gtk/window.rkt:640`) — einen Resize nur weitermelden, wenn er die Größe wirklich
+ändert; da `set-size` den Cache **vor** dem nativen Resize schreibt, läuft das Echo des
+eigenen `set-size` ins Leere, und genau dort lief Fix-Versuch 1 endlos. Verifiziert bis
+zum echten Mausziehen (auch unter die Mindestgröße: 6 Korrekturen bei 8 Drag-Schritten,
+je ein sauberer Recheck, kein Kaskadieren) und bis zum Preferences-Dialog in echtem
+DrRacket (1060×663 → 1200×820, alle Kinder folgen, OK klickt an neuer Position).
+**Windows/macOS müssen `qt-shim` nach dem Pull neu bauen** (`shim_window_set_resize_cb`
+neu, wie §27). Editor-Canvas-Scrollbars
 (2026-09-11 Windows: Fix-Versuch
 root-caused einen degenerierten Scroll-Range-Bug, der den Editor-Inhalt komplett
 weißmalt — Fix zurückgerollt/geparkt, additive Shim-Primitiven bleiben als Grundlage

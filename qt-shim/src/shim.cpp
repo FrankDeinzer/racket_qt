@@ -55,6 +55,12 @@ typedef void (*shim_mouse_cb_t)(void* ud, int type, int x, int y, int buttons, i
 typedef void (*shim_key_cb_t)(void* ud, int type, int key, int text_char, int mods);
 // Focus: gained(1=in, 0=out)
 typedef void (*shim_focus_cb_t)(void* ud, int gained);
+
+// Reports a native top-level resize. Carries the new size so Racket needs no
+// live geometry query: wx/qt/window.rkt's w/h cache is the source of truth
+// once it is maintained from here, exactly like wx/gtk/window.rkt's save-w/
+// save-h (see its remember-size).
+typedef void (*shim_resize_cb_t)(void* ud, int w, int h);
 // File dialog result: ud, path (UTF-8 C string, NULL if the user canceled).
 typedef void (*shim_file_dialog_cb_t)(void* ud, const char* path);
 
@@ -221,8 +227,14 @@ protected:
 
 class RacketWindow : public QMainWindow {
 public:
-    shim_callback_t close_cb;
-    void*           close_ud;
+    shim_callback_t  close_cb;
+    void*            close_ud;
+    // Wired after construction via shim_window_set_resize_cb, not through the
+    // constructor: resizeEvent fires during construction/first show, before
+    // Racket's frame% object exists. Leaving it null until the frame is ready
+    // drops those early events instead of posting into a half-built object.
+    shim_resize_cb_t resize_cb = nullptr;
+    void*            resize_ud = nullptr;
 
     RacketWindow(shim_callback_t cb, void* ud)
         : QMainWindow(nullptr), close_cb(cb), close_ud(ud)
@@ -237,6 +249,15 @@ protected:
     void closeEvent(QCloseEvent* e) override {
         e->ignore();
         if (close_cb) close_cb(close_ud);
+    }
+
+    // Base implementation first (QMainWindow lays out its menu bar and central
+    // widget here), then report. Pattern follows focusOutEvent, not closeEvent
+    // -- the latter deliberately swallows its event, this one must not.
+    void resizeEvent(QResizeEvent* e) override {
+        QMainWindow::resizeEvent(e);
+        if (resize_cb && e->size().width() > 0 && e->size().height() > 0)
+            resize_cb(resize_ud, e->size().width(), e->size().height());
     }
 };
 
@@ -340,6 +361,15 @@ void shim_window_set_title(void* win, const char* title)
 void shim_window_set_size(void* win, int w, int h)
 {
     static_cast<RacketWindow*>(win)->resize(w, h);
+}
+
+// Wires the native resize notification. Called once per frame, after the
+// Racket-side frame% is constructed.
+void shim_window_set_resize_cb(void* win, shim_resize_cb_t cb, void* ud)
+{
+    auto* rw = static_cast<RacketWindow*>(win);
+    rw->resize_cb = cb;
+    rw->resize_ud = ud;
 }
 
 void shim_window_show(void* win, int visible)

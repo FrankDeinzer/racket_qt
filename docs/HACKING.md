@@ -1528,6 +1528,14 @@ genau wie `tab-panel%` selbst in dieser Session als Block-A-Nachfolger zu
 
 ### 21.7 Resize/Reflow-Bug — Root Cause gefunden, Fix versucht und wieder zurückgerollt
 
+> **✅ GEFIXT 2026-09-14 im vierten Anlauf — s. §32.** Die Root-Cause-Analyse unten
+> stimmt; was fehlte, war gtks Dedup-Wächter: `remember-size` meldet einen Resize nur
+> weiter, wenn er die Größe **tatsächlich** ändert, und `set-size` schreibt den Cache
+> vor dem nativen Resize. Damit bricht die in „Fix-Versuch 1" beschriebene
+> Rückkopplungsschleife genau an der Stelle ab, an der sie damals endlos lief. Verifiziert
+> bis hin zum echten Mausziehen und zum Preferences-Dialog in echtem DrRacket.
+> **Achtung: Shim-ABI-Änderung** — Windows/macOS müssen `qt-shim` neu bauen.
+
 Noch in derselben Sitzung wurde Befund 1 aus §21.6 root-caused und ein Fix versucht,
 der aber ein neues, schlimmeres Problem aufdeckte — Rollback, kein Fix in dieser
 Sitzung.
@@ -3459,5 +3467,119 @@ Fenster-Vergrößern weiterhin nicht mit — dafür fehlt weiterhin die
 `resizeEvent`-Verdrahtung, s. §21.9/§21.10). Er behebt die **initiale** Fehlgeometrie
 jedes Frames mit Menüleiste. Beides sah in §25.1 wie dasselbe Problem aus und ist es
 nicht.
+
+Volles Detail: `docs/2026-09-14_report-linux.md`.
+
+## 32. §21.7 gefixt: `resizeEvent` verdrahtet mit gtks `remember-size`-Dedup (Linux, 2026-09-14)
+
+**Vierter Fix-Versuch — der erste, der hält.** Versuche 1 und 2 (Windows, 2026-07-13)
+endeten in einer Rückkopplungsschleife bzw. in nachträglich „abgespielten"
+Resize-Schritten; Versuch 3 (Linux, 2026-09-13, §21.9) war harmlos, aber wirkungslos —
+und sein Negativbefund war, wie §21.10 zeigte, ein Artefakt des Messinstruments.
+
+### Warum dieser Versuch anders ausging
+
+Nicht neue Messtechnik, sondern ein Blick in `wx/gtk/window.rkt`. GTK löst die
+Rückkopplung mit vier Zeilen:
+
+```racket
+;; wx/gtk/window.rkt:640 (aus dem configure-event-Handler gerufen)
+(define/public (remember-size x y w h)
+  (unless (and (= save-w w) (= save-h h) (equal? save-x x) (equal? save-y y))
+    (set! save-w w) (set! save-h h) (set! save-x x) (set! save-y y)
+    (queue-on-size)))
+```
+
+**Der Trick steckt in der Reihenfolge:** `set-size` schreibt den Cache, **bevor** es das
+native Fenster resized. Das Resize-Ereignis, das daraufhin vom Toolkit zurückkommt,
+findet den Cache also bereits gleich — `remember-size` meldet „keine Änderung" und ruft
+kein `queue-on-size`. Die Kette `natives Resize → queue-on-size → correct-size →
+set-size → natives Resize → …` bricht damit genau dort ab, wo Versuch 1 sie endlos
+laufen ließ. `wx/qt/frame.rkt:75-77` hatte diese Reihenfolge bereits (`super set-size`
+vor `shim_window_set_size`) — es fehlte nur der Dedup.
+
+**Nebeneffekt:** Versuch 3s zweite Shim-Funktion (`shim_window_get_size`, Live-Query)
+entfällt. GTKs `get-width` liefert schlicht `save-w` — der Cache **ist** die Wahrheit,
+sobald `remember-size` ihn pflegt. Statt zwei neuer Shim-Funktionen also eine.
+
+### Änderung
+
+| Datei | Änderung |
+|---|---|
+| `qt-shim/src/shim.cpp` | `shim_resize_cb_t` (ud, w, h — die Größe reist mit, keine Rückfrage nötig); `RacketWindow::resizeEvent` ruft **erst** `QMainWindow::resizeEvent(e)` (Muster wie `focusOutEvent`, nicht wie `closeEvent`, das sein Event absichtlich schluckt), dann den Callback, und nur bei positiver Breite/Höhe; `shim_window_set_resize_cb` als Setter |
+| `wx/qt/utils.rkt` | `_resize_cb_t` + FFI-Binding |
+| `wx/qt/window.rkt` | `remember-size nw nh` → `#t`, wenn sich die Größe wirklich geändert hat; nicht-positive Maße werden ignoriert (Qt meldet solche bei Hide/Show-Übergängen, ein genullter Cache würde `correct-size`-Berechnungen vergiften) |
+| `wx/qt/frame.rkt` | `resize-cb` **nach** `super-new` gesetzt, damit Konstruktions-Resizes ins Leere laufen statt in ein halbfertiges Objekt zu posten; der atomare C-Callback postet nur (Regel 2), das Thunk entscheidet: `(when (send this remember-size nw nh) (queue-on-size))` |
+
+### Messungen — in der vom Risiko diktierten Reihenfolge
+
+Alle mit repariertem Instrument (`PUMP OK` im Log, §21.10) — erst dadurch sind die
+Ergebnisse überhaupt zulässig.
+
+**1. Diskrete Resizes, stretchbarer Inhalt** (`examples/live-resize-probe.rkt`):
+
+| Fenster | Button |
+|---|---|
+| 300×200 | 296×25 |
+| 700×500 | **696×25** |
+| 900×600 | **896×25** |
+| 500×350 | **496×25** |
+
+Kind folgt in beide Richtungen, jede Größe über mehrere Ticks stabil. **Erstmals in vier
+Versuchen reflowt der Inhalt.** (Die Probe brauchte dafür eine Korrektur: ihr Button war
+nicht stretchbar und hätte auch bei perfektem Reflow konstant 80×25 gemeldet — eine
+unstretchbare Probe kann Reflow grundsätzlich nicht nachweisen.)
+
+**2. Der Korrekturzweig, ausgelöst durch ein echtes natives Resize**
+(`examples/minsize-resize-probe.rkt`) — genau Versuch 1s Todesfall. Instrumentiert in
+`wxtop.rkt`s `resized` (temporär, danach per `git checkout` zurückgerollt,
+Hash-Identität geprüft):
+
+```
+[resized] new=700x600 correct=700x600 min=295x348      ← Ausgangslage
+[resized] new=300x200 correct=300x348 min=295x348      ← nativer Resize unter die Mindesthöhe
+[resized] KORREKTUR-ZWEIG: set-size 300x348            ← die Korrektur
+[resized] new=300x348 correct=300x348 min=295x348      ← synchroner Recheck, sauber
+```
+
+**Genau eine Korrektur.** Das Echo des eigenen `set-size` wurde vom Dedup geschluckt,
+kein asynchroner Folgezyklus.
+
+**Nebenfund, für künftige Proben wichtig:** der Korrekturzweig lässt sich **nicht** über
+`[stretchable-width #f]` an einem eigenen Panel erzwingen — das implizite Top-Panel des
+Frames bleibt stretchbar (gemessen: `stretch=#t/#t`). Der zuverlässige Weg ist, den
+Inhalt eine große Mindestgröße erzwingen zu lassen und das Fenster von außen darunter zu
+ziehen.
+
+**3. Live-Drag mit echtem Mausziehen** — der Fall, an dem Versuch 1 **und** 2 starben.
+
+| Probe | Ergebnis |
+|---|---|
+| stretchbar | 9 `resized`-Aufrufe, live während des Ziehens nachgeführt (340→380→420→460→500→zurück), 0 Korrekturen, Kind folgt |
+| unter Mindestgröße gezogen | 24 `resized`-Aufrufe, **6 Korrekturen bei 8 Drag-Schritten**, jede gefolgt von genau einem sauberen Recheck — kein Kaskadieren |
+
+In beiden Fällen: Prozess lebt, Eventspace tickt nach dem Loslassen weiter, Endzustand
+über mehrere Ticks stabil. **Kein „Nachspielen" nach dem Loslassen** — Versuch 2s
+Symptom trat nicht auf, wie erwartet: X11 kennt keine modale Resize-Nachrichtenschleife
+wie Windows' `WM_SIZING`, `shim_pump` drainiert durchgehend weiter.
+
+**4. Echtes DrRacket — §21.7s Originalsymptom in seiner Originalharness.**
+Preferences-Dialog von 1060×663 auf 1200×820 gezogen: Tab-Zeile spannt auf die neue
+Breite, die rechte Feldspalte sitzt am neuen rechten Rand, **die Button-Zeile wandert an
+den neuen unteren Rand** — und der OK-Knopf klickt an seiner **neuen** Position (Dialog
+schließt). Hit-Testing folgt dem Reflow.
+
+### Gate
+
+Smoke 3/3 mit **und** ohne `PLT_QT`; `is-shown-probe`/`resize-reflow-probe`/
+`enable-cascade-probe` unverändert gegen die Basislinie; `test-dock-size`-Sequenz 2/2
+crashfrei (§30 intakt); Preferences-Akzeptanztest (§31) 3/3 PASS mit unverändertem
+Dialogmaß.
+
+### ⚠ Shim-ABI-Änderung
+
+`shim_window_set_resize_cb` ist neu. **Windows und macOS müssen `qt-shim` nach dem
+nächsten Pull neu bauen**, sonst schlägt schon das Laden fehl (`get-ffi-obj`). Gleiche
+Klasse wie §27; Bauanleitung je Plattform steht in `CLAUDE.md`.
 
 Volles Detail: `docs/2026-09-14_report-linux.md`.
