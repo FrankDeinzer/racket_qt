@@ -2561,6 +2561,15 @@ den Hash danach prüfen.
 
 ### 25.2 Colors-Tab „rechte Spalte" (letzter offener Rest von §21.6 Punkt 4) — bestätigt real, dieselbe Root-Cause wie §24.5, geparkt
 
+> **✅ GEFIXT 2026-09-14 (Linux), §34.** Der unten vermutete Mechanismus („der
+> scroll-aktivierende Codepfad wird unter Qt offenbar gar nicht erst betreten") ist
+> **gemessen und widerlegt**: `do-set-scrollbars` feuert auf dem `'(auto-vscroll)`-Panel
+> sehr wohl, mit `len=0/349 page=0/260 pos=-1/-1` (§34.1). Der Pfad war vollständig da;
+> es fehlten die Scrollbars (bewusstes `(not (is-panel?))`-Gate aus §33) und ein
+> Widget, das sich verschieben lässt. Der Absatz unten bleibt als Befundlage der
+> damaligen Sitzung stehen — die **Beobachtungen** (unerreichbare Buttons, drei
+> unabhängige Wege) waren korrekt, nur die daraus gezogene Dispatch-Vermutung nicht.
+
 **Auf Nutzerwunsch untersucht (2026-09-12, Teil 2 der Fortsetzung). Status: Root-Cause
 gefunden (Shared Code, identisch zu §24.5) — kein Fix-Versuch, konsistent mit der dort
 bereits getroffenen Parken-Entscheidung. Korrigiert eine erste, hier zurückgezogene
@@ -3738,3 +3747,198 @@ dessen Paint-Logging die Scroll-Sequenz zudeckt).
 `qt-shim`-Rebuild nach dem Pull; er deckt jetzt beide Funktionen ab.
 
 Volles Detail: `docs/2026-09-14-2_report-linux.md`.
+
+---
+
+## 34. Scroll-Block Fall 2 gefixt: `'(auto-vscroll)`-Panels bewegen ihre Kind-Widgets (Linux, 2026-09-14)
+
+**Status: gefixt, nur auf Linux gebaut und getestet** (Cross-Platform-Modell wie §30/
+§31/§32/§33: reine Racket-Logik ohne bekannte Plattformdivergenz, Validierung auf
+Windows/macOS gebündelt). **Keine Shim-ABI-Änderung** — `shim_panel_create` und
+`shim_widget_set_geometry` existierten bereits. Der offene Rebuild aus §32/§33 bleibt
+davon unberührt bestehen.
+
+Damit ist der Scroll-Cluster (§21.6 Punkt 4 → §24.5 → §25.2) geschlossen: Fall 1
+(`editor-canvas%`/`canvas%`) in §33, Fall 2 (`canvas-panel%`) hier.
+
+### 34.1 Die Vormessung korrigiert §25.2s vermutete Root-Cause
+
+§25.2 hatte vermutet, der scroll-aktivierende Codepfad werde unter Qt „gar nicht erst
+betreten" (ausdrücklich als nicht nachverfolgt gekennzeichnet). Die erste Messung
+dieser Sitzung — `examples/panel-scroll-probe.rkt` auf der **unveränderten** Basislinie
+mit `PLT_QT_SCROLL_DEBUG=1` — widerlegt das:
+
+```
+[sb c8578] do-set-scrollbars step=1/1 len=0/349 page=0/260 pos=-1/-1
+```
+
+`do-set-scrollbars` **feuert**, mit `pos=-1/-1` — das ist der Aufrufer
+`reset-auto-scroll` (`wx/common/canvas-mixin.rkt:80-83`), also ist `is-auto-scroll?`
+auf diesem Panel bereits `#t` und `virtual-height` gesetzt (349 + 260 = 609 px
+Inhalt in 260 px Client). Der Pfad war vollständig da; was fehlte, waren die
+Scrollbars und ein Widget, das sich verschieben lässt. Ein zweiter Trace zeigte auch
+den Grund für die fehlenden Bars:
+
+```
+[sb c9440] style=(deleted transparent auto-vscroll) panel=#t want=#f/#f
+```
+
+Der Stil trägt `auto-vscroll` — `want-v?` war nur deshalb `#f`, weil §33 das
+`(not (is-panel?))`-Gate bewusst gesetzt hatte.
+
+### 34.2 Warum ein eigenes Content-Widget nötig ist
+
+Der Inhalt eines `canvas-panel%` sind **echte Kind-Widgets**. Fall 1 verschiebt einen
+Zeichen-Offset (`set-auto-scroll` auf dem dc) — an einem `QPushButton` bewegt das
+nichts. win32 hält dafür ein separates `content-hwnd` **innerhalb** des Canvas-Fensters
+(`wx/win32/canvas.rkt:149-159`), gibt es über `get-content-hwnd` an die Kinder aus und
+verschiebt es in `canvas-panel%`s `reset-dc-for-autoscroll` (`canvas.rkt:663-673`) um
+den Scroll-Offset. Genau das ist hier nachgebaut, als `content-handle` in
+`qt-canvas-scroll-mixin`.
+
+### 34.3 Drei Entscheidungen, die vom win32-Vorbild abweichen
+
+1. **Das Content-Widget lebt in `qt-canvas-scroll-mixin`, nicht in `canvas-panel%`.**
+   Grund ist Qts Stapelreihenfolge: unter Geschwistern liegt das **zuletzt** erzeugte
+   oben, und das Content-Widget ist so groß wie der virtuelle Inhalt — es würde die
+   Scrollbars verdecken, wenn es nach ihnen entstünde. `canvas-panel%`s eigener
+   Klassenrumpf läuft erst nach dem Konstruktor von `canvas%`, also nach den
+   Scrollbars. Ein `raise`-Primitiv gibt es im Shim nicht; es einzuführen wäre ein
+   dritter neuer Export und würde die „keine ABI-Änderung"-Eigenschaft dieser Sitzung
+   kosten.
+2. **Erzeugt nur für ein Panel, das wirklich einen Scrollbar bekommt**
+   (`(and (is-panel?) (or want-h? want-v?))`), nicht für jedes `is-panel?` wie bei
+   win32. Jedes Kind eines solchen Panels parentet sich in dieses Handle statt in das
+   Canvas-Widget — das ist die Handle-Identitätsänderung, vor der die Übergabe gewarnt
+   hat. Die Einschränkung hält sie von den `'hide-hscroll`/`'hide-vscroll`-Panels fern
+   (`framework/private/color-prefs.rkt`s `canvas:color%`, die anderen Colors-Unterreiter),
+   die ihre heutige Struktur unverändert behalten. Nachgemessen: Colors → Racket sieht
+   vorher wie nachher identisch aus.
+3. **Die Größe kommt aus `get-client-size`, nicht aus `shim_canvas_get_*`.**
+   `position-scrollbars!` arbeitet bewusst gegen die rohe Widget-Größe; das
+   Content-Widget darf das nicht kopieren, denn `wxpanel.rkt`s `panel-redraw` platziert
+   seine Kinder gegen genau die Client-Größe (Bars bereits abgezogen). Größe ist
+   `max(Client, virtuell)`, Position ist `-(Scroll-Position)`.
+
+Ein hidden Bar behält in Qt seinen letzten Wert. `content-offset` liefert deshalb für
+einen unsichtbaren Bar `0` — sonst bliebe der Inhalt weggescrollt, sobald
+`wxpanel.rkt`s `adjust-panel-size` entscheidet, dass der Inhalt passt, und den Bar
+versteckt.
+
+**Fallstrick, der eine leere Anzeige erzeugt hätte:** Qt zeigt ein Kind, das einem
+bereits sichtbaren Elternteil hinzugefügt wird, **nicht** von selbst, und das
+Content-Widget ist kein `window%` — niemand ruft je `show` darauf. Ohne das
+`shim_widget_set_visible content-handle 1` direkt nach der Erzeugung bliebe das ganze
+Panel leer (und sähe nach einem Paint-Fehler aus).
+
+### 34.4 Mausrad — zweiter, getrennter Schritt
+
+Bei jedem anderen Canvas kommt das Rad als `key-event%` an und etwas weiter unten macht
+Scrollen daraus: `editor-canvas%` tut genau das (`wxme/editor-canvas.rkt:506`). Ein
+Panel hat keinen Editor, sein mred-seitiges `on-char` ignoriert den Code — das Ereignis
+verfiele. gtk scrollt ein solches Panel aus seinem Scrolled Window heraus, win32 über
+die Fensternachrichten des Scrollbars; hier ist das Canvas-Widget das Einzige, was das
+Ereignis überhaupt erreicht.
+
+Deshalb ein Vorrecht-Hook: `qt-wheel-scroll` (Default `#f` in `base-canvas%`) wird
+gefragt, **bevor** das Rad als `key-event%` zugestellt wird. Nur der Panel-Fall
+antwortet `#t`.
+
+Die Bedingung ist `(and content-handle <sichtbarer Bar>)` — **nicht**
+`(and (is-panel?) (is-auto-scroll?) …)`, was der erste Entwurf hatte. `is-auto-scroll?`
+wird erst gesetzt, wenn `wxpanel.rkt`s `panel-redraw` zum ersten Mal `set-scrollbars`
+gelaufen ist (und das nur innerhalb von `(when (or scroll-y? scroll-x?) …)`); ein
+Radereignis davor fiele durch und verschwände. `content-handle` ist die genaue
+Bedingung: es existiert exakt für ein Panel, das diese Klasse selbst scrollt, und hält
+`editor-canvas%` (nie ein Panel) heraus — dem einen Ding, das §33 nachweislich zum
+Laufen gebracht hat (gegengemessen, s. 34.5).
+
+**Schrittweite: ein Zehntel Page pro Raste.** Der Single Step des Bars ist hier nicht
+brauchbar: `reset-auto-scroll` gibt `1 1` als Step aus, und Qt multipliziert das mit
+`wheelScrollLines`. **Gemessen** (Rad direkt über dem Bar, 3 Rasten): 9 px, also 3 px
+pro Raste — gegen eine Range von 349 px. Der Wert ist eine UX-Setzung, kein
+Korrektheitsbefund, und lässt sich gefahrlos ändern.
+
+### 34.5 Verifikation
+
+Akzeptanzkriterium der Übergabe wörtlich: „die drei Buttons sind durch Scrollen
+erreichbar **und** klickbar (getrennt prüfen)".
+
+| Prüfung | Probe | Ergebnis |
+|---|---|---|
+| Scrollbar sichtbar | `panel-scroll-probe` | ✅ |
+| Kinder bewegen sich beim Scrollen | `panel-scroll-probe` | ✅ Zeile mit „Revert/Design/Names" erscheint |
+| Mausrad bewegt den Inhalt | `panel-scroll-probe` | ✅ 26 px/Raste, gemessen 976→820 bei 6 Rasten |
+| geklickt werden sie auch | `panel-scroll-probe` | ✅ **3/3** (Revert, Design, Names) |
+| dasselbe im echten Ziel | DrRacket Preferences → Colors → Color Schemes | ✅ Scrollbar da, alle drei Buttons sichtbar; „Style & Color Names" geklickt → Dialog „color names:" öffnet |
+
+Die Klickkoordinaten stammen **nicht** aus dem Screenshot, sondern aus
+`client->screen` der Probe selbst (Lehre aus §21.10, Vorbild
+`enable-cascade-probe`) — eine erste Runde mit aus dem Bild geschätzten Koordinaten
+traf schlicht daneben und hätte als „nicht klickbar" fehlinterpretiert werden können.
+Nebenbei ist das der Nachweis, dass `client->screen` durch das verschobene
+Content-Widget hindurch korrekt rechnet.
+
+**Regressionswache:**
+
+| Wache | Ergebnis |
+|---|---|
+| Smoke ohne `PLT_QT` | 3/3 |
+| Smoke mit `PLT_QT` | 3/3 |
+| Fall 1 (`scroll-probe`, §33) | unverändert: Mausrad Zeile 0 → 10 |
+| `live-resize-probe` (§32) | 296 → 696 → 896, unverändert |
+| `minsize-resize-probe` (§32) | 300×200 → 300×348 in einem Schritt |
+| `test-dock-size` (Run, dann File→Open als 2. Tab) | **3× crashfrei**, Tab-Zahl je Lauf belegt (s. 34.7) |
+| §31-Akzeptanztest (Preferences-Button-Zeile) | Dialog **1060×663**, OK klickt und schließt |
+| Colors → Racket (`hide-*`-Panel, andere Maschinerie) | unverändert |
+
+### 34.6 Lebensdauer des Content-Widgets
+
+Kein `shim_panel_destroy`-Aufruf und kein Leck: **dieses Backend zerstört überhaupt
+keine Widgets explizit.** `shim_canvas_destroy`/`shim_button_destroy` sind in
+`wx/qt/utils.rkt` zwar gebunden, werden aber von keiner Stelle in `wx/qt/` aufgerufen
+(per Grep bestätigt) — die Aufräumung läuft über Qts Parent-Child-Ownership beim
+Zerstören des Top-Level-Fensters. Das Content-Widget ist ein Kind des Canvas-Widgets
+und fällt damit unter exakt dieselbe Regelung wie die Scrollbars aus §33: keine neue
+Fehlerklasse, aber auch keine Verbesserung des bestehenden Zustands.
+
+### 34.7 Zwei Automatisierungsfallen bei der `test-dock-size`-Wache
+
+Beide kosten sonst eine Fehlmessung, beide sind **nicht** von dieser Änderung
+verursacht (vorbestehend, hier nur erstmals sauber belegt):
+
+1. **Ctrl-Akzeleratoren erreichen DrRacket hier nicht.** `ctrl+o` (File→Open) und
+   `ctrl+t` (New Tab) per `xdotool` lösen nichts aus; `F5` (Run) dagegen schon. Nur der
+   **Menüklick** funktioniert zuverlässig. Wer die Sequenz per Tastenkürzel fährt, misst
+   eine Sequenz, die gar nicht stattgefunden hat.
+2. **Das Tabs-Menü zeigt „Previous Tab"/„Next Tab"/„Tab 1…9" auch bei zwei offenen Tabs
+   ausgegraut** — die Enable-States werden unter diesem Backend offenbar nicht
+   nachgeführt. Daraus „also nur ein Tab" zu schließen, ist falsch; genau diese
+   Fehldeutung ist in dieser Sitzung zunächst passiert.
+
+**Belastbarer Tab-Zähler stattdessen:** nach dem Öffnen `File → Close` klicken. Springt
+der Fenstertitel auf `htdp-tests-probe.rkt` zurück, gab es zwei Tabs (Close schließt den
+aktuellen Tab, nicht das Fenster). So ist die Zwei-Tab-Bedingung hier in **allen drei**
+Läufen einzeln nachgewiesen:
+
+```
+  after Run:   htdp-tests-probe.rkt - DrRacket
+  after Open:  hello.rkt - DrRacket
+  RUN: ALIVE (no crash)
+  after Close: htdp-tests-probe.rkt - DrRacket
+```
+
+Das ausgegraute Tabs-Menü ist ein **eigener, offener Nebenbefund** (Menü-Enable-States
+werden nicht aktualisiert) — hier nicht untersucht.
+
+### 34.8 Nicht gemacht
+
+- **`notify-child-extent`** hat kein Gegenstück. Bei win32 wächst das `content-hwnd`
+  darüber nach, wenn ein Kind über den bisherigen Rand hinaus platziert wird; der
+  Aufrufer ist win32 `window%`s eigener Resize-Pfad, den dieses Backend nicht hat.
+  Hier kommt die Größe aus `canvas-autoscroll-mixin`s virtueller Größe, die
+  `panel-redraw` über `set-scrollbars` setzt, **bevor** es ein Kind platziert. Sollte
+  je ein Treiber ein Kind ohne vorheriges `set-scrollbars` außerhalb platzieren, wäre
+  das der Ort, an dem es fehlt.
+- **Das ausgegraute Tabs-Menü** (34.7 Punkt 2) — eigener Befund, eigene Sitzung.
+- **Kein Cross-Platform-Durchlauf** (gebündeltes Modell).

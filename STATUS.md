@@ -5,6 +5,55 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-14 (Linux, 3) — Scroll-Block Fall 2 gefixt: `'(auto-vscroll)`-Panels bewegen ihre Kind-Widgets (§34)
+
+**Kontext:** Der in `docs/2026-09-14-2_report-linux.md` (Abschnitt „Startpunkt")
+übergebene Rest des Scroll-Clusters. Volles Detail:
+`docs/2026-09-14-3_report-linux.md`, Technik `docs/HACKING.md` §34.
+
+**Keine neue Shim-ABI-Änderung** — `shim_panel_create`/`shim_widget_set_geometry`
+existierten bereits. Der **bestehende** offene Rebuild aus §32/§33 für Windows/macOS
+bleibt unverändert nötig.
+
+**Vormessung widerlegt §25.2s vermutete Root-Cause:** auf der unveränderten Basislinie
+feuert `do-set-scrollbars` auf dem `'(auto-vscroll)`-Panel sehr wohl
+(`len=0/349 page=0/260 pos=-1/-1`, also aus `reset-auto-scroll`). Der Pfad war
+vollständig da; es fehlten die Scrollbars (§33s bewusstes `(not (is-panel?))`-Gate) und
+ein Widget, das sich verschieben lässt. §25.2 ist korrigiert, nicht nur ergänzt.
+
+**Implementiert:** eigenes Content-QWidget in `qt-canvas-scroll-mixin`, von
+`get-content-hwnd` an die Panel-Kinder ausgegeben und in `reset-dc-for-autoscroll` um
+den Scroll-Offset verschoben — das Qt-Äquivalent zu win32s `content-hwnd`. Drei
+begründete Abweichungen vom win32-Vorbild (Erzeugung vor den Scrollbars wegen Qts
+Stapelreihenfolge; nur für Panels, die wirklich einen Scrollbar bekommen, um die
+Handle-Identitätsänderung einzugrenzen; Größe aus `get-client-size`). Als zweiter,
+getrennter Schritt: Mausrad über dem Panel (`qt-wheel-scroll`-Vorrecht-Hook,
+ein Zehntel Page pro Raste — Qts eigene 3 px/Raste sind gegen 349 px Range unbrauchbar).
+
+**Akzeptanzkriterium der Übergabe wörtlich erfüllt:** im echten DrRacket
+(Preferences → Colors → Color Schemes) sind die drei Buttons „Revert Colors…",
+„Design Your Own Color Schemes", „Style & Color Names" durch Scrollen **sichtbar** und
+**klickbar** (getrennt geprüft; der Klick öffnet den „color names:"-Dialog). In der
+isolierten Probe 3/3 Buttons geklickt.
+
+**Regressionswache grün:** Smoke 3/3 mit und ohne `PLT_QT`; Fall 1 (`scroll-probe`)
+unverändert; `live-resize-probe` 296→696→896; `minsize-resize-probe` 300×200→300×348 in
+einem Schritt; `test-dock-size` **3× crashfrei** (Zwei-Tab-Bedingung je Lauf einzeln
+belegt); §31-Akzeptanztest 1060×663 mit funktionierendem OK; Colors → Racket
+(`hide-*`-Panel) unverändert.
+
+**Neuer Nebenbefund (nicht untersucht, §34.7):** DrRackets Tabs-Menü zeigt
+„Previous/Next Tab" auch bei zwei offenen Tabs ausgegraut — Menü-Enable-States werden
+unter diesem Backend nicht nachgeführt. Außerdem erreichen `ctrl+o`/`ctrl+t` per
+`xdotool` DrRacket hier nicht (`F5` schon); nur der Menüklick funktioniert. Beides
+vorbestehend, beides eine Fehlmessungsquelle für künftige GUI-Automatisierung.
+
+**Nur auf Linux gefixt und getestet** (Cross-Platform-Modell). Der gebündelte
+Windows/macOS-Durchlauf hat jetzt vier Sitzungen Rückstand (§31/§32/§33/§34) und
+**einen** fälligen `qt-shim`-Rebuild.
+
+---
+
 ## Session 2026-09-14 (Linux, 2) — Scroll-Block Fall 1 gefixt: `canvas%` bekommt echte Scrollbars (§33)
 
 **Kontext:** Fortsetzung des in `docs/2026-09-14_report-linux.md` übergebenen
