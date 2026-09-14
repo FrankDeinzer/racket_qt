@@ -383,3 +383,14 @@ Unverändert aus `docs/2026-09-13_report-linux.md` übernommen, plus:
   Message-Handler (`wx/win32/frame.rkt:340-345`); sollte sich das Symptom auf Windows
   zeigen, ist das die Stelle, an der ein Qt-Äquivalent ansetzen müsste. macOS ist
   unbekanntes Terrain (weder X11 noch Win32-Modalschleife).
+  **Reproduktionsmittel, konkret:** `examples/minsize-resize-probe.rkt` ist die
+  Drag-Regressionsprobe — sie ist die einzige, die `wxtop.rkt`s Korrekturzweig
+  erreicht (große Mindestgröße, dann von außen darunter ziehen). Erwartung: pro
+  Drag-Schritt höchstens eine Korrektur, danach ein sauberer Recheck; `PUMP OK` muss
+  im Log stehen, sonst ist die Messung ungültig. `examples/live-resize-probe.rkt`
+  deckt den harmlosen stretchbaren Fall ab.
+  **Verifiziert, was ein vergessener Rebuild auslöst** (auf Linux mit dem alten Shim
+  gegengeprüft): der Fehler ist **laut und sofort**, nicht still —
+  `ffi-obj: could not find export from foreign library … undefined symbol:
+  shim_window_set_resize_cb`. Es gibt keinen Modus, in dem der Callback still null
+  bleibt und Frames einfach nicht reflowen.
