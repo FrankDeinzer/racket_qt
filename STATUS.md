@@ -5,6 +5,68 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-14 (Linux, 4) — Toolbar-Überlappung gefixt: `wx/qt` beachtet jetzt den Stil `'deleted` (§35)
+
+**Kontext:** Der in `docs/2026-09-14-3_report-linux.md` §35 übergebene Befund —
+`Untitled`/Dateiname und ein zweites Control mit dem Text `Undock` werden oben links im
+DrRacket-Editorfenster übereinander gezeichnet. Volles Detail:
+`docs/2026-09-14-4_report-linux.md`, Technik `docs/HACKING.md` §35.
+
+**Keine Shim-ABI-Änderung** — `shim_widget_set_visible` existierte bereits, die Änderung
+ist rein Racket-seitig. Der **bestehende** offene Rebuild aus §32/§33 für Windows/macOS
+bleibt unverändert nötig.
+
+**Nativ-Gate zuerst, wie §35 es vorgeschrieben hatte:** DrRacket ohne `PLT_QT` zeigt
+`Untitled▾` und `(define ...)▾` sauber nebeneinander, und `Undock` kommt dort
+**überhaupt nicht** vor. Damit war der Befund als `wx/qt`-Defekt bestätigt.
+
+**Root-Cause:** `wx/qt` kannte den Fensterstil `'deleted` nicht —
+`grep -rn deleted wx/qt/*.rkt` war leer, während win32 (`window.rkt:291`) und gtk
+(`window.rkt:582/714`) ihn je ausdrücklich behandeln. DrRackets Test-Report-Dock wird bei
+jedem Frame-Aufbau mit genau diesem Stil erzeugt (`test-tool.rkt:100`), seine Knöpfe
+`Hide`/`Undock` aber ohne. Unter Qt trägt ein QWidget, dessen Parent bei der Erzeugung
+noch nicht sichtbar ist, kein Hide-Flag; `QWidget::show()` auf dem Frame kaskadiert nach
+unten und macht jeden solchen Nachfahren sichtbar. Die Racket-Seite war beweisbar nicht
+beteiligt: die neue Probe `examples/deleted-style-probe.rkt` meldet unter Qt und nativ
+**identische** `is-shown?`-Zustände, nur das gezeichnete Bild unterschied sich.
+`Undock` ist ein gewöhnliches `button%` — **Hypothese 2 der Übergabe
+(`switchable-button%`) ist damit erledigt**, Hypothese 1 (Windows-Streifenrechteck,
+§24.5) bleibt offen.
+
+**Implementiert:** `no-show?`-Init in `wx/qt/window.rkt` plus
+`(when (and handle no-show?) (shim_widget_set_visible handle 0))` am Ende des
+Klassenrumpfs; elf Platform-Klassen reichen `(memq 'deleted style)` durch. Dass der
+Glue-Layer fast alles mit `'deleted` erzeugt und sofort danach per `show-control` wieder
+anzeigt, trägt win32 seit jeher — und `really-show` landet auf `show`, nicht auf dem
+`(void)`-Stub `direct-show`; beides vor der ersten Zeile Code nachgesehen.
+
+**Akzeptanzkriterium erfüllt:** Toolbarzeile in echtem DrRacket sauber, **n=3, 3/3**
+über getrennte Prozessstarts. Vorher/Nachher im selben Ausschnitt:
+`docs/2026-09-14-4_toolbar-overlap-{before,after}-linux.png`.
+
+**Regressionswache grün:** Smoke 3/3 mit und ohne `PLT_QT`; `live-resize-probe`
+296→696→896; `minsize-resize-probe` 300×200→300×348 in einem Schritt; Fall 1
+(`scroll-probe`) Mausrad 0→10; Fall 2 (Colors → Color Schemes) Scrollbar bewegt den
+Inhalt; §31-Akzeptanztest 1060×663 mit funktionierendem OK; `test-dock-size` **3×
+crashfrei** (Zwei-Tab-Bedingung je Lauf belegt). Zusätzlich die zwei Wachen, auf die es
+bei diesem Fix wirklich ankommt: nachträgliches `add-child` auf das `'(deleted)`-Panel
+macht es sichtbar **und** korrekt platziert, und ein Scroll-`canvas%` darin kommt samt
+Inhalt und **beiden Scrollbars** zurück (dessen Content-Widget und Scrollbars entstehen
+erst nach dem Hide-on-Create, §33/§34) — ein Hide-on-Create, das den Dock-Pfad kaputt
+macht, wäre wertlos.
+
+**Gemessen statt angenommen:** der Test-Report-Dock taugt in dieser htdp-lib-Version
+nicht als Wache — Andocken hängt allein an der Preference
+`test-engine:test-window:docked?`, und mit `docked? = #t` erscheint der Dock **auch
+nativ nicht**. Die Preference wurde vorher gesichert und danach bitgleich
+zurückgespielt.
+
+**Nur auf Linux gefixt und getestet** (Cross-Platform-Modell). Der gebündelte
+Windows/macOS-Durchlauf hat jetzt **fünf** Sitzungen Rückstand (§31/§32/§33/§34/§35) und
+**einen** fälligen `qt-shim`-Rebuild.
+
+---
+
 ## Session 2026-09-14 (Linux, 3) — Scroll-Block Fall 2 gefixt: `'(auto-vscroll)`-Panels bewegen ihre Kind-Widgets (§34)
 
 **Kontext:** Der in `docs/2026-09-14-2_report-linux.md` (Abschnitt „Startpunkt")

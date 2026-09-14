@@ -3991,60 +3991,183 @@ werden nicht aktualisiert) — hier nicht untersucht.
 
 ---
 
-## 35. Übereinander gezeichnete Toolbar-Controls im DrRacket-Editorfenster (Linux, beobachtet 2026-09-14) — Startpunkt einer eigenen Sitzung
+## 35. Übereinander gezeichnete Toolbar-Controls im DrRacket-Editorfenster — `'deleted` wurde unter Qt nicht beachtet (Linux, gefixt 2026-09-14)
 
-**Status: beobachtet und belegt, NICHT untersucht. Insbesondere ist nicht gemessen, ob
-der Befund überhaupt Qt-spezifisch ist** — das ist die erste Pflichtmessung der nächsten
-Sitzung (s. 35.3). Der Abschnitt existiert, damit diese Sitzung nicht bei null anfängt.
+**Status: root-caused und gefixt.** Der Abschnitt stand seit dem Vortag als „beobachtet,
+nicht untersucht" hier; die Reihenfolge, die er für die nächste Sitzung vorgeschrieben
+hatte (erst Nativ-Gate, dann Widget-Zuordnung), ist eingehalten worden und hat direkt
+zur Ursache geführt. **Keine Shim-ABI-Änderung** — `shim_widget_set_visible` gab es
+bereits.
 
-### 35.1 Was zu sehen ist
+### 35.1 Was zu sehen war
 
-Direkt unter der Toolbar-Zeile, **oben links** im DrRacket-Editorfenster, werden zwei
-Controls an derselben Stelle gezeichnet:
+Direkt unter der Toolbar-Zeile, oben links im DrRacket-Editorfenster, wurden zwei
+Controls an derselben Stelle gezeichnet: der Tab-/Dateinamen-Knopf (`Untitled` bzw. der
+Dateiname) und darüber ein zweites Control mit dem Text `Undock`. Sofort nach dem Start
+im leeren Puffer, ohne Run, ohne zweiten Tab, über mehrere Prozessstarts stabil.
 
-- der Tab-/Dateinamen-Knopf — Text `Untitled` bzw. der Dateiname, schwarz, größer;
-- darüber ein zweites Control mit dem Text `Undock` — blau mit orangefarbenen Anteilen,
-  kleiner.
+Belegbilder, gleicher Ausschnitt, beide unter Qt:
+`docs/2026-09-14-4_toolbar-overlap-before-linux.png` (vorher) und
+`docs/2026-09-14-4_toolbar-overlap-after-linux.png` (nachher). Das ältere, größere
+Belegbild der Erstbeobachtung bleibt `docs/2026-09-14-3_toolbar-overlap-linux.png`.
 
-Rechts daneben sitzt korrekt und unbeschädigt `(define ...)▾` samt den beiden
-Toolbar-Icons. Belegbild (Ausschnitt, vergrößert):
-`docs/2026-09-14-3_toolbar-overlap-linux.png`.
+### 35.2 Nativ-Gate — der Befund ist Qt-spezifisch
 
-**Reproduktion:** DrRacket unter `PLT_QT=1` starten (Rezept in `CLAUDE.md`) und den
-Bereich unmittelbar unter der Menüzeile am linken Rand ansehen. Es braucht **kein**
-Run, keinen zweiten Tab und keine Interaktion — der Effekt steht sofort nach dem Start
-im leeren `Untitled`-Puffer. Er überlebt Tab-Wechsel; der schwarze Text darunter
-wechselt dabei mit dem Dateinamen mit, der blaue `Undock`-Text bleibt.
+Erste Handlung der Sitzung, wie 35.3 der Vorversion es verlangt hatte. DrRacket **ohne**
+`PLT_QT` gestartet, derselbe Ausschnitt: `Untitled▾` und `(define ...)▾` stehen sauber
+nebeneinander, und der Text `Undock` kommt im nativen Fenster **überhaupt nicht** vor.
+Damit war der Befund als `wx/qt`-Defekt bestätigt und die Ursachensuche im Backend
+gerechtfertigt.
 
-Beobachtet in **jedem** DrRacket-Screenshot der Sitzung vom 2026-09-14 (3. Sitzung),
-über mehrere Prozessstarts hinweg — also stabil, nicht sporadisch.
+### 35.3 Wem das Control gehört
 
-### 35.2 Zwei Hypothesen (beide ungeprüft)
+`Undock` ist ein gewöhnliches `button%` aus `htdp-lib/test-engine/test-tool.rkt:252` —
+einer von zwei Knöpfen (`Hide`, `Undock`) im Button-Panel des Test-Report-Docks. **Damit
+ist Hypothese 2 der Vorversion beantwortet und erledigt:** es ist *kein*
+`switchable-button%`, die Sache hat mit §24.4s Toolbar-Save-Icon nichts zu tun.
+Hypothese 1 (derselbe Befund wie das orange/blau gestreifte Rechteck auf Windows, §24.5)
+bleibt offen — sie ist von Linux aus nicht entscheidbar.
 
-1. **Das ist derselbe Befund wie der bisher nur beiläufig notierte „grafische
-   Störeffekt (orange/blau gestreiftes Rechteck) nahe dem oberen Rand des
-   DrRacket-Editor-Fensters"** (Nebenbefund in §24.5, Windows 2026-09-11, Root-Cause nie
-   untersucht). Dafür spricht die Farbkombination (blau/orange) und die Lage (oberer
-   Rand). Wäre das bestätigt, schlösse ein Fix beide Einträge. **Nicht belegt** — der
-   Windows-Befund ist als „Rechteck" beschrieben, hier ist es lesbarer Text.
-2. **Es geht um dieselbe Maschinerie wie der Toolbar-Save-Icon-Befund**, dessen
-   Datei-Zuordnung §24.4 auf `mrlib/switchable-button.rkt` + `wx/qt/canvas.rkt`
-   korrigiert hat. Zu prüfen wäre zuerst schlicht, ob das `Undock`-Control überhaupt ein
-   `switchable-button%` ist.
+Entscheidend ist, **wie** dieses Panel erzeugt wird
+(`test-tool.rkt:100`, in `make-root-area-container`):
 
-### 35.3 Was die nächste Sitzung zuerst messen muss
+```racket
+(define test-p (make-object test-panel% outer-p '(deleted)))
+```
 
-1. **Der Nativ-Gate — vor allem anderen.** DrRacket **ohne** `PLT_QT` starten und
-   denselben Bereich vergleichen. Zeigt GTK dieselbe Überlappung, ist es **kein**
-   `wx/qt`-Befund und die Sitzung ist an dieser Stelle zu Ende. Diese Messung ist
-   2026-09-14 **nicht** gemacht worden; ohne sie ist jede Ursachensuche im Backend
-   verfrüht (dieselbe Lehre wie §24.5s Stride-Verdacht und §21.10s Instrumentenartefakt).
-2. **Wem gehören die beiden Widgets, und welche Geometrie bekommen sie?** Das
-   Instrumentarium dafür liegt seit §32 bereit und ist verlässlich. Die interessante
-   Unterscheidung: bekommen beide Controls dieselbe Geometrie zugewiesen (echter
-   Layout-Fehler), oder bekommt eines **gar keine** und sitzt deshalb auf seiner
-   Default-Position 0,0 (fehlender `set-size`-Aufruf — genau das Muster, das §33 beim
-   fehlenden `on-size` gefunden hat)?
+Der Test-Report-Dock wird bei **jedem** Frame-Aufbau angelegt, aber mit dem Stil
+`'deleted` — also erzeugt, jedoch nicht in den Container eingehängt und nicht sichtbar,
+bis `display-test-panel` ihn per `add-child` andockt. Seine Kinder (das Button-Panel mit
+`Hide` und `Undock`) tragen **kein** `'deleted` und werden vom Glue-Layer ganz normal
+angezeigt. Dass nur `Undock` zu lesen war und nicht `Hide`: Qt stapelt unter
+Geschwistern das zuletzt erzeugte oben, und `Undock` wird nach `Hide` erzeugt.
 
-Reihenfolge nicht tauschen: Punkt 2 ist nur dann etwas wert, wenn Punkt 1 den Befund als
-Qt-spezifisch bestätigt hat.
+### 35.4 Root-Cause: die Qt-Seite kannte `'deleted` nicht
+
+Die anderen Backends behandeln den Stil ausdrücklich:
+
+| Backend | Fundstelle | Formulierung |
+|---|---|---|
+| win32 | `wx/win32/window.rkt:291` | `(unless (memq 'deleted style) (show #t))` |
+| gtk | `wx/gtk/window.rkt:582/714` + je Widget-Datei | `no-show?`-Init, `(unless no-show? (show #t))` |
+| **qt (vorher)** | — | **kam nirgends vor** (`grep -rn deleted wx/qt/*.rkt` → leer) |
+
+Warum das unter Qt sichtbar wird, obwohl die Racket-Seite korrekt ist: Ein QWidget, das
+mit einem Parent erzeugt wird, der **selbst noch nicht sichtbar** ist — und das ist der
+Normalfall, Panels und Controls entstehen vor `(send frame show #t)` — trägt kein
+explizites Hide-Flag. `QWidget::show()` auf dem Frame kaskadiert dann nach unten und
+macht **jeden** solchen Nachfahren sichtbar, `'deleted` oder nicht. win32/gtk drücken die
+Regel als „am Ende der Konstruktion zeigen, AUSSER bei `'deleted`" aus; Qt braucht die
+umgekehrte Formulierung: **bei `'deleted` explizit verstecken.**
+
+Die Racket-Seite war beweisbar nicht beteiligt. Die isolierte Probe
+`examples/deleted-style-probe.rkt` meldet unter Qt und nativ **identische** Zustände:
+
+```
+[probe] dead-panel    is-shown?=#f  x=0 y=0 w=0 h=0      <- beide Backends
+[probe] dead-inner    is-shown?=#t  x=0 y=0 w=0 h=0
+[probe] b-stray       is-shown?=#t  x=0 y=0 w=80 h=25
+```
+
+Nur das gezeichnete Bild unterschied sich: unter Qt wurde `STRAY` bei 0,0 gemalt, nativ
+nicht. Das ist auch die Antwort auf die zweite Pflichtfrage der Vorversion („dieselbe
+Geometrie oder gar keine?"): **gar keine** — das Panel bleibt bei `0×0`, der Knopf sitzt
+auf seiner Default-Position; aber die Ursache ist nicht ein fehlender `set-size`-Aufruf
+wie bei §33, sondern ein fehlender Hide-Aufruf.
+
+### 35.5 Der Fix
+
+`wx/qt/window.rkt` bekommt einen `no-show?`-Init (Formulierung von gtk übernommen) und
+am Ende des Klassenrumpfs:
+
+```racket
+(when (and handle no-show?)
+  (shim_widget_set_visible handle 0))
+```
+
+Elf Platform-Klassen reichen ihn durch: `button% canvas% check-box% choice%
+group-panel% list-box% message% panel% radio-box% slider% tab-panel%`, jeweils
+`[no-show? (and (memq 'deleted style) #t)]` am `super-new`.
+
+`frame%`/`dialog%` bleiben bewusst außen vor: bei einem Top-Level-Fenster ist `show`
+immer explizit, und Qt-Top-Levels starten ohnehin versteckt. win32 drückt genau dasselbe
+aus, indem `wx/win32/frame.rkt:257` den **Frame selbst** mit `(cons 'deleted style)`
+konstruiert, damit `window.rkt:291` ihn nicht am Ende der Konstruktion zeigt. Bei
+`slider%` ist `handle` der äußere Container (`(or panel-handle slider-handle)`), das
+Verstecken trifft also Slider **und** Wertelabel.
+
+**Der Punkt, an dem diese Änderung gefährlich klingt und es nicht ist:** der Glue-Layer
+erzeugt *fast alles* mit `'deleted` und zeigt es sofort danach wieder an —
+`wxitem.rkt:234/246/251` (button/check-box/message) und `wxpanel.rkt:597` (jedes
+Basis-Panel) hängen `(cons 'deleted style)` an, bevor sie die Platform-Klasse
+konstruieren, und rufen direkt danach `show-control` auf
+(`wxitem.rkt:198`, `wxpanel.rkt:598`), das über `really-show` (`wxwindow.rkt:112`) auf
+genau dem `show` landet, das den QWidget wieder sichtbar macht. Dieselbe Mechanik trägt
+win32 seit jeher. Nur ein Widget, dessen **Nutzer**-Stil wirklich `'deleted` sagt,
+bekommt diesen Aufruf nie — und genau das ist der Test-Report-Dock.
+
+Wichtig ist dabei, dass `really-show` auf `show` zeigt und **nicht** auf `direct-show`:
+`wx/qt/panel.rkt` und `wx/qt/button.rkt` definieren `direct-show` als `(void)`-Stub, was
+den Fix stillschweigend wirkungslos gemacht hätte. Unter win32 ist es umgekehrt
+(`show` delegiert an `direct-show`, `wx/win32/window.rkt:287`). Vor der ersten Zeile Code
+nachgesehen.
+
+### 35.6 Verifikation
+
+| Wache | Ergebnis |
+|---|---|
+| Nativ-Gate (DrRacket ohne `PLT_QT`) | keine Überlappung, kein `Undock` — Befund ist Qt-spezifisch |
+| Isolierte Probe, Qt, vor Fix | `STRAY` bei 0,0 gezeichnet (Symptom reproduziert) |
+| Isolierte Probe, Qt, nach Fix | `STRAY` verschwunden, `SICHTBAR` unverändert |
+| Isolierte Probe, `add-child` nachträglich | `STRAY` erscheint **an korrekter Layout-Position** (`dead-panel` `y=115 520×145`) |
+| Isolierte Probe, Scroll-`canvas%` im `'(deleted)`-Panel | vorher unsichtbar, nach `add-child` **samt Inhalt und beiden Scrollbars** da (`y=72 520×73`) |
+| Echtes DrRacket, Toolbarzeile | sauber, **n=3, 3/3** über getrennte Prozessstarts |
+| Smoke mit / ohne `PLT_QT` | 3/3 / 3/3 |
+| `live-resize-probe` (§32) | 296 → 696 → 896, unverändert |
+| `minsize-resize-probe` (§32) | 300×200 → 300×348 in genau einem Schritt, unverändert |
+| `scroll-probe`, Fall 1 (§33) | Mausrad Zeile 0 → 10, beide Scrollbars da, unverändert |
+| Preferences → Colors → Color Schemes (§34) | Scrollbar da, Ziehen bewegt den Inhalt, unverändert |
+| §31-Akzeptanztest | Dialog **1060×663**, OK klickt und schließt (`xwininfo` → `IsUnMapped`) |
+| `test-dock-size` (Run, dann File→Open als 2. Tab) | **3× crashfrei**, Zwei-Tab-Bedingung je Lauf über den Fenstertitel belegt |
+
+Alle Probenläufe mit `PUMP OK` im Log (§21.10).
+
+**Die wichtigste Wache ist die vierte Zeile.** Ein Hide-on-Create wäre wertlos, wenn das
+Panel danach nie mehr sichtbar würde — dann wäre der Test-Report-Dock kaputt statt der
+Toolbar. `examples/deleted-style-probe.rkt` fährt deshalb mit `PROBE_ADD=1` genau den
+Pfad nach, den `display-test-panel` beim Andocken nimmt (`add-child` auf den
+Elterncontainer), und weist nach, dass das Panel dann sichtbar wird **und** korrekt
+platziert ist.
+
+Die Zeile darunter deckt den einen Fall ab, in dem das nicht selbstverständlich ist:
+`canvas%` erzeugt sein Content-Widget und die QScrollBars in `qt-canvas-scroll-mixin`
+**nach** `window%`s `super-new` (§33/§34), also nach dem Hide-on-Create — und §34 hat
+festgehalten, dass Qt ein Kind eines bereits sichtbaren Elternteils nicht von selbst
+zeigt. Die Probe enthält darum einen `editor-canvas%` mit `'(auto-hscroll auto-vscroll)`
+**ohne** eigenes `'deleted` im `'(deleted)`-Panel (genau die Lage des
+Test-Report-Canvas, `test-tool.rkt:219`): nach dem Andocken rendert er samt beider
+Scrollbars. Ein Canvas, der sein `'deleted` **selbst** trägt, bleibt dagegen zu Recht
+unsichtbar — Racket meldet dann auch `is-shown?=#f`, gleich auf welchem Backend.
+
+Der Dock selbst ließ sich im echten DrRacket nicht als Wache benutzen: das
+Andocken hängt allein an der Preference `test-engine:test-window:docked?` (es gibt keinen
+Menüeintrag dafür — `dock-label`/`undock-label` in `test-tool.rkt:120` sind tot), und mit
+`docked? = #t` erscheint der Dock **auch nativ nicht**; die Testergebnisse landen in
+beiden Backends im Interactions-Pane. Das Feature ist in dieser htdp-lib-Version inert,
+gleich auf welchem Backend — gemessen, nicht angenommen, und die Preference danach aus
+dem Backup zurückgespielt.
+
+### 35.7 Beobachtet, nicht weiterverfolgt
+
+- **Zwei gleichzeitig ausgewählte Radio-Buttons** im Color-Schemes-Panel (`Classic` und
+  `White on Black`) sind **kein** Defekt: die Liste hat zwei Abschnitte, „Light Color
+  Scheme" und „Dark Color Scheme", und pro Abschnitt ist genau eine Wahl gesetzt. Passt
+  zu §20s Fund, dass DrRacket das als **1-Button-Gruppen** baut
+  (`mk-color-scheme-radio-buttons`). Mit sauberem Zug nachgemessen (nur Scrollbar
+  gezogen, sonst nichts geklickt), damit die Beobachtung nicht auf einen eigenen
+  Fehlklick zurückgeht.
+- **Kein Cross-Platform-Durchlauf** (gebündeltes Modell). Die Mechanik dahinter — Qts
+  Show-Kaskade auf nie explizit versteckte Kinder — ist Qt-eigenes Verhalten und nicht
+  plattformspezifisch. Was daraus für Windows/macOS folgt, entscheidet der gebündelte
+  Durchlauf, nicht dieser Absatz; die Geschichte dieses Projekts (§21.9, §24.5,
+  §21.10) ist voll von Vorhersagen dieser Art, die sich als falsch erwiesen haben.
