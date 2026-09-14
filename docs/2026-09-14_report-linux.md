@@ -465,3 +465,71 @@ Unverändert aus `docs/2026-09-13_report-linux.md` übernommen, plus:
   `ffi-obj: could not find export from foreign library … undefined symbol:
   shim_window_set_resize_cb`. Es gibt keinen Modus, in dem der Callback still null
   bleibt und Frames einfach nicht reflowen.
+
+---
+
+# Startpunkt für die nächste Sitzung (Scroll-Block, Linux)
+
+Dieser Abschnitt ist die Übergabe — alles Nötige, um mit frischem Kontext zu beginnen.
+
+## Zuerst lesen (gezielt, nicht alles)
+
+| Quelle | warum |
+|---|---|
+| `CLAUDE.md` | Regeln 1–8, Umgebung/Build/Run **Linux**. Der Rebuild-Warnblock über „Build" betrifft **nur Windows/macOS** — Linux ist gebaut. |
+| `docs/HACKING.md` **§24.5** | Der **zurückgerollte** Scrollbar-Fixversuch (Windows, 2026-09-11). Wichtigste Quelle: was schon probiert wurde und warum es zurückgerollt wurde. **Nicht wiederholen.** |
+| `docs/HACKING.md` **§25.2** | Colors-Tab rechte Spalte — der realistischste Ende-zu-Ende-Reproduktionsfall, inkl. der Stelle in `framework/private/color-prefs.rkt`. |
+| `docs/HACKING.md` **§31/§32** | Was sich seither geändert hat (Client-Geometrie, Resize-Benachrichtigung) — die Vorbedingungen, die den Block überhaupt erst sinnvoll machen. |
+| **§21.10** | Die Pump-Gate-Regel: **ohne `PUMP OK` im Log ist eine Probenmessung ungültig.** |
+| dieser Report, Abschnitt „Vormessung für den Scroll-Block" | der aktuelle Symptomstand. |
+
+## Ausgangslage in einem Satz
+
+`wx/qt/canvas.rkt:300-307` implementiert die Scroll-Methoden **gar nicht** (ausdrückliche
+Stubs, „no scrollbars in the spike"); Rendering und Reflow funktionieren seit §31/§32
+korrekt, die Shim-Primitiven liegen seit `7d1231e0` bereit.
+
+## Die Reproduktionsfälle — konsolidiert, mit aktuellem Stand
+
+| # | Fall | Stand 2026-09-14 |
+|---|---|---|
+| 1 | `examples/scroll-probe.rkt` — isolierter `editor-canvas%` | rendert sauber, reflowt, **kein Scrollbar, Mausrad/PageDown wirkungslos**. Der Arbeitsfall. |
+| 2 | §25.2 Colors-Tab rechte Spalte (drei Buttons hinter `'(auto-vscroll)`) | unverändert unerreichbar. Der Ende-zu-Ende-Fall. |
+| 3 | §24.5 Editor-Canvas in echtem DrRacket | auf Linux vor §31/§32 „gestreift"; **nach den Fixes nicht erneut geprüft** — als Erstes nachmessen. |
+| 4 | §23.1 Interactions-Bildanzahl (4/6) | 2026-09-13 als **Viewport-Befund** reklassifiziert (skaliert mit der Fensterhöhe: 2 → 4 → 6/6). **Offene Frage: hat §32 das bereits erledigt?** Jetzt reflowt das Fenster — die Zahl könnte auf Vergrößern reagieren. Billig zu prüfen, **vor** jedem Fixversuch. |
+| 5 | §25.1 Preferences-Button-Zeile | **gefixt** (§31), gehört nicht mehr dazu. |
+
+## Akzeptanzkriterium (vorab festlegen, damit es nicht verrutscht)
+
+> `examples/scroll-probe.rkt`: **vertikaler Scrollbar sichtbar**, Mausrad **und**
+> PageDown bewegen den Inhalt, Zeile 99 ist erreichbar; horizontal analog. Zusätzlich
+> Fall 2 (Colors-Tab): die drei Buttons sind durch Scrollen erreichbar **und klickbar**
+> (Klickbarkeit separat prüfen — §25.1 hat gezeigt, dass „sichtbar" und „klickbar"
+> auseinanderfallen können).
+>
+> Regressionswache: Smoke 3/3 mit **und** ohne `PLT_QT`, `test-dock-size` 1→2-Tab-Sequenz
+> crashfrei, §31-Akzeptanztest (Preferences-Button-Zeile) weiterhin 3/3, und die
+> Resize-Proben (`live-resize-probe`, `minsize-resize-probe`) unverändert.
+
+## Was ausdrücklich **nicht** zu tun ist
+
+- **Den Stride-/Backing-Buffer-Verdacht verfolgen.** Er stammt aus der Vorsession und ist
+  durch die Vormessung oben **erledigt** — das gestreifte Bild war eine Folge der
+  falschen Geometrie, kein Pixelformat-Problem.
+- **§24.5s Fixversuch wiederholen**, ohne ihn vorher gelesen zu haben.
+- Eine Shim-ABI-Änderung einplanen: die vier Scrollbar-Primitiven existieren bereits.
+  Falls doch eine nötig wird, gilt Regel 8 und der Rebuild-Zwang auf allen Maschinen —
+  dann vorher fragen.
+
+## Offene Unbekannte (ehrlich benannt)
+
+- Ob Qts eigene `QScrollBar`-Widgets (die vorhandenen Primitiven) der richtige Weg sind
+  oder ob ein `QScrollArea`-Ansatz besser passt — **nicht untersucht**.
+  `wx/qt/canvas.rkt`s Kommentar bei Zeile 336-351 beschreibt, was `canvas-panel%` vom
+  Autoscroll-Mixin erbt und was win32 zusätzlich tut (`reset-dc-for-autoscroll`
+  verschiebt dort ein separates Content-HWND) — dieser Backend hat kein solches
+  separates Fenster, echtes Virtual-Scroll-Kind-Repositioning ist nicht implementiert.
+  Das ist vermutlich die eigentliche Entwurfsfrage des Blocks.
+- Ob Windows' „Inhalt komplett weiß"-Symptom sich nach dem Shim-Rebuild ebenfalls an
+  Linux/macOS angeglichen hat. Erwartung ja (derselbe Geometriefehler wirkte dort
+  ebenso), **nicht geprüft**.
