@@ -1,19 +1,42 @@
-# Report — „Instrument reparieren" (Linux) — 2026-09-14
+# Report — Instrument repariert, §25.1 und §21.7 gefixt (Linux) — 2026-09-14
+
+> # ⚠ VOR DEM NÄCHSTEN PULL AUF WINDOWS/macOS LESEN
+>
+> Diese Sitzung enthält eine **Shim-ABI-Änderung**: `shim_window_set_resize_cb` ist neu
+> (§32). **`qt-shim` muss auf Windows und macOS nach dem Pull neu gebaut werden** —
+> Bauanleitung je Plattform in `CLAUDE.md`. Ohne Rebuild schlägt bereits das Laden des
+> Forks fehl, und zwar **laut und sofort** (auf Linux gegen den alten Shim verifiziert):
+>
+> ```
+> ffi-obj: could not find export from foreign library
+>   name: shim_window_set_resize_cb
+>   system error: ... undefined symbol: shim_window_set_resize_cb
+> ```
+>
+> Es gibt keinen Modus, in dem der Callback still null bleibt und Frames einfach nicht
+> reflowen — wer diese Meldung sieht, hat den Rebuild vergessen. Gleiche Klasse wie §27.
 
 **Auftrag:** Schritt 1 aus der Empfehlung am Ende von `docs/2026-09-13_report-linux.md`
 (= `docs/HACKING.md` §21.9): das Messinstrument reparieren, bevor ein vierter
 `resizeEvent`-Wiring-Versuch überhaupt sinnvoll wird. Kein eigener Prompt — direkte
-Fortsetzung auf Nutzerwunsch.
+Fortsetzung auf Nutzerwunsch; die Schritte 1 und 2 kamen danach je auf eigene Ansage
+dazu.
 
 Gemessene Version: `~/racket/bin/racket --version` → **v9.3 [cs]** (x86-64, `~/racket`,
 nicht im PATH). Sitzungstyp `x11`. Qt 6.11.1.
 
-**Ergebnis in einem Satz:** die Root-Cause des Instrumentenfehlers ist gefunden, aus
-dem Primärcode belegt und gegen natives GTK kontrolliert; vier Proben sind repariert und
-tragen ab jetzt ihren eigenen Gültigkeitsbeweis im Log; als direkter Ertrag ist die in
-Block A offen gebliebene Klick-Verifikation der Enable-Kaskade nachgeholt (**n=3, 3/3
-PASS**). **Kein `resizeEvent`-Wiring-Versuch** — der ist Schritt 2 und bleibt
-Nutzerentscheidung.
+**Ergebnis in drei Sätzen:** Die Root-Cause des Instrumentenfehlers ist gefunden, aus dem
+Primärcode belegt und gegen natives GTK kontrolliert — vier Proben sind repariert und
+tragen ab jetzt ihren Gültigkeitsbeweis (`PUMP OK`) im eigenen Log; als direkter Ertrag
+ist die offen gebliebene Klick-Verifikation der Enable-Kaskade nachgeholt (**n=3, 3/3
+PASS**). Mit dem reparierten Instrument wurde die §21.7-Kernfrage in echtem DrRacket
+gemessen: **§25.1 ist gefixt** (`get-client-size` unterschlug die Menüleistenhöhe) und
+gehörte nie zu §21.7 — rein Racket-seitig, **ohne** Shim-Änderung (§31). Danach auf
+Nutzerwunsch **§21.7 selbst gefixt** (§32, vierter Anlauf, der erste der hält) — mit
+Shim-ABI-Änderung, s. Kasten oben.
+
+**Inhalt:** Phase 0–3 (Instrument) · „Schritt 1" (§31, `get-client-size`) · „Schritt 2"
+(§32, `resizeEvent`) · methodische Lehre · Liste „später zu validieren".
 
 ---
 

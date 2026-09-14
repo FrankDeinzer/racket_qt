@@ -46,6 +46,14 @@ Qt Widgets backend ("wx/qt/") für `racket/gui`. Additiver Spike: aktiviert via 
 
 ## Build
 
+> **⚠ Offener Shim-Rebuild für Windows und macOS (Stand 2026-09-14).**
+> Der `resizeEvent`-Fix (§32) hat `shim_window_set_resize_cb` neu eingeführt. Auf
+> **Windows und macOS** muss `qt-shim` nach dem nächsten Pull **einmalig neu gebaut**
+> werden (Linux ist gebaut). Ohne Rebuild schlägt schon das Laden des Forks fehl, laut
+> und sofort: `ffi-obj: could not find export … undefined symbol:
+> shim_window_set_resize_cb`. Diesen Hinweis entfernen, sobald beide Maschinen gebaut
+> haben. Gleiche Klasse wie der §27-Rebuild.
+
 **Windows:**
 ```powershell
 cmake --preset windows-x64 -S qt-shim
