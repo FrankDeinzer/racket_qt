@@ -22,7 +22,8 @@ aber ohne — unter Qt wurden sie deshalb bei 0,0 mitgezeichnet. Ein Hide-on-Cre
 `wx/qt/window.rkt`, durchgereicht von elf Platform-Klassen, schließt das; die Toolbarzeile
 ist in echtem DrRacket 3/3 sauber, und die volle Regressionswache ist grün.
 
-**Inhalt:** Nativ-Gate · Zuordnung · Root-Cause · Fix · Verifikation · Offenes.
+**Inhalt:** Nativ-Gate · Zuordnung · Root-Cause · Fix · Verifikation · Beobachtetes ·
+Nicht Gemachtes · Cross-Platform-Liste · Commits · Startpunkt.
 
 Technik im Detail: `docs/HACKING.md` §35.
 
@@ -182,6 +183,59 @@ und danach bitgleich zurückgespielt (`diff` grün).
 - **Die `pkill`-Falle aus §9 hat wieder zugeschlagen** (Exit 144, Kommando läuft nie),
   diesmal mit einem Probennamen statt `drracket`. Der Eintrag ist korrekt und
   vollständig — er wurde nur nicht rechtzeitig gelesen. Kein neuer Befund.
+- **`vertical-pane%` hat weder `is-shown?` noch `client->screen`** (`send: no such
+  method`). Eine Probe, die ihre Knoten generisch protokolliert, muss `vertical-panel%`
+  nehmen oder die Aufrufe absichern. Kostete hier zwei Fehlstarts; kein Qt-Bezug,
+  gilt auch nativ.
+
+## Nicht gemacht (bewusst)
+
+- **Kein Cross-Platform-Durchlauf** (gebündeltes Modell). Die Mechanik dahinter — Qts
+  Show-Kaskade auf nie explizit versteckte Kinder — ist Qt-eigenes Verhalten und nicht
+  plattformspezifisch; was daraus für Windows/macOS folgt, entscheidet trotzdem der
+  gebündelte Durchlauf und nicht dieser Absatz (§21.9/§24.5/§21.10 sind die Mahnmale
+  für Vorhersagen dieser Art).
+- **Kein Anfassen von Shared Code:** geändert wurden ausschließlich
+  `wx/qt/window.rkt` plus elf `wx/qt`-Widget-Dateien (Submodul) sowie `examples/` +
+  `docs/` + `CLAUDE.md`/`STATUS.md` (Umbrella). `wxwindow.rkt`, `wxitem.rkt`,
+  `wxpanel.rkt`, `wxtop.rkt` wurden gelesen, aber nicht angefasst.
+- **`frame%`/`dialog%` nicht verdrahtet** — Begründung in Phase 3; nachgesehen, nicht
+  angenommen.
+- **`menu%`/`menu-item%`/`menu-bar%` nicht verdrahtet.** Sie leiten zwar von `window%`
+  ab (`class window%` in allen drei Dateien — nachgesehen, die naheliegende Annahme
+  „das sind keine `window%`-Ableitungen" wäre falsch gewesen), haben aber gar keinen
+  `style`-Init: `no-show?` bleibt dort auf seinem Default `#f`, und das Hide-on-Create
+  läuft für sie nie. Für Menüs ergäbe `'deleted` auch keinen Sinn — es gibt bei ihnen
+  kein QWidget, das versteckt werden könnte.
+
+## Liste „später zu validieren" (gebündelter Cross-Platform-Durchlauf)
+
+Unverändert aus `docs/2026-09-14-3_report-linux.md` übernommen (inkl. des dort
+weiterhin offenen `qt-shim`-Rebuilds für **zwei** Exporte), plus:
+
+- **Toolbarzeile auf Windows/macOS gegenprüfen:** oben links darf nur
+  `<Dateiname>▾  (define ...)▾` stehen, kein überlagertes `Undock`.
+- **Gegenprobe auf das umgekehrte Risiko:** Das Hide-on-Create ist die erste Änderung
+  dieses Backends, die Widgets *verstecken* kann. Zu prüfen ist deshalb nicht nur, dass
+  `Undock` weg ist, sondern dass **nichts anderes fehlt** — Toolbar, Preferences-Dialog
+  (alle neun Kategorien), Test-Report-Canvas. Auf Linux ist das durch die
+  Regressionswache abgedeckt, auf den anderen beiden Maschinen nicht.
+- `examples/deleted-style-probe.rkt` ist dort die Akzeptanzprobe, mit **und** ohne
+  `PROBE_ADD=1`; `PUMP OK` muss im Log stehen.
+- **Hypothese 1 zu §35** (s. u.) lässt sich nur auf Windows entscheiden.
+
+## Commits
+
+| Repo | SHA | Inhalt |
+|---|---|---|
+| gui-Submodul (`qt-backend`) | `9e957c1a` | `'deleted`-Hide-on-Create in `wx/qt` |
+| Umbrella (`main`) | `3af6dcb` | Doku, Probe, Belegbilder + Submodul-Zeiger |
+
+Reihenfolge nach Regel 8 eingehalten: Submodul-Stand gegen `origin` geprüft → Submodul
+committet → Submodul **gepusht** → erst danach der Umbrella-Pointer-Commit, ebenfalls
+gepusht. Beide Repos stehen danach deckungsgleich mit `origin`. **Linux ist damit
+synchron; Windows und macOS müssen noch pullen** (Regel 7 — der Schritt gehört auf die
+jeweilige Maschine).
 
 ## Startpunkt für die nächste Sitzung
 
