@@ -1812,6 +1812,37 @@ die gelesene Qt-Framework-Garantie begründet. Die Positivkontrolle zuerst ist d
 Pflicht: zählt sie nicht, ist die Automatisierung defekt und das Ergebnis des
 Disabled-Laufs bedeutungslos.
 
+### 21.10.1 Methodische Lehre — zwei Fragen, die diesem Fall zwei Sessions gekostet haben
+
+Der Instrumentenfehler war zwei Sessions lang unsichtbar, obwohl er in vier Zeilen
+Shared Code steht. Beide Sessions haben sauber und diszipliniert gearbeitet; was
+fehlte, waren zwei Fragen. Sie kosten Minuten und gehören ab jetzt in jeden
+Debugging-Durchgang:
+
+**1. „Misst mein Instrument überhaupt das, was ich glaube?"** — zu stellen, *bevor*
+ein Befund als Produktbefund notiert wird, und spätestens dann, wenn das Budget für
+eine Hypothese erschöpft ist. Konkret: eine Probe, die auf ein GUI-Ereignis wartet,
+muss **beweisen**, dass sie Ereignisse überhaupt empfangen kann (dafür gibt es jetzt
+das Pump-Gate). Ein Null-Ergebnis aus einem ungeprüften Messmittel ist kein Ergebnis.
+Verwandter Fall aus derselben Sitzung: die Klick-Koordinaten aus `client->screen`
+sahen plausibel aus (`150 35`) und waren falsch — plausible Zahlen sind kein Beleg
+für ein funktionierendes Messmittel.
+
+**2. „Habe ich die andere Seite des Mechanismus geprüft?"** — jeder asynchrone
+Mechanismus hat mindestens zwei Seiten. Hier: **posten** und **dispatchen**. Block B
+prüfte ausschließlich die Post-Seite (FFI-Callback-Kontext, Eventspace-Ziel,
+`inherit`-Hygiene, Timing) und kam zu „Root-Cause nicht gefunden, Budget
+überschritten". Die Antwort stand auf der Dispatch-Seite, in
+`wx/common/queue.rkt:357/464` — einem Sprung von der Aufrufstelle zur Definition
+entfernt. **Wenn das Budget auf einer Seite erschöpft ist, ist das das Signal, die
+Seite zu wechseln, nicht zu parken.**
+
+Praktische Kurzform für `wx/qt`-Debugging: **Erst den Shared-Code-Pfad lesen, dann
+instrumentieren.** Ein Blick in die Definition kostet zwei Minuten und beantwortet
+Fragen, für die eine Messreihe eine halbe Session braucht — besonders bei Mechanismen
+aus `wx/common/`, die keine Qt-Entsprechung haben und deshalb leicht für „läuft schon
+irgendwo nebenher" gehalten werden (genau die Fehlannahme beim Handler-Thread).
+
 Volles Detail: `docs/2026-09-14_report-linux.md`.
 
 ## 22. macOS: Qt reißt einen Help-Menü-Eintrag fälschlich als „Preferences" ins App-Menü (gefixt, 2026-07-14)

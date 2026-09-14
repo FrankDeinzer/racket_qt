@@ -199,6 +199,54 @@ eine defekte Automatisierung dasselbe Bild erzeugt.
    als nun tragfähigem Messmittel (Pump-Gate muss im Log stehen) — **Nutzerentscheidung
    wegen Shim-ABI**.
 
+## Methodische Lehre — Vorschlag für die Triage-Regel im nächsten Prompt
+
+Der Instrumentenfehler war zwei Sessions lang unsichtbar, obwohl er in vier Zeilen
+Shared Code steht. Das lag **nicht** an mangelnder Disziplin — im Gegenteil: Regel 4
+(„Budget erschöpft → parken, nie ein spekulativer Fix") hat korrekt gegriffen und einen
+vierten Blindversuch verhindert. Die Regel hat aber eine Lücke, und die hat hier die
+Kosten verursacht.
+
+**Was die Regel heute leistet:** sie verhindert spekulative Fixes.
+**Was sie nicht leistet:** sie fragt nie, ob das Messmittel trägt. Ein Null-Ergebnis aus
+einem ungeprüften Instrument wird derzeit wie ein Messergebnis behandelt und geparkt —
+und ein geparkter Befund wird in der Folgesession als Faktum weitergereicht. Genau so
+wurde „gepostetes Thunk läuft nie" zweimal bestätigt und in drei Dokumente geschrieben.
+
+**Konkreter Vorschlag, Regel 4 um zwei Schritte zu ergänzen (vor dem Parken, nicht danach):**
+
+> 4a. **Instrument validieren, bevor geparkt wird.** Bevor ein Null-/Negativbefund
+> festgehalten wird: beweisen, dass die Messung ein Positivergebnis überhaupt hätte
+> zeigen können (Positivkontrolle, Pump-Gate, Oracle-Lauf gegen das native Backend).
+> Ohne diesen Beweis wird der Befund **nicht** als Produktbefund notiert, sondern als
+> „ungemessen".
+>
+> 4b. **Bei erschöpftem Budget die Seite des Mechanismus wechseln, nicht parken.** Jeder
+> asynchrone Mechanismus hat mindestens zwei Seiten (hier: posten vs. dispatchen). Wenn
+> zwei Hypothesen-Zyklen auf einer Seite nichts ergeben haben, ist das das Signal, die
+> andere Seite zu lesen — erst dann parken.
+
+**Belegende Beobachtung aus dieser Session:** Block B hat ausschließlich die Post-Seite
+geprüft (FFI-Callback-Kontext, Eventspace-Ziel, `inherit`-Hygiene, Timing) und dafür
+deutlich mehr als zwei Zyklen verbraucht. Die Antwort stand auf der Dispatch-Seite, einen
+Sprung von der Aufrufstelle zur Definition entfernt (`wx/common/queue.rkt:357/464`). Der
+Report vom 13.09. listet „`queue-event`/`eventspace-queue-proc` selbst instrumentieren"
+folgerichtig als *künftigen* Schritt — die Datei war nie geöffnet worden. Diese Session
+hat keine neue Messtechnik gebraucht, sondern zuerst den Shared-Code-Pfad gelesen.
+
+**Zweite, kleinere Beobachtung für die Prompt-Planung:** die Sessions vom 13.09. waren
+sehr lang (Vertrags-Audit mit vier Subagenten + Preferences-Sweep + Block B +
+Folgesession). Der Instrumentenverdacht kam erst ganz am Ende auf, als das Budget
+mehrfach ausgereizt war. Eine kurze, eng gestellte Session hat ihn in unter einer Stunde
+aufgelöst. Für Befunde, die eine Vorsession ausdrücklich als „Instrument verdächtig"
+markiert hat, lohnt sich ein **eigener, schmaler Block** statt eines Anhängsels.
+
+**Was diese Session dagegen ausdrücklich der Vorarbeit verdankt:** der Report vom 13.09.
+hat sein eigenes Messmittel als Verdächtigen benannt, statt „resizeEvent funktioniert
+unter Qt nicht" zu behaupten. Ohne diese selbstkritische Übergabe wäre der schnelle Weg
+nicht sichtbar gewesen. Die Praxis, Negativbefunde samt Ausgeschlossenem und samt Zweifel
+am eigenen Vorgehen zu dokumentieren, hat sich hier direkt ausgezahlt.
+
 ## Liste „später zu validieren" (gebündelter Cross-Platform-Durchlauf)
 
 Unverändert aus `docs/2026-09-13_report-linux.md` übernommen, plus:
