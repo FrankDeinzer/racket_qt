@@ -1714,6 +1714,98 @@ durch eine echte resizeEvent-Lücke.
 Volles Detail (Log-Auszüge, beide Diskriminator-Tests, DrRacket-Widerspruch):
 `docs/2026-09-13_report-linux.md`.
 
+> **Nachtrag 2026-09-14 (§21.10): der Mechanismus ist gefunden, und eine
+> Sicherheitsaussage oben ist zu eng zu fassen.** Der „Thunk läuft nie"-Effekt ist
+> vollständig durch Racket-GUI-Semantik erklärt (s. §21.10) und hat mit Qt nichts zu
+> tun — er tritt unter nativem GTK identisch auf. **Wichtige Korrektur an der
+> Sicherheitsaussage dieses Abschnitts:** „kein Crash, kein Hänger" bleibt gültig
+> (beobachtet), **„keine Rückkopplungsschleife" jedoch nicht** — die befürchtete
+> Schleife setzt voraus, dass das geposteste Thunk läuft und `set-size` aufruft, was
+> ein weiteres natives Resize auslöst. Genau dieses Thunk lief nie. Der Pfad wurde
+> also **nie durchlaufen**; das Rückkopplungsrisiko ist **ungeprüft, nicht
+> entkräftet**. Ein vierter Wiring-Versuch darf sich nicht auf diesen Abschnitt als
+> Entwarnung berufen.
+
+## 21.10 Das Messinstrument repariert: `(sleep n)` in einer bare-`racket`-Probe dispatcht keine Events (Linux, 2026-09-14)
+
+**Root Cause, aus dem Primärcode belegt — reine Racket-GUI-Semantik, kein Qt-Bezug:**
+
+| Fundstelle | Aussage |
+|---|---|
+| `wx/common/queue.rkt:357` | `(define main-eventspace (make-eventspace* (current-thread)))` — in einem bare-`racket`-Skript **ist der Hauptthread selbst der Handler-Thread** des Haupt-Eventspace (anders als bei einem per `make-eventspace` erzeugten Eventspace, der einen eigenen Thread bekommt, Z. 366–395). |
+| `wx/common/queue.rkt:464/475` | `yield` dispatcht Events **nur**, wenn `(current-thread)` der Handler-Thread ist. |
+| — | `(sleep n)` dispatcht nichts. Ein Hauptthread, der schläft, ist ein Handler-Thread, der die Queue nicht bedient. |
+| `wx/common/queue.rkt:637–641` | Der überschriebene `executable-yield-handler` ruft beim Programmende `(yield main-eventspace)` — **dort** wird die aufgestaute Queue endlich abgearbeitet. |
+
+Das erklärt den §21.9-Befund lückenlos: Thunks werden gepostet, liegen in der Queue,
+und laufen erst, wenn der Hauptthread seine Schleife beendet hat. Der 50-ms-`shim_pump`
+-Thread (`wx/qt/queue.rkt:23`) widerspricht dem nicht — er drainiert **Qts** Loop
+(deshalb feuern die C-Callbacks zuverlässig und prompt), aber in die Racket-Queue
+posten ≠ sie dispatchen.
+
+**Empirischer Diskriminator (`WAIT=sleep|yield`, Thunk direkt nach `show` gepostet):**
+
+| Lauf | Backend | Warteprimitiv | Thunk lief nach |
+|---|---|---|---|
+| A | Qt (`PLT_QT=1`) | `(sleep 1)` ×6 | **5014 ms** — erst nach der Schleife; ein einzelnes `(yield)` danach gibt `#t` zurück (das Event lag die ganze Zeit in der Queue) |
+| B | Qt (`PLT_QT=1`) | `(sleep/yield 1)` ×6 | **0,6 ms** |
+| C | **nativ GTK** (ohne `PLT_QT`) | `(sleep 1)` ×6 | **5019 ms** — identisch zu A |
+
+Lauf C ist der entscheidende Kontrollwert: **natives GTK verhält sich exakt gleich.**
+Der Effekt liegt im Shared Code, nicht im Qt-Backend.
+
+**Welche früheren Befunde das entwertet — und welche ausdrücklich nicht:**
+
+| Befund | Status |
+|---|---|
+| §21.9 „gepostetes Thunk läuft nie" (`resizeEvent` **und** `closeEvent`) | **ungültig** — Instrumentenartefakt, kein Qt-Befund |
+| §21.9 „keine Rückkopplungsschleife" | **ungültig** (Pfad nie durchlaufen, s. Nachtrag oben) |
+| Block A: Klick-Verifikation der Enable-Kaskade (`clicks = 0`) | **ungültig** — der Button-Callback läuft über die Queue und konnte strukturell nie zählen; die dort vermutete X11-Fokus-Ursache war nicht nötig (echte Ursache s. u.) |
+| §21.9 „kein Crash, kein Hänger" bei verdrahtetem `resizeEvent` | **gültig** (direkt beobachtet) |
+| Konvergenz-Messung `resize-reflow-probe.rkt` | **gültig** — die Kette `reflow-container` → `force-redraw` → `resized` ist synchron im Hauptthread, kein gepostetes Event |
+| `is-shown?`-Basisfeld-Messung (§23.3/Block A) | **gültig** — die `show`-Aufrufe laufen synchron während der Konstruktion |
+| `test-dock-size`-Akzeptanztest 0/3 | **gültig** — lief in echtem DrRacket, das nachweislich pumpt |
+| Commits `2f0755bd` (is-shown?) und `a787b43f` (enable) | **unberührt gültig** |
+
+**Die Reparatur:** `examples/pump-gate.rkt` stellt zwei Dinge bereit, die jede
+Diagnose-Probe ab jetzt nutzt:
+
+- `(wait/pump secs)` ersetzt `(sleep secs)` — wartet über `sleep/yield`, also
+  dispatchend.
+- `(pump-gate!)` direkt nach `(send frame show #t)` postet ein Prüf-Thunk und lässt
+  den ersten `wait/pump`-Aufruf `[pump-gate] PUMP OK (n ms)` bzw. `PUMP FAIL`
+  loggen. **Jede Probe trägt ihren Gültigkeitsbeweis damit im eigenen Log** — ein
+  „eingefrorenes" Ergebnis ohne `PUMP OK` ist ab jetzt als Instrumentenfehler
+  erkennbar, statt als Produktbefund missdeutet zu werden.
+
+Repariert: `enable-cascade-probe.rkt`, `live-resize-probe.rkt`, `is-shown-probe.rkt`,
+`resize-reflow-probe.rkt`.
+
+**Klick-Automatisierung: Block As „X11-Stacking-Rätsel" ist aufgeklärt.** Die
+Automatisierung muss die Zielkoordinaten kennen; die Probe meldet sie jetzt selbst per
+`client->screen`. Dabei zeigte sich: **unmittelbar nach `(send f show #t)` liefert
+`client->screen` fensterrelative statt absoluter Koordinaten** (gemessen: `150 35`,
+während das Fenster bei `853,437` lag) — der Fenstermanager hatte das Fenster noch
+nicht platziert, Qts `mapToGlobal` rechnete gegen eine Position von `0,0`. Nach einem
+einzigen `(wait/pump 1)` meldet dieselbe Abfrage korrekt `1003 472` (= 853+150,
+437+35). **Kein `wx/qt`-Defekt, sondern ein Timing-Fehler der Messung** — aber genau
+er erklärt Block As Beobachtung, dass der synthetische Klick „das Terminalfenster
+anhebt": der Klick ging nach `(150,35)`, also in die Bildschirmecke, wo das Terminal
+lag. Regel für künftige Klick-Automatisierung: **Zielkoordinaten erst nach einem
+dispatchenden Warteschritt abfragen**, Fensterauswahl weiterhin über
+`xwininfo -id <id> | grep IsViewable`.
+
+**Direkter Ertrag — die offene Behauptung aus Block A ist jetzt belegt:** mit
+repariertem Instrument und korrekten Koordinaten, **n=3, 3/3 identisch**:
+Positivkontrolle (Klick auf den **enabled** Button) zählt auf 1 hoch, danach
+`(send b enable #f)`, zweiter Klick auf dieselbe Stelle → **Delta 0**. Damit ist der
+Enable-Kaskaden-Fix (`a787b43f`, §26 Fund 2) **empirisch verifiziert** statt nur über
+die gelesene Qt-Framework-Garantie begründet. Die Positivkontrolle zuerst ist dabei
+Pflicht: zählt sie nicht, ist die Automatisierung defekt und das Ergebnis des
+Disabled-Laufs bedeutungslos.
+
+Volles Detail: `docs/2026-09-14_report-linux.md`.
+
 ## 22. macOS: Qt reißt einen Help-Menü-Eintrag fälschlich als „Preferences" ins App-Menü (gefixt, 2026-07-14)
 
 **Symptom (reproduzierbar, 2/2):** Auf macOS existiert unter Edit **kein**

@@ -5,6 +5,47 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-14 (Linux) — Messinstrument repariert: `(sleep n)` dispatcht keine Events; Enable-Kaskade endlich per echtem Klick verifiziert
+
+**Kontext:** Schritt 1 der Empfehlung aus §21.9 — erst das Instrument reparieren, dann
+wieder messen. Voller Bericht: `docs/2026-09-14_report-linux.md`. Details:
+`docs/HACKING.md` §21.10.
+
+- **Root Cause gefunden und aus dem Primärcode belegt:** in einem bare-`racket`-Skript
+  ist der Hauptthread **selbst** der Handler-Thread des Haupt-Eventspace
+  (`wx/common/queue.rkt:357`); `yield` dispatcht nur aus diesem Thread (Z. 464/475),
+  `(sleep n)` dispatcht gar nichts, und der `executable-yield-handler` (Z. 637) leert
+  die Queue erst beim Programmende. Damit ist der §21.9-Befund „gepostetes Thunk läuft
+  nie" vollständig erklärt — **Instrumentenartefakt, kein Qt-Befund**.
+- **Kontrolle gegen natives GTK:** identisches Verhalten ohne `PLT_QT` (Thunk nach
+  5019 ms statt 0,6 ms) — der Effekt sitzt im Shared Code. Mit `sleep/yield` läuft das
+  Thunk 0,6 ms nach dem Posten.
+- **Reparatur:** neues `examples/pump-gate.rkt` (`wait/pump` + `pump-gate!`); vier
+  Proben umgestellt (`enable-cascade`, `live-resize`, `is-shown`, `resize-reflow`).
+  **Jede Probe loggt ab jetzt `PUMP OK (n ms)`** und trägt damit ihren eigenen
+  Gültigkeitsbeweis — ein eingefrorenes Ergebnis ohne diese Zeile ist als
+  Instrumentenfehler erkennbar.
+- **Direkter Ertrag:** die in Block A offen gebliebene Klick-Verifikation der
+  Enable-Kaskade nachgeholt — **n=3, 3/3 PASS** (Positivkontrolle zählt, deaktivierter
+  Button feuert nicht). `a787b43f` ist damit empirisch belegt statt nur über gelesene
+  Qt-Framework-Garantie begründet.
+- **Block As „X11-Stacking-Rätsel" aufgeklärt:** `client->screen` liefert unmittelbar
+  nach `show` fensterrelative Koordinaten (`150 35`), weil der WM das Fenster noch
+  nicht platziert hat; nach einem dispatchenden Warteschritt korrekt (`1003 472`). Die
+  damaligen Klicks landeten schlicht in der Bildschirmecke auf dem Terminal. Kein
+  `wx/qt`-Defekt.
+- **Korrektur an §21.9:** „kein Crash, kein Hänger" bleibt gültig; **„keine
+  Rückkopplungsschleife" ist zu streichen** — die Schleife setzt voraus, dass das
+  geposteste Thunk läuft und `set-size` aufruft; es lief nie, der Pfad wurde nie
+  durchlaufen. Risiko **ungeprüft, nicht entkräftet**.
+- **Weiterhin gültig:** Konvergenz-Messung (synchron), `is-shown?`-Basisfeldmessung
+  (synchron), `test-dock-size` 0/3 (lief in echtem DrRacket), beide Block-A-Commits.
+- **Nicht gemacht:** kein vierter `resizeEvent`-Wiring-Versuch (Shim-ABI,
+  Nutzerentscheidung), keine Cross-Platform-Validierung. Nur `examples/` + `docs/`
+  angefasst, kein `wx/qt`-/Shim-Touch. Smoke 3/3 mit und ohne `PLT_QT`.
+
+---
+
 ## Session 2026-09-13 (Linux, Fortsetzung) — Block B: Resize/Reflow-Bug (§21.7), dritter Fix-Versuch — sicherer als je zuvor, aber weiterhin ungelöst; Nachmessung zeigt defektes Messinstrument
 
 **Kontext:** direkte Fortsetzung von Block A, kein eigener Prompt. Voller Bericht:

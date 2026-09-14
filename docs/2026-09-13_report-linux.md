@@ -200,6 +200,18 @@ als harmloser No-op bestehen (kein Konsument, kein Fix nötig). Keine Shim-Ände
 inzwischen um ein Live-Klickzähler-Label erweitert) — `(send button enable #f)` läuft
 ohne Crash, `is-enabled?` meldet korrekt `#f` danach.
 
+> **KORREKTUR 2026-09-14 (`docs/HACKING.md` §21.10, `docs/2026-09-14_report-linux.md`):**
+> der gesamte folgende Absatz ist **überholt**. Der Klickzähler konnte in dieser Probe
+> **strukturell nie** hochzählen: sie wartete mit `(sleep 8)` im Hauptthread, der in
+> einem bare-`racket`-Skript selbst der Handler-Thread des Eventspace ist — der
+> Button-Callback wird über die Queue dispatcht und lief deshalb nie, unabhängig davon,
+> ob der Klick ankam. Die unten diskutierte Fokus-/Stacking-Ursache wird nicht
+> benötigt; die tatsächliche Ursache der danebengehenden Klicks war, dass die
+> Zielkoordinaten unmittelbar nach `show` fensterrelativ statt absolut bestimmt wurden
+> (Klick landete in der Bildschirmecke auf dem Terminal). Mit repariertem Instrument
+> **nachgemessen: n=3, 3/3 PASS** — enabled zählt, disabled feuert nicht. Der
+> Enable-Kaskaden-Fix ist damit verifiziert.
+
 **Verifikationsversuch per echtem Klick (nach Advisor-Rückfrage nachgeholt) —
 ergebnislos wegen Automatisierungs-Artefakt, nicht wegen eines Produktbefunds:**
 mehrere Versuche, den Button per `xdotool` tatsächlich anzuklicken (vor **und** nach
