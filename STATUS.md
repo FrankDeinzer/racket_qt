@@ -5,6 +5,44 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-16 (Linux, 4) — „Crash B" (Teardown, `invalid memory reference`) gefixt
+
+**Kontext:** Nutzerfrage zu Sessionbeginn — ist Crash B aus `CLAUDE.md` noch offen?
+Letzter Stand 2026-07-12 (`docs/2026-07-11-2_report-linux.md`): 1/1 reproduziert,
+Root-Cause offen, Guardrail-Befund für eine eigene Session. Volles Detail:
+`docs/2026-09-16-4_report-linux.md`, Technik `docs/HACKING.md` §39.
+
+**Keine Shim-ABI-Änderung** — rein Racket-seitig (`wx/qt/filedialog.rkt`).
+
+**Reproduziert 1/1**, identisch zum Originalbefund (frameless `(put-file)`-Skript,
+Absturz sofort nach korrektem Rückgabewert). **Root-Cause per gdb-Backtrace** (nicht
+geraten): `shim_file_dialog_create`s `finished`-Handler ruft `dlg->deleteLater()` nach
+dem Racket-Callback; mit offenem `frame%` drainiert der laufende Event-Pump dieses
+`DeferredDelete` längst vor jedem `(exit)` — in einem frameless Skript ist der
+Rückgabewert aber der letzte Akt vor Prozessende, kein weiterer Pump-Zyklus war
+garantiert. Unbehandelt lieferte Qts eigener `atexit`-Event-Flush das Event stattdessen
+aus, während andere Qt-Globals schon abgebaut waren: Absturz tief in
+`QSettings::QSettings` (über `QFileDialogPrivate::saveSettings`, aus dem
+`QFileDialog`-Destruktor).
+
+**Fix:** `filedialog.rkt` ruft nach dem synchronen Warten einmal mehr `(atomically
+(shim_pump 0))` — dieselbe Primitive/derselbe Stil wie `queue.rkt`s Wakeup-Hook, keine
+neue Event-Loop.
+
+**Mechanismus verifiziert, nicht nur das Symptom** (Advisor-Einwand vor Commit, dann
+per gdb-Breakpoint auf `QFileDialog::~QFileDialog` entschieden): der Destruktor läuft
+jetzt nachweislich über genau den neuen `shim_pump`-Aufruf aus Racket-Top-Level, nicht
+über den 50ms-Poll-Thread und nicht über `atexit`.
+
+**Verifiziert:** neue Probe `examples/crash-b-teardown-probe.rkt` (Accept 3/3, Cancel
+1/1, beide vorher betroffen); `examples/file-dialog-probe.rkt` (frame-offen-Pfad,
+derselbe Code) mit 3× `put-file` + `get-file`-Cancel + `Force GC` (§19-Stresstest)
+grün; echtes DrRacket File → Save Definitions As grün. Smoke 3/3 beide Wege. Nur auf
+Linux gefixt/getestet (Cross-Platform-Modell) — Windows/macOS brauchen dafür **keinen**
+Shim-Rebuild, nur den bestehenden gui-lib-Sync.
+
+---
+
 ## Session 2026-09-16 (Linux, 3) — „Zombie-Prozess" (§29.2/§37) root-caused: Testmethodik-Artefakt, kein Backend-Bug
 
 **Kontext:** `docs/2026-09-16-2_report-linux.md` (§37-Session) hatte den seit §29.2

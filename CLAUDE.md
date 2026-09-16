@@ -217,8 +217,22 @@ Automatisierungsabkürzung). Linux Resize/Minimieren unter
 KWin nicht validiert; Linux Crash A
 („arity mismatch") nach den macOS-Menü-Dispatch-Fixes (§19) in 4 Versuchen nicht mehr
 reproduziert — plausibel behoben, nicht absolut bewiesen (Original war
-n=1-intermittierend); Linux Crash B (Teardown, „invalid memory reference") 1/1
-unverändert reproduziert, bleibt offen, andere Ursache als die Menü-Fixe; `test-dock-
+n=1-intermittierend). **Linux Crash B (Teardown, „invalid memory reference") gefixt
+2026-09-16 (§39):** per gdb-Backtrace root-caused auf einen fehlenden Pump-Zyklus
+zwischen `QFileDialog::deleteLater()` (im C-seitigen `finished`-Handler,
+`qt-shim/src/shim.cpp`) und Racket-seitigem `(exit)` in einem frameless Skript — mit
+offenem `frame%` drainiert der laufende Event-Pump das `DeferredDelete` längst vorher,
+ohne offenes Fenster lieferte Qts eigener `atexit`-Flush es stattdessen aus, während
+andere Qt-Globals schon abgebaut waren (Absturz tief in `QSettings::QSettings`). Fix:
+ein expliziter `(atomically (shim_pump 0))`-Aufruf in `wx/qt/filedialog.rkt` nach dem
+synchronen Warten — **keine Shim-ABI-Änderung**, per gdb-Breakpoint auf
+`QFileDialog::~QFileDialog` verifiziert (Destruktor läuft jetzt nachweislich über
+genau diesen neuen Aufruf, nicht mehr über `atexit`). Verifiziert: neue Probe
+`examples/crash-b-teardown-probe.rkt` (Accept 3/3, Cancel 1/1), `examples/file-dialog-
+probe.rkt` (frame-offen-Pfad, §19-Stresstest: 3× `put-file` + Cancel + Force GC) grün,
+echtes DrRacket File → Save Definitions As grün, Smoke 3/3 beide Wege. Nur auf Linux
+gefixt/getestet (Cross-Platform-Modell) — Windows/macOS brauchen dafür keinen
+Shim-Rebuild. Crash A bleibt von diesem Fix unberührt (anderer Codepfad). `test-dock-
 size`-Crash (früher hier als `htdp-lib`-Contract-Bug geführt) **reklassifiziert 2026-07-14
 (§23/§23.1/§23.2): echte `wx/qt`-Lücke, kein htdp-lib-Bug, auf allen drei Plattformen
 bestätigt** — Windows+Linux+macOS je 1→2-Tab-Sequenz 10/10 Qt-Crash, 0/10 nativ; die

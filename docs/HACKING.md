@@ -4496,3 +4496,132 @@ nicht mehr dafür verwendet werden — stattdessen wie bei jeder anderen Widget-
 Nur auf Linux gemessen (Kontrollversuch nativ/gtk eingeschlossen). Keine Code-Änderung
 — reine Diagnose; die temporäre Debug-Instrumentierung in `qt-shim/src/shim.cpp` wurde
 vor Abschluss der Session vollständig zurückgebaut (`git status` im Submodul clean).
+
+## 39. „Crash B" gefixt (§19-Nebenbefund, offen seit 2026-07-11) — fehlender Pump-Zyklus vor `exit`, nicht Teardown-Reihenfolge im Allgemeinen
+
+### 39.1 Auftrag
+
+Nutzerfrage zu Sessionbeginn: ist „Linux Crash B (Teardown, `invalid memory
+reference`)" aus `CLAUDE.md` noch offen, und soll daran weitergemacht werden? Letzter
+Stand war 2026-07-12 (`docs/2026-07-11-2_report-linux.md`): 1/1 exakt reproduziert,
+Root-Cause nicht gefunden, als Guardrail-Befund für eine eigene Session zurückgestellt
+(„Teardown-/`deleteLater()`-Reihenfolgeproblem", Hypothese, nicht verifiziert).
+
+### 39.2 Reproduktion vor dem Fix — 1/1, identisch zum Originalbefund
+
+Minimalskript (kein `frame%`, `(put-file)` als letzte Aktion vor Modulende):
+
+```racket
+#lang racket/gui
+(printf "[crash-b-repro] about to call put-file\n") (flush-output)
+(define result (put-file))
+(printf "[crash-b-repro] put-file returned: ~a\n" result) (flush-output)
+```
+
+`PLT_QT=1 QT_PLUGIN_PATH=~/Qt/6.11.1/gcc_64/plugins ~/racket/bin/racket …`, per `xdotool`
+einen Dateinamen eingetippt und mit Enter bestätigt (echte Klickkoordinaten aus
+`xdotool search --name "Save As"`, kein geschätzter Klick, s. §21.10/§38-Lehre). Log
+druckt den korrekten Pfad, danach sofort Prozessende — **identisch zum
+2026-07-11-Befund**, exakt derselbe Wortlaut (`invalid memory reference.  Some
+debugging context lost`).
+
+### 39.3 Root-Cause — per gdb-Backtrace gemessen, nicht geraten
+
+`gdb -q -batch -ex run -ex "thread apply all bt" -ex quit --args ~/racket/bin/racket
+…` (Dialog wie oben per `xdotool` bedient) liefert am Absturzpunkt:
+
+```
+Thread 1 "racket" received signal SIGSEGV, Segmentation fault.
+#0  … in QSettings::QSettings(…) () from …/libQt6Core.so.6
+#1  … in QFileDialogPrivate::saveSettings() () from …/libQt6Widgets.so.6
+#2  … in QFileDialog::~QFileDialog() ()
+#3  … in QObject::event(QEvent*) ()
+#4  … in QApplicationPrivate::notify_helper(QObject*, QEvent*) ()
+#5  … in QCoreApplicationPrivate::sendPostedEvents(QObject*, int, QThreadData*) ()
+#6  … in __run_exit_handlers (…) at ./stdlib/exit.c:108
+#7  … in __GI_exit (…) at ./stdlib/exit.c:138
+#8  c_exit ()
+#9  … S_call_help () / Scall2 () / racket_boot () / main ()
+```
+
+Gelesen von unten nach oben: Racket ruft am Modulende `(exit)` → glibc `exit()` läuft
+seine `atexit`-Kette ab → eine darin registrierte Qt-Routine ruft
+`sendPostedEvents`, die noch **ein ausstehendes `DeferredDelete`-Event** ausliefert →
+das zerstört den `QFileDialog`, dessen Destruktor `QFileDialogPrivate::saveSettings()`
+aufruft → das baut ein `QSettings`-Objekt → Absturz tief in `libQt6Core`.
+
+Der Grund, warum dieses Event noch ausstand: `shim_file_dialog_create`s
+`finished`-Handler (`qt-shim/src/shim.cpp:1341-1375`) ruft `dlg->deleteLater()` **nach**
+dem Racket-Callback — das postet nur ein Event, führt die Zerstörung nicht sofort aus
+(aus gutem Grund: der Dialog steckt zu diesem Zeitpunkt noch im eigenen
+Signal-Emissions-Stack, ein synchrones `delete` wäre unsicher). Mit offenem `frame%`
+drainiert der laufende `qt-start-event-pump`-Thread (`wx/qt/queue.rkt:23-35`, 50ms-Poll)
+dieses Event längst, bevor irgendetwas `(exit)` ruft. In einem frameless Skript ist der
+Rückgabewert von `put-file`/`get-file` aber der letzte Racket-Akt vor Modul- und
+Prozessende — nichts garantierte einen weiteren Pump-Zyklus dazwischen. Bestätigt: es
+ist **kein** allgemeines Teardown-Reihenfolgeproblem (die ursprüngliche §19-Hypothese),
+sondern eine fehlende Pump-Garantie an genau einer Stelle.
+
+### 39.4 Fix — ein expliziter Pump-Zyklus, kein neuer, keine Shim-ABI-Änderung
+
+`gui-lib/mred/private/wx/qt/filedialog.rkt`: nach `(yield (semaphore-peek-evt
+done-sema))` (der Wartepunkt, der den C-seitigen Callback synchron erscheinen lässt)
+einmal mehr `(atomically (shim_pump 0))`, bevor der Ergebniswert zurückgegeben wird —
+dieselbe Primitive und derselbe Aufrufstil wie `queue.rkt`s Wakeup-Hook (`(atomically
+(shim_pump 0))`), keine neue Event-Loop, keine neue Shim-Funktion. `shim_pump` war
+bereits nach Racket exportiert (`utils.rkt:187-188`).
+
+### 39.5 Mechanismus verifiziert, nicht nur das Symptom
+
+Wichtiger Advisor-Einwand vor dem Commit: „Symptom verschwunden" beweist nicht, *wie* —
+Qt gated `DeferredDelete`-Auslieferung an die Loop-Level-Buchhaltung
+(`scopeLevel`/`loopLevel`), ein zusätzlicher `processEvents()`-Aufruf auf derselben
+Ebene könnte das Event ebenso gut wieder reposten, und 3/3 grün wäre dann nur der
+50ms-Poll-Thread, der das Rennen zufällig gewinnt — nicht Determinismus.
+
+Entschieden per gdb-Breakpoint auf `QFileDialog::~QFileDialog` (`set breakpoint pending
+on`, da das Symbol erst nach dem Laden von `libQt6Widgets.so.6` aufgelöst werden kann):
+
+```
+Thread 1 "racket" hit Breakpoint 1.2, … in QFileDialog::~QFileDialog() ()
+#0  … QFileDialog::~QFileDialog() ()
+#1  … QObject::event(QEvent*) ()
+#2  … QApplicationPrivate::notify_helper(…) ()
+#3  … QCoreApplication::notifyInternal2(…) ()
+#4  … QCoreApplicationPrivate::sendPostedEvents(…) ()
+#5  … QEventDispatcherGlib::processEvents(…) ()
+#6  … QCoreApplication::processEvents(…) ()
+#7  … QCoreApplication::processEvents(…) ()
+#8  shim_pump (max_ms=0) at /home/deinzer/src/racket_qt/qt-shim/src/shim.cpp:315
+#9  … S_call_help () / Scall2 () / racket_boot () / main ()
+```
+
+Frame #8/#9: der Destruktor läuft jetzt über **genau den neuen, expliziten
+`shim_pump`-Aufruf** aus `filedialog.rkt`, direkt von Racket-Top-Level aus
+(`racket_boot`/`Scall2`), **nicht** über den 50ms-Poll-Thread und **nicht** über
+`atexit`/`__run_exit_handlers` wie vor dem Fix. Damit ist der Mechanismus empirisch
+bestätigt, nicht nur das Fehlen des Crashs.
+
+### 39.6 Regressions-Gate
+
+- Smoke 3/3 beide Wege (Qt + nativ, Gate-Test).
+- Neue Probe `examples/crash-b-teardown-probe.rkt` (durables Äquivalent des obigen
+  Minimalskripts): Accept-Pfad **3/3** (`EXITCODE=0`, kein Crash-Log-Eintrag mehr),
+  Cancel-Pfad (Escape) **1/1** grün — beide Pfade rufen `dlg->deleteLater()` im selben
+  Handler auf, beide vorher betroffen.
+- `examples/file-dialog-probe.rkt` (frame-offen-Pfad, derselbe Code, dieselbe neue
+  Pump-Zeile durchlaufen): `get-file` mit Cancel, drei aufeinanderfolgende
+  `put-file`-Zyklen, `Force GC`-Menüpunkt (der historische §19-Stresstest für
+  Callback-Retention) — alle grün, kein Regressions-Crash.
+- Echtes DrRacket (`PLT_QT=1 ~/racket/bin/racket -l drracket`): File → Save Definitions
+  As, Dateiname eingetippt, Datei landet korrekt auf Platte, kein Crash.
+
+**Keine Shim-ABI-Änderung** — rein Racket-seitig (`filedialog.rkt`), der bereits
+gepflegte Windows/macOS-Rebuild-Hinweis (§32/§33/§36/§37) bleibt unverändert, dieser Fix
+fügt keinen weiteren Grund hinzu.
+
+Nur auf Linux gefixt/getestet (Cross-Platform-Modell, gebündelte Validierung für eine
+spätere Session). Crash A (der zweite, seltenere §19-Nebenbefund, `arity mismatch`
+beim allerersten Interaktionsversuch) bleibt unberührt — anderer Codepfad
+(`wx/common/queue.rkt`s `pre-event-sync`-Boundary vs. hier `deleteLater()`/Exit-Timing),
+nicht Teil dieser Session.
