@@ -5,6 +5,62 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-16 (Linux, 5) — §33.7-Tab-2-Befund: 14/14 sauber, weiterhin nicht reproduzierbar
+
+**Kontext:** Nutzerfrage — ist der einmalige, nicht reproduzierbare Tab-2-Befund aus
+§33.7 (falsche Zeilennummern nach Run + File→Open als 2. Tab, 2026-09-14) noch offen?
+Ja (in §34-§39, inkl. aller anderen 2026-09-16-Sessions, kein einziges Mal erwähnt).
+Auftrag: mit dem in §33.7 vorbereiteten `PLT_QT_SCROLL_DEBUG=1`-Tracer erneut
+versuchen, öfter als die damaligen 3 Wiederholungen.
+
+**Ergebnis: nicht reproduziert.** 14 gültige, vollständige Durchläufe der historischen
+Sequenz (`racket -l drracket -- examples/htdp-tests-probe.rkt`, Run per echtem
+Mausklick auf den Toolbar-Button, File→Open von `examples/htdp-image-probe.rkt` als
+2. Tab per echtem Mausklick+Dialog, alle mit `PLT_QT_SCROLL_DEBUG=1`), **0/14 zeigten
+das Symptom** — jeder Lauf zeigte die Definitions-Ansicht mit korrekten, sequentiellen
+Zeilennummern, kein Crash, keine Fehlermeldung in den Logs.
+
+**Automatisierung war der eigentliche Aufwand dieser Session, mit drei getrennten
+Fehlschlägen davor:**
+
+1. Ein erster Versuch (Run per `xdotool key F5`, File→Open per fest programmierten
+   Mausklick-Koordinaten) erzeugte zwei überlappende „Select a file"-Dialoge —
+   Ursache nicht abschließend geklärt, keine Tastatur-Nav beteiligt, plausibelste
+   Vermutung eine zu knapp bemessene Wartezeit nach `F5`.
+2. Ein zweiter Versuch (Run per verifiziertem Mausklick, File→Open per Tastatur
+   `Down`×3+`Enter` — exakt die Sequenz, die in einer vorangegangenen manuellen
+   Kalibrierung im selben, durchgehend offenen Prozess zuverlässig funktioniert hatte)
+   landete in einem frisch gestarteten Prozess stattdessen auf „Save Definitions
+   As…" und schrieb eine Datei `rk.rkt`. Plausible, aber **nicht unabhängig
+   verifizierte** Erklärung: DrRackets Qt-Datei-Menü markiert nicht in jedem frisch
+   gestarteten Prozess denselben ersten Eintrag, wodurch ein fixer `Down`-Zähler nicht
+   prozessübergreifend deterministisch ist.
+3. Ein dritter Versuch (File→Open per Mausklick statt Tastatur, aber ohne
+   Poll-Schleife) meldete „0 Dialoge gefunden", obwohl der Dialog laut Screenshot
+   längst offen war — reine Race Condition in der eigenen Zustandsprüfung, zu früh
+   nach dem Klick ausgewertet.
+
+**Fix:** Run durchgehend per echtem Mausklick auf den Toolbar-Button (gemessene,
+stabile Koordinate); File→Open durchgehend per Mausklick statt Tastatur-Nav; nach
+jedem kritischen Schritt eine `xdotool search`-basierte Zustandsprüfung **mit
+Poll-Schleife** (statt Einzelprüfung nach festem `sleep`), die bei Abweichung sofort
+abbricht statt einen verfälschten Lauf mitzuzählen. Mit dieser finalen Fassung liefen
+alle 13 weiteren gezählten Läufe (Nummern 3-15) ohne einen einzigen Abbruch durch.
+
+**Tracer ungenutzt geblieben:** da der Bug in keinem der 14 gültigen Läufe auftrat,
+liefert `PLT_QT_SCROLL_DEBUG=1` diesmal keine neue Spur.
+
+**Einordnung:** §33.7 bleibt offen, die beobachtete Rate ist jetzt zusätzlich auf
+≤1-in-18 (1 historischer Fund + 3 damalige + 14 jetzige saubere Wiederholungen)
+eingegrenzt statt ≤1-in-4. Kein Grund, den offenen Status oder den
+Cross-Platform-Rebuild-Hinweis zu ändern. **Keine Code-Änderung diese Session** (reine
+Diagnose). Ein Debris-Fund aus dem ersten fehlgeschlagenen Automatisierungsversuch
+(`examples/rk.rkt`, eine versehentliche Kopie von `htdp-tests-probe.rkt`) wurde vor
+Sessionende entfernt, Repo-Status wieder sauber. Details: `docs/HACKING.md` §33.7-
+Nachtrag, `docs/2026-09-16-5_report-linux.md`.
+
+---
+
 ## Session 2026-09-16 (Linux, 4) — „Crash B" (Teardown, `invalid memory reference`) gefixt
 
 **Kontext:** Nutzerfrage zu Sessionbeginn — ist Crash B aus `CLAUDE.md` noch offen?

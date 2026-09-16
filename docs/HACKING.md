@@ -3773,6 +3773,34 @@ Für die nächste Sitzung: `PLT_QT_SCROLL_DEBUG=1` schaltet eine pro-Canvas geta
 Ablaufverfolgung aller Scroll-Aufrufe an (bewusst **nicht** an `PLT_QT_DEBUG` gehängt,
 dessen Paint-Logging die Scroll-Sequenz zudeckt).
 
+**Nachtrag 2026-09-16 (Linux, eigene Session, kein Fix-Versuch, reine Diagnose):**
+14 gültige, vollständige Wiederholungen derselben Sequenz (echter Mausklick auf Run,
+dann File→Open per Mausklick+Dialog, alle mit `PLT_QT_SCROLL_DEBUG=1`) zeigten **0/14**
+das Symptom — jeder Lauf rendert Tab 2 mit korrekten, sequentiellen Zeilennummern. Der
+Tracer selbst kam dadurch nicht zum Einsatz (kein Auftreten, keine Spur).
+
+Drei getrennte, unabhängige Automatisierungsfehlschläge gingen voraus (keiner davon
+zeigte je den Tab-2-Inhalt, keiner zählt zu den 14): (1) Run per `xdotool key F5` +
+File→Open per fest programmierten Mausklick-Koordinaten erzeugte zwei überlappende
+Öffnen-Dialoge — Ursache nicht abschließend geklärt, keine Tastatur-Nav beteiligt,
+plausibelste Vermutung eine zu knapp bemessene Wartezeit nach `F5`. (2) Run per
+verifiziertem Mausklick + File→Open per Tastatur-Down-Zähler (dieselbe Sequenz, die in
+einer vorangegangenen manuellen Kalibrierung im selben, durchgehend offenen Prozess
+zuverlässig funktioniert hatte) landete in einem frisch gestarteten Prozess
+stattdessen auf „Save Definitions As…" — plausible, aber **nicht unabhängig
+verifizierte** Erklärung: DrRackets Qt-Datei-Menü markiert offenbar nicht in jedem
+frisch gestarteten Prozess denselben ersten Eintrag, wodurch ein fixer
+Tastatur-Down-Zähler nicht prozessübergreifend deterministisch ist. (3) File→Open per
+Mausklick, aber ohne Poll-Schleife, meldete „0 Dialoge gefunden", obwohl der Dialog
+laut Screenshot längst offen war — reine Race Condition in der eigenen
+Zustandsprüfung. Nach Umstellung auf durchgehende Mausklicks (Run **und** Open) mit
+gemessenen, stabilen Koordinaten plus einer `xdotool search`-Poll-Schleife nach jedem
+kritischen Schritt (erwartete Dialog-/Fenstertitel-Anzahl, sonst Abbruch statt
+Weitermachen mit verfälschtem Zustand) liefen alle 13 weiteren gezählten Läufe sauber
+durch. Damit ist die beobachtete Rate zusätzlich auf ≤1-in-18 (1 historischer Fund +
+3 damalige + 14 jetzige) statt ≤1-in-4 eingegrenzt; §33.7 bleibt offen. Details:
+`docs/2026-09-16-5_report-linux.md`.
+
 ### ⚠ Shim-ABI-Änderung
 
 `shim_canvas_set_wheel_cb` ist neu — **zusätzlich** zu §32s
