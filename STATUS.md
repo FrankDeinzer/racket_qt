@@ -5,6 +5,41 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-16 (Linux, 3) — „Zombie-Prozess" (§29.2/§37) root-caused: Testmethodik-Artefakt, kein Backend-Bug
+
+**Kontext:** `docs/2026-09-16-2_report-linux.md` (§37-Session) hatte den seit §29.2
+(2026-09-13, macOS) bekannten Nebenbefund erneut beobachtet — natives Fenster
+schließen, Fenster verschwindet visuell, Prozess läuft unverändert weiter. Auftrag
+dieser Session: root-causen. Volles Detail: `docs/2026-09-16-3_report-linux.md`,
+Technik `docs/HACKING.md` §38.
+
+**Keine Code-Änderung.** Reine Diagnose.
+
+**Root-Cause:** `xdotool windowclose` liefert die Close-Anfrage unter dieser
+KWin/Plasma-X11-Session nie an die Anwendung aus — das Fenster wird von außen
+zerstört (X11-Ressource komplett weg, `BadWindow`), ohne dass `closeEvent`/`on-close`
+je feuert. **Kontrollversuch identisch unter nativem gtk** (ohne `PLT_QT`): derselbe
+false positive, GTK meldet dabei selbst `Gdk-WARNING: GdkWindow unexpectedly
+destroyed` — beweist, dass der Fehler backend-unabhängig ist, nicht in `wx/qt` liegt.
+
+**Gegenversuch:** ein echter simulierter Klick auf den sichtbaren Schließen-Button
+(Koordinaten aus der Fenstergeometrie abgeleitet, nicht geschätzt) beendet den Prozess
+zuverlässig — n=3/3 an einer isolierten Probe, n=2/2 an echtem laufenden DrRacket
+(`PLT_QT=1`). Damit ist die „Qt-Pump-Loop-Bug bei `queue-callback`"-Hypothese aus dem
+Startpunkt der letzten Session **auf Linux widerlegt**: der komplette Close-Mechanismus
+funktioniert, sobald der Close-Request die Anwendung erreicht.
+
+**Nicht auf macOS gegengeprüft** — die ursprünglichen §29.2/§22-Beobachtungen liefen
+über eine andere Automatisierung (kein `xdotool` auf macOS); beide Zeilen bleiben in
+`CLAUDE.md` offen, jetzt mit Hinweis auf die nötige Nachmessung.
+
+**Lehre für künftige Sessions:** `xdotool windowclose` ist als Ersatz für „Klick auf
+den nativen Schließen-Button" ungeeignet und darf nicht mehr so verwendet werden —
+stattdessen wie bei jeder anderen Widget-Interaktion (§21.10/§34.7) echte
+Klickkoordinaten aus der Fenstergeometrie ableiten.
+
+---
+
 ## Session 2026-09-16 (Linux, 2) — Menü-Enable/Check-States gefixt (§37, §34.7-Folgebefund)
 
 **Kontext:** `docs/2026-09-16_report-linux.md` (Zwischenablage-Fix, selber Tag) hatte

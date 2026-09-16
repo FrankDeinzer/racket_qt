@@ -180,18 +180,40 @@ bestätigt, durch den §22-Fix nicht berührt). **Präzisiert 2026-09-13 (§29.2
 innerhalb einer einzelnen Session ist der Zustand stabil (3/3 Neustarts identisch 8
 Menüs) — die Intermittenz zeigt sich vermutlich nur **zwischen** Sessions, nicht
 während einer laufenden. **Zombie-Prozess beim Schließen des letzten Fensters
-explizit reproduziert** (§29.2, 2026-09-13): Fenster schließt, Prozess läuft >13s
-unverändert weiter, kein Crash — deckt sich mit dem unten dokumentierten Befund.
+explizit reproduziert** (§29.2, 2026-09-13, macOS): Fenster schließt, Prozess läuft
+>13s unverändert weiter, kein Crash — deckt sich mit dem unten dokumentierten Befund.
+**Auf Linux 2026-09-16 (§38) root-caused und als Testmethodik-Artefakt entlarvt, nicht
+als echter Backend-Bug:** `xdotool windowclose` liefert die Close-Anfrage unter dieser
+KWin/Plasma-X11-Session nie an die Anwendung aus (Fenster wird von außen zerstört, kein
+`closeEvent`, kein `on-close`) — identisch reproduziert unter Qt **und** nativem gtk
+(GTK meldet selbst `Gdk-WARNING: GdkWindow unexpectedly destroyed`), also
+backend-unabhängig. Ein echter simulierter Klick auf den sichtbaren Schließen-Button
+(Koordinaten aus der Fenstergeometrie, nicht geschätzt) beendet den Prozess dagegen
+zuverlässig (n=3/3 isolierte Probe, n=2/2 echtes DrRacket, `PLT_QT=1`). **Diese
+macOS-Zeile hier bleibt trotzdem offen** — dort lief die Messung über eine andere
+Automatisierung (kein `xdotool`) und wurde nicht mit einem äquivalenten „echter Klick"-
+Test wiederholt; erst danach ließe sie sich ebenfalls als Artefakt einordnen oder nicht.
+Details: `docs/HACKING.md` §38. **Als Lehre für künftige Sessions: `xdotool windowclose`
+nicht mehr als Ersatz für „Klick auf den nativen Schließen-Button" verwenden** — wie bei
+jeder anderen Widget-Interaktion (§21.10/§34.7) echte Klickkoordinaten aus der
+Fenstergeometrie ableiten und per `xdotool mousemove`+`click` simulieren.
 **gefixt 2026-07-14 (§22):**
 macOS-App-Menü-Eintrag an der „Preferences"-Stelle löste den falschen Callback aus
 (DrRackets Help-Menü-Punkt „Configure Command Line for Racket…" statt
 `preferences:show-dialog`) — behoben durch `setMenuRole(NoRole)` in `shim.cpp` +
 PLT_QT-gated `current-eventspace-has-standard-menus?` in `mred/private/app.rkt` (unser
-Fork). **Neuer, ungeklärter Nebenbefund aus demselben Fix:** die erhoffte
-Exit-Bestätigung + tatsächliche Prozessbeendigung beim Schließen des letzten Fensters
-trat NICHT ein (Prozess läuft weiter, kein Crash) — nicht root-caused, zwei Hypothesen
-(DrRacket-eigene Close-Logik vs. Qt-Pump-Loop-Bug bei `queue-callback`), eigene künftige
-Session. Linux Resize/Minimieren unter
+Fork). **Neuer, ungeklärter Nebenbefund aus demselben Fix (macOS, 2026-07-14):** die
+erhoffte Exit-Bestätigung + tatsächliche Prozessbeendigung beim Schließen des letzten
+Fensters trat NICHT ein (Prozess läuft weiter, kein Crash) — nicht root-caused, zwei
+Hypothesen (DrRacket-eigene Close-Logik vs. Qt-Pump-Loop-Bug bei `queue-callback`).
+**Die zweite Hypothese ist seit 2026-09-16 (§38) auf Linux widerlegt** — der komplette
+Pump-/`queue-callback`-Pfad funktioniert dort nachweislich, sobald der native
+Close-Request die Anwendung überhaupt erreicht; das damalige macOS-Symptom könnte
+also, wie auf Linux, ein Automatisierungsartefakt der jeweils verwendeten Close-Methode
+sein, statt ein echter Pump-Bug — auf macOS aber nicht nachgemessen, weiterhin offen,
+eigene künftige Session (s. `docs/HACKING.md` §38 für den Linux-Befund und die dort
+empfohlene Methode: echter Klick auf den Schließen-Button statt einer
+Automatisierungsabkürzung). Linux Resize/Minimieren unter
 KWin nicht validiert; Linux Crash A
 („arity mismatch") nach den macOS-Menü-Dispatch-Fixes (§19) in 4 Versuchen nicht mehr
 reproduziert — plausibel behoben, nicht absolut bewiesen (Original war

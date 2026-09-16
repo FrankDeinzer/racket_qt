@@ -4378,3 +4378,121 @@ Fensters (Prozess bleibt am Leben, s. `CLAUDE.md`s „Offene Nebenbefunde") erne
 beobachtet — nicht Teil dieses Fixes, per `kill` aufgeräumt statt root-caused.
 
 Nur auf Linux gefixt/getestet (Cross-Platform-Modell, gebündelte Validierung).
+
+## 38. „Zombie-Prozess beim Schließen des letzten Fensters" (§29.2, wiederholt in §37) —
+auf Linux ein Testmethodik-Artefakt, kein Backend-Bug (2026-09-16)
+
+### 38.1 Auftrag
+
+`docs/2026-09-16-2_report-linux.md` hatte den seit §29.2 (2026-09-13, macOS) bekannten
+Befund erneut beobachtet: natives Fenster schließen → Fenster verschwindet visuell,
+Racket-Prozess läuft unverändert weiter, kein Absturz. Root-Cause war bisher ungeklärt,
+zwei Hypothesen standen im Raum: DrRackets eigene Close-Logik vs. ein Qt-Pump-Loop-Bug
+bei `queue-callback`. Auftrag dieser Session: root-causen.
+
+### 38.2 Wie der Exit-Pfad überhaupt funktioniert
+
+Bevor die eigentliche Diagnose beginnt, ein Blick auf den Mechanismus, der einen
+`racket`-Prozess mit offenem GUI-Fenster überhaupt terminieren lässt — das ist an
+keiner Stelle offensichtlich, weil ein racket/gui-Skript nach `(send frame show #t)`
+normal aus dem Modul zurückkehrt und trotzdem interaktiv bleibt:
+
+- `wx/common/queue.rkt:637-641` installiert einen `executable-yield-handler`, der vor
+  dem eigentlichen Prozessende `(yield main-eventspace)` aufruft.
+- Eine `eventspace`-Struktur hat `#:property prop:evt`, das auf `eventspace-done-evt`
+  zeigt; „done" wird intern über `done-sema` signalisiert, gesetzt/gelöscht durch
+  `check-done` (`queue.rkt:213-225`) — und zwar exakt dann, wenn `count` (offene
+  Callback-Events in den `hi`/`med`/`lo`/`refresh`-Warteschlangen) **und**
+  `(hash-count frames)` (offene Top-Level-Fenster) **und** die Timer-Liste alle leer
+  sind.
+- `register-frame-shown` (aufgerufen aus `frame%.direct-show`, CLAUDE.md Regel 5) trägt
+  Fenster in `frames` ein/aus — **synchron**, nicht über die `hi`/`med`/`lo`-Queues.
+- `(yield main-eventspace)` blockiert also exakt so lange, bis alle drei Bedingungen
+  erfüllt sind, dann kehrt es zurück, der ursprüngliche `executable-yield-handler`
+  übernimmt, und der Prozess beendet sich normal (Exit-Code 0) — **ohne dass
+  irgendjemand `(exit)` aufrufen muss.** Das gilt für ein schlichtes racket/gui-Skript.
+- In echtem DrRacket kommt zusätzlich `framework`s `register-group-mixin` dazu
+  (`framework/private/frame.rkt:506-511`, `group.rkt:308-314`): dessen `on-close`
+  (augment) ruft `remove-frame` und danach `group:on-close-action`, das bei
+  `(null? (get-frames))` `(exit:exit)` aufruft — und **das** postet erst
+  `(queue-callback (lambda () (exit)))` (`framework/private/exit.rkt:68-78`), was
+  explizit `(exit)` aufruft. Zwei verschiedene Pfade also: das bare Skript kommt ohne
+  `(exit)` aus, DrRacket braucht es (und öffnet ggf. einen `user-oks-exit`-Bestätigungs-
+  dialog, wenn `framework:verify-exit` gesetzt ist — Default ist `#f`, kein Dialog
+  beobachtet).
+
+Beide Pfade hängen letztlich an derselben Vorbedingung: der native Close-Request muss
+`frame%`s `on-close`/`direct-show #f` überhaupt erreichen.
+
+### 38.3 Root-Cause: `xdotool windowclose` liefert die Close-Anfrage nicht zuverlässig aus
+
+Isolierte Probe (`racket/gui`, kein `framework`, `frame%` mit `on-close`-Augment +
+`exit-handler`-Wrapper + Sekunden-Heartbeat, Scratchpad-only) unter `PLT_QT=1`:
+`xdotool windowclose <WID>` auf ein frisch geöffnetes Fenster —
+
+- Fenster verschwindet **visuell** sofort; eine Sekunde später liefert `xdotool
+  getwindowname <WID>` `BadWindow (invalid Window parameter)` — die X11-Ressource ist
+  komplett zerstört, nicht nur unmapped.
+- Im Shim eingebauter Debug-Print in `RacketWindow::closeEvent` (`e->ignore(); if
+  (close_cb) close_cb(...)`) feuert **kein einziges Mal** — bestätigt per
+  `strings`/`/proc/<pid>/maps` gegen genau die frisch gebaute `.so`.
+- `on-close` (Racket-seitig) wird nie aufgerufen, `get-top-level-windows` bleibt bei 1,
+  der Prozess läuft nach 90+ Sekunden unverändert weiter (n=3, identisch).
+
+**Entscheidender Kontrollversuch — ohne `PLT_QT`, native gtk-Backend, identische
+Probe:** derselbe `xdotool windowclose`-Aufruf zerstört das `GdkWindow` ebenfalls ohne
+Racket-seitige Reaktion, diesmal mit einer expliziten GTK-eigenen Warnung: `Gdk-
+WARNING **: GdkWindow 0x... unexpectedly destroyed`. „Unexpectedly" ist wörtlich zu
+nehmen — **GTK selbst** ist überrascht, dass sein Window verschwindet. Das beweist:
+der Fehler liegt nicht in `wx/qt`, sondern in der Interaktion von `xdotool windowclose`
+mit dieser KWin/Plasma-X11-Session — unabhängig vom GUI-Toolkit. Was genau `xdotool
+windowclose`/KWin hier tut (`_NET_CLOSE_WINDOW` an die WM vs. direktes
+`WM_DELETE_WINDOW`-ClientMessage, Timeout-Fallback), wurde nicht weiter seziert — für
+diese Codebase reicht der Befund, dass die Anfrage die Anwendung nie erreicht.
+
+**Gegenversuch — echter simulierter Mausklick auf den sichtbaren Schließen-Button**
+(Koordinaten aus der Fenstergeometrie abgeleitet, nicht aus dem Screenshot geschätzt —
+`xdotool getwindowgeometry --shell <WID>` liefert `X`/`Y`/`WIDTH`; die Titelleiste
+dieser KWin-Deko ist 28px hoch, gemessen über `xwininfo -root -tree` an einem
+Testfenster; Klickpunkt `(X + WIDTH − 12, Y − 14)`): closeEvent feuert, `on-close`
+läuft, `exit-handler` wird aufgerufen, Prozess beendet sich binnen der 3s-Beobachtungs-
+frist. **n=3/3** an der isolierten Probe (`PLT_QT=1`), zusätzlich **n=2/2** an echtem
+laufenden DrRacket (`~/racket/bin/racket -l drracket`, `PLT_QT=1`, inklusive einmal mit
+und einmal ohne den Autosave-Recovery-Dialog dazwischen) — beide Läufe: Fenster
+verschwindet, Prozess ist danach vollständig weg (kein Eintrag mehr in `ps aux`, kein
+Zombie im wörtlichen Sinn), kein Bestätigungsdialog blockiert.
+
+### 38.4 Einordnung
+
+Der Nebenbefund ist auf Linux **kein Bug in `wx/qt` oder im gui-Fork** — weder in
+`frame%.direct-show`/`on-close` noch im Pump-Loop (`wx/qt/queue.rkt`). Die
+`queue-callback`-Pump-Loop-Hypothese aus dem Startpunkt der letzten Session ist damit
+**auf Linux widerlegt**: der komplette Ketten-Mechanismus (closeEvent → `close_cb` →
+`on-close` → `direct-show #f`/`exit:exit` → `queue-callback (exit)` → Prozessende)
+funktioniert nachweislich, sobald der native Close-Request die Anwendung überhaupt
+erreicht. Was bisher als „Zombie-Prozess" in den Session-Logs stand, war ein Artefakt
+der Testautomatisierung: `xdotool windowclose` ist unter dieser KWin/Plasma-X11-Session
+**kein gültiger Ersatz** für einen echten Klick auf den Schließen-Button — es
+false-positived identisch unter Qt **und** unter nativem gtk.
+
+**Nicht auf macOS gegengeprüft** — die ursprüngliche §29.2-Beobachtung (2026-09-13) lief
+über eine andere Automatisierung (`xdotool` existiert dort nicht), ebenso der ältere,
+separate §22-Nebenbefund (2026-07-14, „erhoffte Exit-Bestätigung blieb aus"). Beide
+Zeilen bleiben in `CLAUDE.md`s „Offene Nebenbefunde" stehen, aber mit dem Hinweis
+versehen, dass sie mit einer anderen Automatisierungsmethode gemessen wurden und mit
+einem echten Klick auf den Schließen-Button erneut gemessen werden müssen, bevor sie
+sich ebenfalls als Artefakt einordnen lassen. Der pauschale Verweis auf einen
+„Qt-Pump-Loop-Bug bei `queue-callback`" als Hypothese ist damit **nur für Linux**
+entkräftet, nicht für macOS — `wx/qt/queue.rkt`s eigener Kommentar zu
+`CFRunLoopRunInMode` vs. Racket CS' mach-port-Sleep beschreibt eine
+plattformspezifische Pump-Eigenheit, die diese Session nicht angerührt hat.
+
+**Für künftige Sessions (durable payload dieser Diagnose):** `xdotool windowclose` ist
+als Testwerkzeug für „Klick auf den nativen Schließen-Button" **ungeeignet** und darf
+nicht mehr dafür verwendet werden — stattdessen wie bei jeder anderen Widget-Interaktion
+(§21.10/§34.7) echte Klickkoordinaten aus der Fenstergeometrie ableiten und per
+`xdotool mousemove`+`click` simulieren.
+
+Nur auf Linux gemessen (Kontrollversuch nativ/gtk eingeschlossen). Keine Code-Änderung
+— reine Diagnose; die temporäre Debug-Instrumentierung in `qt-shim/src/shim.cpp` wurde
+vor Abschluss der Session vollständig zurückgebaut (`git status` im Submodul clean).
