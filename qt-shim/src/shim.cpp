@@ -31,6 +31,8 @@
 #include <QKeyEvent>
 #include <QFocusEvent>
 #include <QEnterEvent>
+#include <QClipboard>
+#include <QMimeData>
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
@@ -1524,6 +1526,34 @@ void shim_group_panel_get_content_margins(void* handle, int* left, int* top, int
 void shim_group_panel_set_label(void* handle, const char* label)
 {
     plt_group_panel_state(handle)->box->setTitle(QString::fromUtf8(label));
+}
+
+// ---- clipboard ------------------------------------------------------------
+// Text only (spike scope, docs/2026-09-14-4_report-linux.md "Nachtrag"):
+// QClipboard is a plain synchronous global object, unlike gtk's async
+// ownership-callback model -- clipboard-driver% (wx/qt/platform.rkt) writes
+// through eagerly and reads back live, no C-to-Racket callback involved, so
+// none of the #:atomic? rules (CLAUDE.md Regel 2) apply here.
+
+void shim_clipboard_set_text(const char* utf8)
+{
+    QApplication::clipboard()->setText(QString::fromUtf8(utf8), QClipboard::Clipboard);
+}
+
+// Returned pointer is only valid until the next shim_clipboard_* call --
+// matches shim_version's convention (Racket's _string return type copies
+// immediately during FFI marshaling, before this buffer can be reused).
+const char* shim_clipboard_get_text(void)
+{
+    static QByteArray buf;
+    buf = QApplication::clipboard()->text(QClipboard::Clipboard).toUtf8();
+    return buf.constData();
+}
+
+int shim_clipboard_has_text(void)
+{
+    const QMimeData* md = QApplication::clipboard()->mimeData(QClipboard::Clipboard);
+    return (md && md->hasText()) ? 1 : 0;
 }
 
 } // extern "C"

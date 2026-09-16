@@ -5,6 +5,43 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-16 (Linux) — Zwischenablage unter Qt gefixt (§36)
+
+**Kontext:** Nachtrag in `docs/2026-09-14-4_report-linux.md` hatte gemessen, dass
+Copy/Paste unter Qt komplett funktionslos ist (`clipboard-driver%` in
+`wx/qt/platform.rkt` ein reiner No-op-Stub). Volles Detail:
+`docs/2026-09-16_report-linux.md`, Technik `docs/HACKING.md` §36.
+
+**Eine Shim-ABI-Änderung** — drei neue Exporte (`shim_clipboard_set_text`,
+`shim_clipboard_get_text`, `shim_clipboard_has_text`). Windows/macOS brauchen nach dem
+Pull einen `qt-shim`-Rebuild (deckt sich mit dem bereits offenen Rebuild aus §32/§33).
+
+**Root-Cause tiefer als erwartet:** der alte Stub hatte nicht nur keine Implementierung,
+sondern die **falschen Methodennamen** — `wx/common/clipboard.rkt` (die einzige
+Konsumentin) ruft `get-client`/`set-client`/`get-data`/`get-text-data`/
+`get-bitmap-data`/`set-bitmap-data`, exakt wie bei gtk/cocoa; der Stub hatte stattdessen
+`get-data`/`set-data`/`clear-data`/`same-client?`, von denen die letzten drei nirgends
+aufgerufen wurden. Neu implementiert nach gtk/cocoa-Vorbild, aber **eager statt
+Ownership-Callback**, da `QClipboard` ein schlichtes synchrones globales Objekt ist
+(schreibt/liest sofort über die drei neuen Shim-Exporte). Scope bewusst nur Text — Bild-
+Zwischenablage bleibt No-op-Stub wie vorher.
+
+**Verifiziert:** neue Probe `examples/clipboard-probe.rkt` (3/3: direkter Round-trip,
+echtes Editor-Copy, echtes Editor-Paste über den WXME-Selbstbesitz-Pfad), unter Qt und
+nativ. Cross-Prozess/Cross-Toolkit geprüft (ein `PLT_QT=1`-Schreiber, ein separater
+nativer gtk-Leser). Im echten laufenden DrRacket-Prozess über die Interactions-REPL
+bestätigt (`the-clipboard`-Round-trip liefert den gesetzten String zurück).
+
+**Nicht bewiesen:** die GUI-Bedienung selbst (Edit-Menü → Copy per `xdotool`-Klick) —
+Copy/Cut waren im Edit-Menü durchgehend ausgegraut trotz aktiver Selektion, deckt sich
+mit dem bereits unter §34.7 dokumentierten, separaten Befund zu nicht nachgeführten
+Menü-Enable-States unter diesem Backend. Die zugrundeliegende API ist im selben Prozess
+direkt bestätigt; die Menü-Verdrahtung ist eine eigene künftige Sitzung.
+
+**Gate:** Smoke 3/3 beide Wege. Nur auf Linux gefixt/getestet (Cross-Platform-Modell).
+
+---
+
 ## Session 2026-09-14 (Linux, 4) — Toolbar-Überlappung gefixt: `wx/qt` beachtet jetzt den Stil `'deleted` (§35)
 
 **Kontext:** Der in `docs/2026-09-14-3_report-linux.md` §35 übergebene Befund —

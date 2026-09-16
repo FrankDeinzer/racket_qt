@@ -4171,3 +4171,100 @@ dem Backup zurückgespielt.
   plattformspezifisch. Was daraus für Windows/macOS folgt, entscheidet der gebündelte
   Durchlauf, nicht dieser Absatz; die Geschichte dieses Projekts (§21.9, §24.5,
   §21.10) ist voll von Vorhersagen dieser Art, die sich als falsch erwiesen haben.
+
+## 36. Zwischenablage unter Qt gefixt — `clipboard-driver%` war ein reiner No-op-Stub (Linux, 2026-09-16)
+
+**Status: gefixt.** Der Befund stand seit dem Vortag als „neu und ungefixt" im
+Nachtrag zu `docs/2026-09-14-4_report-linux.md`. **Eine Shim-ABI-Änderung** (drei neue
+Exporte) — Windows/macOS müssen `qt-shim` nach dem nächsten Pull neu bauen, siehe die
+Sammel-Warnung am Anfang dieser Datei bzw. in `CLAUDE.md`.
+
+### 36.1 Root-Cause: nicht nur „kein Backend", sondern der falsche Vertrag
+
+`wx/qt/platform.rkt:151` (alte Zeilenzählung) definierte `clipboard-driver%` mit
+Methodennamen `get-data`/`set-data`/`get-text-data`/`set-text-data`/`clear-data`/
+`same-client?` — reine No-ops bzw. feste `#f`. Das Naheliegende wäre gewesen, diese
+Methoden einfach zu implementieren. **Tatsächlich hätte das nichts geholfen:**
+`wx/common/clipboard.rkt`s `clipboard%` (die einzige Konsumentin von
+`clipboard-driver%`, verifiziert über `wx/mred-sig.rkt`/`kernel.rkt`/`messagebox.rkt`/
+`mred.rkt`) ruft ausschließlich `get-client`, `set-client` (mit `(c orig-types)`, nicht
+„event"), `get-data`, `get-text-data`, `get-bitmap-data`, `set-bitmap-data` — ein
+Vertrag, der 1:1 aus gtks und cocoas `clipboard-driver%` (`wx/gtk/clipboard.rkt`,
+`wx/cocoa/clipboard.rkt`) übernommen ist. Der alte Stub traf diesen Vertrag nur
+zufällig in Arität, nie in Methodenname; `set-data`/`clear-data`/`same-client?`
+existierten in der übrigen Codebase nirgends und wurden nie aufgerufen. Die neue
+Implementierung übernimmt daher Methodennamen und Arität wortgleich von gtk/cocoa,
+nicht die des alten Stubs.
+
+### 36.2 Warum eager statt Ownership-Callback
+
+gtk (`gtk_clipboard_set_with_data` + `get_data`/`clear_owner`-Funktionszeiger) und
+cocoa (`NSPasteboard`-Owner-Protokoll) beantworten Lesezugriffe anderer Prozesse erst
+*on demand*, über einen Rückruf. Für Qt ist das unnötig: `QClipboard` ist ein
+schlichtes synchrones globales Objekt — `setText`/`text` schreiben bzw. lesen sofort,
+Qt kümmert sich intern um das X11/Wayland-Selection-Protokoll. `clipboard-driver%`
+schreibt deshalb bei `set-client` sofort in die native Zwischenablage (`shim_clipboard_
+set_text`) und liest bei jedem `get-text-data`/`get-data("TEXT")` live zurück
+(`shim_clipboard_get_text`/`has_text`) — kein C-nach-Racket-Callback beteiligt, also
+gilt hier keine der `#:atomic?`-Regeln aus `CLAUDE.md` Regel 2.
+
+Einzige Ausnahme: das reichhaltige `"WXME"`-Format (`wxme/editor.rkt:1633`, fürs
+Selbst-Paste mit Formatierung) hat kein natives Qt-Gegenstück und bleibt im
+`client`/`client-types`-Cache; `get-data` liefert es nur, wenn
+`(equal? (native-text) last-set-text)` — d. h. die native Zwischenablage seit dem
+letzten `set-client` unverändert ist. Kopiert ein externes Programm zwischenzeitlich
+etwas anderes, fällt ein Paste korrekt auf reinen Text zurück statt eine veraltete
+WXME-Struktur zu liefern.
+
+### 36.3 Umfang: nur Text
+
+`get-bitmap-data`/`set-bitmap-data` sind bewusst No-op-Stubs geblieben (der alte Stub
+hatte dafür gar keine Methoden — ein Aufruf hätte hart gecrasht). Bild-Zwischenablage
+war nie Teil des gemessenen Befunds und ist hier nicht angefasst; ebenso
+`cursor-driver%`/`gauge%`/`printer-dc%`/`get-current-mouse-state` aus derselben
+Bestandsaufnahme (`docs/2026-09-14-4_report-linux.md`) — bleiben offen, eigene Sitzung.
+
+### 36.4 Shim-Erweiterung
+
+Drei neue Exporte in `qt-shim/src/shim.cpp` (`#include <QClipboard>`/`<QMimeData>`):
+`shim_clipboard_set_text(const char*)`, `shim_clipboard_get_text() -> const char*`
+(statischer `QByteArray`-Puffer nach `shim_version`-Konvention — gültig bis zum
+nächsten Aufruf, ausreichend weil Rackets `_string`-Rückgabetyp beim FFI-Aufruf sofort
+kopiert), `shim_clipboard_has_text() -> int`. Racket-seitige Bindings in
+`wx/qt/utils.rkt:114-116/668-676`. `wx/qt/platform.rkt` requirt jetzt zusätzlich
+`"utils.rkt"` (vorher nicht nötig, da `platform.rkt` selbst keine Shim-Funktionen
+aufrief).
+
+### 36.5 Verifikation
+
+Neue Probe `examples/clipboard-probe.rkt`, drei Prüfungen: (1) direktes
+`set-clipboard-string`/`get-clipboard-string`, (2) echtes `text%`-Copy einer Selektion
+→ von außen sichtbarer reiner Text, (3) echtes `text%`-Paste in einen zweiten Editor →
+übt den WXME-Selbstbesitz-Pfad aus, nicht nur den Text-Fallback. Alle drei grün unter
+Qt **und** nativ (Kontrollmessung).
+
+Zusätzlich cross-Prozess/cross-Toolkit geprüft: ein `PLT_QT=1`-Prozess setzt die
+Zwischenablage und hält sie offen, ein separater **nativer** (gtk) Prozess liest
+denselben String zurück — bestätigt, dass Qt das X11-`CLIPBOARD`-Protokoll korrekt
+bedient, nicht nur Racket-intern konsistent ist.
+
+Akzeptanztest in echtem DrRacket (`~/racket/bin/racket -l drracket`, `PLT_QT=1`):
+`(send the-clipboard set-clipboard-string "REAL-DRRACKET-REPL-TEST" 0)` gefolgt von
+`(send the-clipboard get-clipboard-string 0)` im Interactions-Pane liefert
+`"REAL-DRRACKET-REPL-TEST"` zurück — im echten Prozess, nicht nur im isolierten
+Probe-Skript. **Die GUI-getriebene Variante (Edit-Menü/Kontextmenü → Copy, per
+`xdotool` geklickt) blieb ergebnislos** (Zwischenablage danach leer) — das Edit-Menü
+zeigte `Copy`/`Cut` durchgehend ausgegraut trotz aktiver Selektion (deckt sich mit dem
+bereits unter §34.7 dokumentierten, separaten Befund „Menü-Enable-States werden unter
+diesem Backend nicht nachgeführt"); ein Klick auf das scheinbar aktive Kontextmenü-
+`Copy` blieb ebenfalls wirkungslos, vermutlich Klick-Timing/-Treffer, nicht
+root-caused. **Damit ist die Menü-Verdrahtung selbst nicht bewiesen, wohl aber die
+zugrundeliegende `clipboard-driver%`-Implementierung** — dieselbe API, die das Edit-
+Menü letztlich aufruft, wurde im selben Prozess direkt erfolgreich geprüft. Die
+Menü-Diskrepanz ist ein Kandidat für dieselbe künftige Sitzung wie §34.7s
+Tabs-Menü-Befund, nicht Teil dieses Fixes.
+
+Gate: Smoke 3/3 beide Wege (`raco test tests/smoke.rkt`), kein Rückbau an anderen
+Fixes berührt (`platform.rkt`/`utils.rkt`/`shim.cpp` sind additiv).
+
+Nur auf Linux gefixt/getestet (Cross-Platform-Modell, gebündelte Validierung).
