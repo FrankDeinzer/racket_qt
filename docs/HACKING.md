@@ -4268,3 +4268,113 @@ Gate: Smoke 3/3 beide Wege (`raco test tests/smoke.rkt`), kein Rückbau an ander
 Fixes berührt (`platform.rkt`/`utils.rkt`/`shim.cpp` sind additiv).
 
 Nur auf Linux gefixt/getestet (Cross-Platform-Modell, gebündelte Validierung).
+
+---
+
+## 37. Menü-Enable/Check-States werden vor dem Öffnen nicht nachgeführt — §34.7-Folgebefund gefixt (Linux, 2026-09-16)
+
+**Status: gefixt.** Zwei unabhängige Symptome hatten denselben Befund markiert: das
+Tabs-Menü „Previous/Next Tab" blieb bei zwei offenen Tabs ausgegraut (§34.7), und das
+Edit-Menü zeigte `Copy`/`Cut` durchgehend ausgegraut trotz aktiver Selektion
+(`docs/2026-09-16_report-linux.md`, im selben Tag zuvor beim Zwischenablage-Fix
+gemessen). **Eine Shim-ABI-Änderung** (ein neuer Export) — Windows/macOS müssen
+`qt-shim` nach dem nächsten Pull neu bauen, deckt sich mit dem bereits offenen Rebuild
+aus §32/§33/§36.
+
+### 37.1 Root-Cause: ein fehlender Aufruf, keine fehlende Methode
+
+Der Mechanismus, der Menü-Enable/Check-States vor dem Öffnen aktualisiert, läuft in
+allen drei Referenz-Backends über denselben Pfad: ein natives „Menü ist gleich
+sichtbar"-Signal ruft `wxtop.rkt`s `on-menu-click` (`override*`-Ziel aus `wx-frame%`,
+`wxtop.rkt:734-738`), das wiederum `(send menu-bar on-demand)` aufruft. `mrmenu.rkt`s
+`menu-bar%`/`menu%` `on-demand` (Zeilen 400-406/448-452) ruft den `demand-callback` und
+rekursiert **danach** in jedes Kind-Item, auch in Submenüs — ein einziger Trigger pro
+Menü-Bar-Baum genügt also, egal wie tief verschachtelt.
+
+Die nativen Hooks je Backend:
+
+- **win32** (`wx/win32/frame.rkt:367-370`): `WM_INITMENU` — fängt Windows ab, bevor
+  irgendein Menü (Bar-Ebene oder Submenü) sichtbar wird, ruft `on-menu-click` über
+  `constrained-reply` synchron blockierend.
+- **gtk** (`wx/gtk/menu-bar.rkt:36-45`): das `"select"`-Signal auf jedem
+  `GtkMenuItem`, das ein Top-Level-Menü in der Bar repräsentiert.
+- **Qt**: `wx/qt/frame.rkt:198-201` definierte `on-menu-command`/`on-menu-click`/
+  `on-toolbar-click`/`on-mdi-activate` korrekt als `(define/override ... (void))` —
+  das ist die geforderte Erfüllung der `override*`-Invariante aus CLAUDE.md Regel 3
+  (die Methode **muss** in der Platform-Klasse existieren, damit `wxtop.rkt` sie
+  überschreiben kann). **Aber nichts rief `on-menu-click` je auf.** `grep -rn
+  "on-menu-click" wx/qt/` fand vor diesem Fix nur die beiden Stub-Definitionen, keinen
+  einzigen Aufrufer — anders als bei win32/gtk, wo der native Hook explizit
+  verdrahtet ist. `on-menu-command` dagegen wird sehr wohl aufgerufen (`wx/qt/menu.rkt`s
+  `append`-Callback postet es bei jedem Action-Klick), weshalb Menüpunkte-Klicks schon
+  lange funktionierten und dieser Befund lange unbemerkt blieb — nur die
+  Enable/Check-**Anzeige** vor dem Öffnen war betroffen, nicht die Funktion selbst.
+
+Qts Äquivalent zu `WM_INITMENU`/`"select"` ist `QMenu::aboutToShow()` — emittiert
+synchron, bevor ein `QMenu` (top-level oder Submenü, per `popup()` oder per
+Bar-Klick-Aktivierung) sichtbar wird.
+
+### 37.2 Fix
+
+Neue `RacketMenu : public QMenu`-Subklasse (`qt-shim/src/shim.cpp`) trägt ein
+`about_to_show_cb`/`about_to_show_ud`-Funktionszeiger-Paar und verbindet
+`QMenu::aboutToShow` im Konstruktor mit einer Lambda, die den Zeiger aufruft, falls
+gesetzt. `shim_menu_create` gibt jetzt `new RacketMenu(...)` statt `new QMenu(...)`
+zurück; der Rückgabewert bleibt `void*`, jeder andere Aufrufer castet weiterhin
+`static_cast<QMenu*>(menu)` — dasselbe Offset-0-Cast-Muster, das `RacketWindow`/
+`QWidget*` im ganzen File schon etabliert (einfache, nicht-virtuelle Vererbung, alle
+bisherigen `static_cast<QWidget*>`-Stellen in `shim.cpp` verlassen sich bereits
+darauf). Neuer Export `shim_menu_set_about_to_show_cb(void* menu, shim_callback_t cb,
+void* ud)`.
+
+Racket-seitig (`wx/qt/menu.rkt`): jede `menu%`-Instanz registriert bei ihrer
+Konstruktion einen Callback, der über das bereits vorhandene `find-top-frame` (dieselbe
+Elternketten-Traversierung, die auch der Action-Klick-Callback benutzt) den Frame
+findet und `on-menu-click` **async** in dessen Eventspace postet — nie synchron, wie
+von CLAUDE.md Regel 2 gefordert (der `_callback_t`-FFI-Typ dieser Codebase ist bereits
+`#:atomic? #t`, ohne `#:async-apply`; die tatsächliche Sicherheitsgrenze ist hier wie
+überall sonst in `wx/qt`, dass der C-Callback nur postet, nie synchron nach Racket
+zurückruft, s. §21s Diskussion zu `#:async-apply`). Der Callback wird als schlichtes
+Objekt-Feld gehalten (gleiches Lebensdauer-Muster wie `frame.rkt`s `resize-cb`) —
+solange die `menu%`-Instanz lebt, lebt der Callback mit ihr, kein GC-Risiko wie bei den
+`append`-Callbacks, die deshalb in `retained-callbacks` gehalten werden müssen.
+
+`wx/qt/frame.rkt` selbst ist **unverändert** — die Stub-Definition von `on-menu-click`
+war bereits korrekt (sie erfüllt die `override*`-Pflicht), es fehlte nur ein Aufrufer.
+
+### 37.3 Verifikation
+
+Neue Probe `examples/menu-demand-probe.rkt` (Qt-spezifisch, requirt `wx/qt/menu-bar`
+direkt für `debug-get-appended-menu`, hinter `PLT_QT_DEBUG` gated wie
+`menu-click-probe.rkt`): ein `menu%` mit `demand-callback`, der bei jedem Aufruf einen
+Zähler erhöht und ein `checkable-menu-item%` togglet. Zwei echte `(send wx-menu popup
+...)`-Aufrufe (derselbe native Pfad wie ein Nutzerklick, nicht der C-Callback direkt
+aufgerufen) — der Zähler steht danach bei 2, und `is-checked?` (liest über
+`shim_action_is_checked` den **nativen** QAction-Zustand zurück, nicht nur
+Racket-seitige Buchführung) alterniert korrekt:
+
+```
+[probe] before any popup: demand-count=0
+[probe] demand-callback fired, count=1 toggle=#t
+[probe] after popup 1: demand-count=1 checked?=#t
+[probe] demand-callback fired, count=2 toggle=#f
+[probe] after popup 2: demand-count=2 checked?=#f
+[probe] RESULT: PASS -- on-menu-click/on-demand fired on real QMenu::aboutToShow, 2 times
+```
+
+Akzeptanztest in echtem DrRacket (`~/racket/bin/racket -l drracket`, `PLT_QT=1`,
+`xdotool`+`spectacle`, wie in §21.10/§34.7 etabliert): Text getippt, Edit-Menü geöffnet
+→ `Cut`/`Copy` greyed-out (korrekt, keine Selektion); `Select All` per Menüklick,
+Edit-Menü erneut geöffnet → `Cut`/`Copy` jetzt aktiv, Selektion sichtbar im
+Hintergrund. Zweiter Test: `File → New Tab`, Tabs-Menü geöffnet → `Previous Tab`/
+`Next Tab` jetzt aktiv (vorher bei einem Tab korrekt greyed-out), `Tab 1: Untitled`/
+`Tab 2: Untitled 2` beide aktiv, `Tab 3`-`Tab 9` weiterhin greyed-out (existieren
+nicht). Beide ursprünglich gemeldeten Symptome (§34.7, Zwischenablage-Nachtrag) damit
+direkt am lebenden Prozess bestätigt, nicht nur in der isolierten Probe.
+
+Gate: `raco test tests/smoke.rkt` 3/3 mit **und** ohne `PLT_QT`, mehrfach wiederholt
+für Stabilität. Bekannter, unveränderter Nebenbefund beim Schließen des letzten
+Fensters (Prozess bleibt am Leben, s. `CLAUDE.md`s „Offene Nebenbefunde") erneut
+beobachtet — nicht Teil dieses Fixes, per `kill` aufgeräumt statt root-caused.
+
+Nur auf Linux gefixt/getestet (Cross-Platform-Modell, gebündelte Validierung).

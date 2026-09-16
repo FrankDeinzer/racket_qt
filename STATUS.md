@@ -5,6 +5,49 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-16 (Linux, 2) — Menü-Enable/Check-States gefixt (§37, §34.7-Folgebefund)
+
+**Kontext:** `docs/2026-09-16_report-linux.md` (Zwischenablage-Fix, selber Tag) hatte
+beim Verifizieren erneut auf den in §34.7 dokumentierten Befund gestoßen: das Edit-Menü
+zeigte `Copy`/`Cut` durchgehend ausgegraut trotz aktiver Selektion — dasselbe Muster wie
+DrRackets Tabs-Menü, das „Previous/Next Tab" bei zwei offenen Tabs weiterhin ausgegraut
+zeigt. Zwei unabhängige Symptome, ein gemeinsamer Verdacht: Menü-Enable-States werden
+unter diesem Backend nicht nachgeführt. Volles Detail: `docs/2026-09-16-2_report-linux.md`,
+Technik `docs/HACKING.md` §37.
+
+**Eine Shim-ABI-Änderung** — ein neuer Export (`shim_menu_set_about_to_show_cb`).
+Windows/macOS brauchen nach dem Pull einen `qt-shim`-Rebuild (deckt sich mit dem bereits
+offenen Rebuild aus §32/§33/§36 — ein Rebuild deckt jetzt alle vier ab).
+
+**Root-Cause:** win32 (`WM_INITMENU`) und gtk (`GtkMenuItem`s `"select"`-Signal) rufen
+je einmalig, kurz bevor irgendein Menü sichtbar wird, `on-menu-click` → `on-demand` —
+das kaskadiert rekursiv durch die ganze Menü-Bar-Baumstruktur (`mrmenu.rkt`), auch in
+Submenüs. `wx/qt/frame.rkt` definierte `on-menu-click` bereits korrekt als
+`override*`-Ziel (Pflicht aus CLAUDE.md Regel 3), aber **nichts rief es je auf** — das
+Qt-Äquivalent `QMenu::aboutToShow` war nirgends verdrahtet. Verifiziert durch direkten
+Quelltextvergleich win32/gtk/qt, nicht geraten.
+
+**Implementiert:** `RacketMenu : public QMenu`-Subklasse (`qt-shim/src/shim.cpp`) trägt
+einen Callback-Zeiger, verbunden mit `QMenu::aboutToShow`; `wx/qt/menu.rkt` registriert
+ihn pro `menu%`-Instanz und postet `on-menu-click` async in das Eventspace des über
+`find-top-frame` gefundenen Frames (nie synchron, Regel 2). Ein Trigger pro Menü-Bar
+genügt, weil `on-demand` bereits selbst rekursiv durch alle Submenüs läuft. Kein
+Rückbau in `wx/qt/frame.rkt` nötig — der Stub war schon korrekt, es fehlte nur ein
+Aufrufer.
+
+**Verifiziert:** neue Probe `examples/menu-demand-probe.rkt` (`demand-callback` feuert
+2/2 bei echtem `QMenu::popup()`, ein `checkable-menu-item%` togglet und der native
+Zustand liest über `shim_action_is_checked` korrekt zurück). Akzeptanztest in echtem
+DrRacket: Edit-Menü `Copy`/`Cut` greyed-out ohne Selektion, aktiv sofort nach Select
+All; Tabs-Menü `Previous Tab`/`Next Tab` greyed-out bei einem Tab, aktiv sofort nach
+`File → New Tab`. Beide ursprünglich gemeldeten Symptome direkt am laufenden Prozess
+bestätigt (Screenshots), nicht nur in der isolierten Probe.
+
+**Gate:** Smoke 3/3 beide Wege, mehrfach wiederholt. Nur auf Linux gefixt/getestet
+(Cross-Platform-Modell).
+
+---
+
 ## Session 2026-09-16 (Linux) — Zwischenablage unter Qt gefixt (§36)
 
 **Kontext:** Nachtrag in `docs/2026-09-14-4_report-linux.md` hatte gemessen, dass

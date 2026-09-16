@@ -752,9 +752,39 @@ void shim_menubar_remove_at(void* menubar, int pos)
 
 // ---- menu -------------------------------------------------------------------
 
+// Subclasses QMenu only to carry an about-to-show callback (docs/HACKING.md
+// §37) -- the Qt analog of win32's WM_INITMENU / gtk's GtkMenuItem "select"
+// signal, both of which fire `on-menu-click` -> `on-demand` right before a
+// menu becomes visible so item enable/check state is current. Elsewhere in
+// this file a void* known to hold a RacketMenu* is freely static_cast to
+// QMenu* (single, non-virtual inheritance, same established pattern as
+// RacketWindow/QWidget*).
+class RacketMenu : public QMenu {
+public:
+    shim_callback_t about_to_show_cb = nullptr;
+    void* about_to_show_ud = nullptr;
+
+    explicit RacketMenu(const QString& title) : QMenu(title)
+    {
+        QObject::connect(this, &QMenu::aboutToShow, [this]() {
+            if (about_to_show_cb) about_to_show_cb(about_to_show_ud);
+        });
+    }
+};
+
 void* shim_menu_create(const char* title)
 {
-    return new QMenu(QString::fromUtf8(title));
+    return new RacketMenu(QString::fromUtf8(title));
+}
+
+// Wires the native about-to-show notification. Called once per menu% (top-level
+// bar menu, submenu, or popup menu alike -- all share shim_menu_create), right
+// after construction.
+void shim_menu_set_about_to_show_cb(void* menu, shim_callback_t cb, void* ud)
+{
+    auto* rm = static_cast<RacketMenu*>(menu);
+    rm->about_to_show_cb = cb;
+    rm->about_to_show_ud = ud;
 }
 
 void shim_menubar_add_menu(void* menubar, void* menu)
