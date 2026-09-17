@@ -5,6 +5,28 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-17 (Windows, 4) — §35-Hypothese 1 (gestreiftes Rechteck) geschlossen
+
+**Kontext:** offener Punkt aus `docs/2026-09-17_report-win.md`: der Windows-Nebenbefund
+vom 2026-09-11 (orange/blau gestreiftes Rechteck nahe dem oberen Rand des
+DrRacket-Editor-Fensters) galt nur als „vermutlich mitbehoben" durch den §33-Scroll-Fix,
+weil bisher nur seine *Abwesenheit* in anderen Kontexten beobachtet wurde, nie der
+tatsächliche Auslöseschritt gezielt wiederholt.
+
+**Ergebnis: geschlossen.** `examples/scroll-probe.rkt` — die bereits im Repo committete
+isolierte `editor-canvas%`-Probe, mit der Linux am 2026-09-13 dasselbe Symptom-Cluster
+gezielt reproduziert hatte (dort als Farbstreifen, auf Windows damals als Weißmalen, auf
+macOS als korrekt-aber-unscrollbar — alle drei dieselbe Root-Cause) — läuft jetzt sauber:
+kein Streifen-/Weißmal-Artefakt, beide Scrollbars sichtbar, echtes Mausrad (10 Notches)
+scrollt den Inhalt korrekt. Erstmals der tatsächliche 2026-09-11-Auslöseschritt 1:1
+wiederholt statt nur seiner Abwesenheit anderswo beobachtet.
+
+Keine Code-Änderung, reine Bestätigung mit existierendem Diagnose-Skript.
+`racket-prefs.rktd` unberührt (bare-`racket/gui`-Skript). Details:
+`docs/2026-09-17-4_report-win.md`.
+
+---
+
 ## Session 2026-09-17 (Windows, 3) — Zombie-Prozess-Nebenbefund nicht reproduzierbar
 
 **Kontext:** Fortsetzung des Nebenbefunds aus der vorigen Sitzung

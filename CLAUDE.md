@@ -322,12 +322,20 @@ Colors-Tab-Rahmen-Teil 2026-09-11 gefixt, §24.3. Font-Size-Slider-Zahl **gefixt
 (2026-09-11, inzident entdeckt, vorbestehend/unabhängig von den Scrollbar-Änderungen,
 per `git stash` bestätigt): grafischer Störeffekt (orange/blau gestreiftes Rechteck) nahe
 dem oberen Rand des DrRacket-Editor-Fensters, Root-Cause nicht untersucht. **§35-Hypothese
-1 (identisch mit diesem Befund?) auf Windows gegengeprüft, 2026-09-17: in keinem der drei
-`test-dock-size`-Läufe und keinem der drei geöffneten Tabs sichtbar** — deckt sich mit der
-Linux-Hypothese, dass der §35-Hide-on-Create-Fix ihn mitbehoben hat; **nicht mit einer
-gezielten Wiederholung des ursprünglichen 2026-09-11-Repro-Schritts verifiziert** (der
-genaue Auslöser von damals wurde nicht rekonstruiert), daher vorsichtig statt endgültig
-als erledigt eingestuft.
+1, 2026-09-17 gegengeprüft: in keinem der drei `test-dock-size`-Läufe und keinem der drei
+geöffneten Tabs sichtbar** — aber nur Abwesenheit in einem anderen Kontext beobachtet,
+nicht der ursprüngliche Auslöseschritt selbst wiederholt. **Mit dem designierten Repro
+geschlossen, 2026-09-17 (4)** (`docs/2026-09-17-4_report-win.md`):
+`examples/scroll-probe.rkt` — exakt die isolierte `editor-canvas%`-Probe
+(`'(auto-hscroll auto-vscroll)`, überlanger Inhalt), mit der Linux dasselbe
+Symptom-Cluster am 2026-09-13 gezielt reproduziert hatte (dort als Farbstreifen, auf
+Windows damals als Weißmalen, auf macOS als korrekt-aber-unscrollbar — alle drei
+dieselbe Root-Cause, §33) — rendert nach dem §33-Fix (fehlender `on-size`-Aufruf in
+`wx/qt/canvas.rkt`) sauber, kein Streifen-/Weißmal-Artefakt an irgendeiner Stelle,
+Mausrad (10 Notches, echte `mouse_event`-Simulation) scrollt den Inhalt korrekt Zeile
+für Zeile. Damit erstmals der tatsächliche Auslöseschritt 1:1 wiederholt statt nur
+seiner Abwesenheit anderswo — **Hypothese 1 gilt als bestätigt erledigt**, keine
+künftige Session mehr nötig.
 **Zwischenablage: gefixt 2026-09-16 (§36).** `clipboard-driver%` war ein reiner
 No-op-Stub, dazu mit Methodennamen, die `wx/common/clipboard.rkt` nie aufruft (falscher
 Vertrag, nicht nur fehlende Implementierung — siehe §36.1). Neu implementiert nach
