@@ -4761,3 +4761,71 @@ einen `qt-shim`-Rebuild (vier neue Exporte, wie jeder vorige ABI-Fund) — reiht
 den bestehenden Rebuild-Hinweis (§32/§33/§36/§37) ein. Bild-Cursor (Farbcursor mit >2
 Farben) nicht Teil des Kontrakts (`is-16x16?` erzwingt monochrom für die öffentliche
 `(new cursor% ...)`-API) — keine Lücke, sondern deckungsgleich mit win32/gtk/cocoa.
+
+## 41. `gauge% implementiert — zweiter der vier Stubs aus der §36-Bestandsaufnahme (Windows, 2026-09-17)
+
+### 41.1 Auftrag
+
+`gauge%` (`wx/qt/platform.rkt`) war ein reiner In-Memory-Stub: `get-range`/`set-range`/
+`get-value`/`set-value` lasen/schrieben nur zwei lokale Variablen, `handle` war
+`#f` — kein natives Widget, zeichnete also nichts. Alter Kommentar im Quelltext nannte
+den DrRacket-Splash-Screen als Beispielverbraucher.
+
+### 41.2 Vertrag gelesen, bevor Code entstand (Regel 8)
+
+win32 (`wx/win32/gauge.rkt`) und gtk (`wx/gtk/gauge.rkt`) verglichen: beide erwarten das
+Init-Signatur `parent label rng x y w h style font` (identisch zu button%/slider% nach
+dem `make-control%`-Glue-Layer) und implementieren nur vier Methoden: `get-range`/
+`set-range`/`get-value`/`set-value` — kein Callback, kein `command` (im Unterschied zu
+button%/check-box%/slider%, die alle interaktiv sind). win32 nutzt den nativen
+`msctls_progress32`-Common-Control direkt mit `PBM_SETRANGE32`/`PBM_SETPOS`; gtk nutzt
+`GtkProgressBar`, dessen API allerdings auf Bruchzahlen (0.0–1.0) statt Ganzzahlen
+arbeitet und deshalb Range/Value racket-seitig cacht, um bei jedem Set die Fraction neu
+zu berechnen.
+
+### 41.3 QProgressBar braucht keine Fraction-Umrechnung — einfacher als win32 *und* gtk
+
+`QProgressBar::setMinimum`/`setMaximum`/`setValue`/`value`/`maximum` sind bereits echte
+Ganzzahlen — genau wx' `0..range`-Vertrag, ohne Umrechnung. Anders als bei gtk muss
+Range/Value deshalb **nicht** Racket-seitig gecacht werden: `get-range`/`get-value`
+fragen den nativen Widget-Zustand direkt per Shim-Roundtrip ab. `setTextVisible(false)`
+schaltet Qts Standard-Prozent-Overlay ab, das wx' `gauge%` nie zeigt (weder win32 noch
+gtk rendern einen Text im Balken).
+
+### 41.4 Als eigene Datei, nicht inline in `platform.rkt`
+
+Anders als `cursor-driver%`/`clipboard-driver%` (dort bewusst inline, weil reine
+Stubs/kleine Hilfsklassen) folgt `gauge%` als jetzt **echte** Implementierung der
+Konvention aller anderen realen Widget-Klassen dieses Backends (`frame.rkt`,
+`button.rkt`, `slider.rkt`, `message.rkt`, …): eine eigene `wx/qt/gauge.rkt`-Datei, in
+`platform.rkt` nur noch requiret. `message.rkt` war die nähere Vorlage als `slider.rkt`
+(beide nicht-interaktiv, ein einzelnes natives Widget ohne Container/Label-Wrapper) —
+`slider.rkt` braucht seinen `panel-handle`-Wrapper nur wegen der separaten
+Zahlen-Anzeige, die `gauge%` gar nicht hat.
+
+### 41.5 Fünf neue Shim-Exporte (ABI-Änderung)
+
+`shim_gauge_create(parent, vertical, range, init_value)`, `shim_gauge_set_range`,
+`shim_gauge_get_range`, `shim_gauge_set_value`, `shim_gauge_get_value` — durchgängig
+`QProgressBar*`, kein Callback-Function-Pointer nötig (rein programmatisch gesteuert,
+nichts, worauf der Benutzer reagieren könnte).
+
+### 41.6 Verifikation
+
+- **`examples/gauge-probe.rkt`** (neu, committet): ein horizontaler und ein vertikaler
+  Gauge nebeneinander, ein `wait/pump`-Loop zählt beide synchron von 0 bis 20 hoch und
+  wieder von vorn. Log bestätigt `get-value`/`get-range` roundtrippen korrekt bei jedem
+  Tick. Screenshots bei zwei verschiedenen Ständen (früh: horizontal ~65 % gefüllt,
+  vertikal fast leer; spät: horizontal fast voll, vertikal fast voll) zeigen einen
+  echten, wachsenden blauen Balken in beiden Orientierungen — vorher zeichnete der Stub
+  überhaupt nichts.
+- **Regressions-Gate:** Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ ohne `PLT_QT`.
+- **DrRacket-Splash nicht gezielt eingefangen** — läuft auf dieser Maschine zu schnell
+  für Screenshot-Polling (5 Screenshots im ersten Sekundenbereich trafen alle bereits
+  das Hauptfenster/den Autosave-Recovery-Dialog). Kein Widerspruch zur Probe — der
+  Splash ist nur ein *Beispiel*-Verbraucher aus dem alten Stub-Kommentar, kein separat
+  zu verifizierender Vertrag; die isolierte Probe deckt denselben Code-Pfad ab.
+
+**Nur auf Windows implementiert/getestet.** macOS/Linux brauchen nach dem nächsten Pull
+einen `qt-shim`-Rebuild (fünf neue Exporte, zusätzlich zu §40s vier Cursor-Exporten,
+beide noch ausstehend auf beiden Maschinen).

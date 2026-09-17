@@ -5,6 +5,38 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-17 (Windows, 7) — `gauge%` implementiert (§41)
+
+**Kontext:** zweiter der vier seit §36 als Stub bekannten Punkte (nach `cursor-driver%`
+in der vorigen Session). Nutzerauftrag: `gauge%` implementieren.
+
+**Ergebnis: implementiert und verifiziert.** Echter `QProgressBar` statt reinem
+In-Memory-Stub. `QProgressBar`s Ganzzahl-`min`/`max`/`value`-API entspricht direkt wx'
+`0..range`-Vertrag — anders als gtk (Fraction-basiert 0.0–1.0) braucht Qt keine
+Umrechnung, `get-range`/`get-value` fragen den nativen Zustand live ab statt
+Racket-seitig zu cachen. Fünf neue Shim-Exporte, Windows-Build per `dumpbin`
+verifiziert. Neue eigene Datei `wx/qt/gauge.rkt` (Konvention aller echten
+Widget-Klassen dieses Backends — `cursor-driver%`/`clipboard-driver%` bleiben bewusst
+inline in `platform.rkt`, weil sie Stubs/kleine Hilfsklassen sind, `gauge%` ist jetzt
+keins von beidem mehr).
+
+**Verifiziert:** neue Probe `examples/gauge-probe.rkt` (horizontaler + vertikaler
+Gauge, ein Loop zählt beide synchron hoch) — Screenshots bei zwei Ständen zeigen einen
+echten, wachsenden blauen Balken in beiden Orientierungen. Smoke-Gate 3/3 mit
+`PLT_QT=1`, 3/3 nativ ohne `PLT_QT`. DrRacket-Splash (der im alten Stub-Kommentar
+genannte Beispielverbraucher) lief auf dieser Maschine zu schnell für
+Screenshot-Polling — kein Widerspruch, deckt denselben Code-Pfad ab wie die Probe.
+
+`racket-prefs.rktd` erneut durch DrRacket-Verifikationsläufe verändert (dieselbe
+harmlose Reihenfolge-Drift wie letzte Session) — aus dem Backup zurückgespielt, Hash
+identisch.
+
+**Nur auf Windows implementiert/getestet** — macOS/Linux brauchen den Shim-Rebuild
+(fünf neue Exporte, zusätzlich zu §40s vier Cursor-Exporten). Details:
+`docs/HACKING.md` §41.
+
+---
+
 ## Session 2026-09-17 (Windows, 6) — `cursor-driver%` implementiert (§40)
 
 **Kontext:** einer von vier seit §36 als Stub bekannten Punkten

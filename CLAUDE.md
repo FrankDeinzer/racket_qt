@@ -47,19 +47,22 @@ Qt Widgets backend ("wx/qt/") für `racket/gui`. Additiver Spike: aktiviert via 
 ## Build
 
 > **⚠ Offener Shim-Rebuild für macOS und Linux (Stand 2026-09-17, Windows erledigt).**
-> Fünf Fixes haben je neue Exporte eingeführt: `shim_window_set_resize_cb`
+> Sechs Fixes haben je neue Exporte eingeführt: `shim_window_set_resize_cb`
 > (`resizeEvent`-Fix, §32), `shim_canvas_set_wheel_cb` (Scroll-Block, §33),
 > `shim_clipboard_set_text`/`shim_clipboard_get_text`/`shim_clipboard_has_text`
-> (Zwischenablage, §36), `shim_menu_set_about_to_show_cb` (Menü-Enable-States, §37) und
+> (Zwischenablage, §36), `shim_menu_set_about_to_show_cb` (Menü-Enable-States, §37),
 > `shim_cursor_create_standard`/`shim_cursor_create_from_argb`/`shim_widget_set_cursor`/
-> `shim_widget_unset_cursor` (`cursor-driver%`, §40). Windows hat `qt-shim` zuletzt am
-> 2026-09-17 neu gebaut (alle zehn Exporte per `dumpbin` verifiziert). Linux war bis §37
-> aktuell, hat aber die vier §40-Cursor-Exporte noch **nicht** — braucht also jetzt
-> ebenfalls einen Rebuild, nicht nur macOS. Auf **beiden** Maschinen muss `qt-shim` nach
-> dem nächsten Pull noch **einmalig neu gebaut** werden — **ein** Rebuild deckt jeweils
-> alle ausstehenden Exporte ab. Ohne Rebuild schlägt schon das Laden des Forks fehl, laut
-> und sofort: `ffi-obj: could not find export … undefined symbol: shim_window_set_resize_cb`
-> (oder `shim_cursor_create_standard` auf Linux). Diesen Hinweis entfernen, sobald beide
+> `shim_widget_unset_cursor` (`cursor-driver%`, §40) und `shim_gauge_create`/
+> `shim_gauge_set_range`/`shim_gauge_get_range`/`shim_gauge_set_value`/
+> `shim_gauge_get_value` (`gauge%`, §41). Windows hat `qt-shim` zuletzt am 2026-09-17
+> neu gebaut (alle fünfzehn Exporte per `dumpbin` verifiziert). Linux war bis §37
+> aktuell, hat aber weder die vier §40-Cursor- noch die fünf §41-Gauge-Exporte —
+> braucht also jetzt ebenfalls einen Rebuild, nicht nur macOS. Auf **beiden** Maschinen
+> muss `qt-shim` nach dem nächsten Pull noch **einmalig neu gebaut** werden — **ein**
+> Rebuild deckt jeweils alle ausstehenden Exporte ab. Ohne Rebuild schlägt schon das
+> Laden des Forks fehl, laut und sofort: `ffi-obj: could not find export … undefined
+> symbol: shim_window_set_resize_cb` (oder `shim_cursor_create_standard`/
+> `shim_gauge_create` auf Linux). Diesen Hinweis entfernen, sobald beide
 > gebaut haben. Gleiche Klasse wie der §27-Rebuild.
 
 **Windows:**
@@ -360,11 +363,21 @@ Edit-Menü waren trotz aktiver Selektion durchgehend ausgegraut, deckte sich mit
 damals offenem Befund zu nicht nachgeführten Menü-Enable-States; **seit §37 (2026-09-16,
 gleicher Tag) gefixt**, GUI-Bedienung damit ebenfalls bestätigt. Scope bewusst nur Text — `get-bitmap-data`/
 `set-bitmap-data` bleiben No-op-Stubs. Nur auf Linux gefixt/getestet. Im selben Zug
-erhoben, drei von vier weiterhin offen, aus derselben Bestandsaufnahme:
-`gauge%` (`platform.rkt:96`, zeichnet nichts), `get-current-mouse-state`
-(`platform.rkt:192`, fest `(0,0)`), `printer-dc%` (`platform.rkt:115`, Drucken tut
-nichts) sind Stubs. Bestandsaufnahme aus dem Quelltext, nicht untersucht — Details und
-Tabelle: `docs/2026-09-14-4_report-linux.md`, Abschnitt „Nachtrag nach Abschluss".
+erhoben, zwei von vier weiterhin offen, aus derselben Bestandsaufnahme:
+`get-current-mouse-state` (`platform.rkt:192`, fest `(0,0)`), `printer-dc%`
+(`platform.rkt:115`, Drucken tut nichts) sind Stubs. Bestandsaufnahme aus dem
+Quelltext, nicht untersucht — Details und Tabelle: `docs/2026-09-14-4_report-linux.md`,
+Abschnitt „Nachtrag nach Abschluss".
+**`gauge%` implementiert, 2026-09-17, Windows (§41)** — echter `QProgressBar`, dessen
+Ganzzahl-`min`/`max`/`value`-API direkt wx' `0..range`-Vertrag entspricht (keine
+Fraction-Umrechnung wie bei gtk nötig, `get-range`/`get-value` fragen den nativen
+Zustand live ab statt Racket-seitig zu cachen). Fünf neue Shim-Exporte (ABI-Änderung,
+s. Build-Banner oben). Eigene `wx/qt/gauge.rkt`-Datei (Konvention aller echten
+Widget-Klassen dieses Backends), `message.rkt` als nähere Vorlage als `slider.rkt`
+(beide nicht-interaktiv, kein Container/Label-Wrapper nötig). Verifiziert: neue Probe
+`examples/gauge-probe.rkt` (horizontaler + vertikaler Gauge, per Screenshot bei zwei
+Ständen als echter, wachsender Balken bestätigt — vorher zeichnete der Stub gar
+nichts). Smoke 3/3 beide Wege. **Nur auf Windows implementiert/getestet.**
 **`cursor-driver%` implementiert, 2026-09-17, Windows (§40)** — echte Standard-Cursor
 (`Qt::CursorShape`, symbolisch per Namensstring aus Racket ausgewählt statt rohem Enum-
 Wert) plus `set-image`/`'bullseye` über eine ARGB-`QCursor(QPixmap, hotX, hotY)`, ohne

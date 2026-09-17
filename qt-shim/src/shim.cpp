@@ -10,6 +10,7 @@
 #include <QBoxLayout>
 #include <QVariant>
 #include <QSlider>
+#include <QProgressBar>
 #include <QTabBar>
 #include <QGroupBox>
 #include <QFrame>
@@ -1168,6 +1169,44 @@ void shim_slider_set_value(void* sl_ptr, int v)
 int shim_slider_get_value(void* sl_ptr)
 {
     return static_cast<QSlider*>(sl_ptr)->value();
+}
+
+// ---- gauge (gauge%) -------------------------------------------------------
+// QProgressBar's min/max/value are already plain integers matching wx
+// gauge%'s 0..range contract directly -- unlike gtk_progress_bar's
+// 0.0-1.0 fraction API, no unit conversion is needed on either side.
+// Purely visual/non-interactive: no changed callback, and the percentage
+// overlay QProgressBar shows by default is turned off since wx gauge% never
+// displays one.
+void* shim_gauge_create(void* parent_widget, int vertical, int range, int init_value)
+{
+    auto* parent = static_cast<QWidget*>(parent_widget);
+    auto* pb = new QProgressBar(parent);
+    pb->setOrientation(vertical ? Qt::Vertical : Qt::Horizontal);
+    pb->setTextVisible(false);
+    pb->setRange(0, range);
+    pb->setValue(init_value);
+    return pb;
+}
+
+void shim_gauge_set_range(void* g_ptr, int range)
+{
+    static_cast<QProgressBar*>(g_ptr)->setRange(0, range);
+}
+
+int shim_gauge_get_range(void* g_ptr)
+{
+    return static_cast<QProgressBar*>(g_ptr)->maximum();
+}
+
+void shim_gauge_set_value(void* g_ptr, int v)
+{
+    static_cast<QProgressBar*>(g_ptr)->setValue(v);
+}
+
+int shim_gauge_get_value(void* g_ptr)
+{
+    return static_cast<QProgressBar*>(g_ptr)->value();
 }
 
 // ---- scrollbar (canvas% do-set-scrollbars / manual scroll API) -----------
