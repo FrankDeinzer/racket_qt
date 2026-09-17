@@ -210,31 +210,37 @@ Details: `docs/HACKING.md` §38. **Als Lehre für künftige Sessions: `xdotool w
 nicht mehr als Ersatz für „Klick auf den nativen Schließen-Button" verwenden** — wie bei
 jeder anderen Widget-Interaktion (§21.10/§34.7) echte Klickkoordinaten aus der
 Fenstergeometrie ableiten und per `xdotool mousemove`+`click` simulieren.
-**Windows-Gegenprobe 2026-09-17 (2)** (`docs/2026-09-17-2_report-win.md`) hatte einen
-n=1-Befund gemeldet: nach echtem Klick auf den Schließen-Button und echtem Klick auf
-„Don't Save" blieb `DrRacket.exe` ohne sichtbares Fenster am Leben, gestützt allein auf
-`Process.Responding = True`. **In der Folgesitzung 2026-09-17 (3)
-(`docs/2026-09-17-3_report-win.md`) widerlegt/entwertet:** (1) `Process.Responding` ist
-für einen Prozess ganz ohne Fenster (`MainWindowHandle=0`) trivial `True` — der einzige
-Beleg des ursprünglichen Fundes war eine Nullaussage, kein Messwert. (2) Zwei bare-Proben
-(bare `frame%` mit echtem Klick; dieselbe Probe mit einer modalen Message-Box in
-`on-close`, analog zur §39-Teardown-Familie) schließen sauber. (3) Fünf gezielte
-Reproduktionsversuche an echtem DrRacket (drei frische Instanzen, eine mit aktiv
-abgefragter UIA-Accessibility-Bridge, eine mit vorangegangener Codeausführung) enden
-**5/5 mit sauberem Prozessende** — keiner reproduziert das Symptom. **Status jetzt: n=1,
-unbestätigt, nicht auf einen belegten Mechanismus zurückführbar** — weder bestätigt noch
-aktiv widerlegt, da die fünf Proben eine lange, interaktionsreiche Sitzung (wie sie den
-ursprünglichen Fund umgab) nicht nachstellen konnten. Einzig belegt: eine frühere Session
-endete tatsächlich hart (Autosave-Recovery-Dialog beim nächsten Start), das sagt aber
-nichts über den Mechanismus. **Die lange Live-Sitzung nachgeholt, 2026-09-17 (5)**
-(`docs/2026-09-17-5_report-win.md`): eine echte, ~20-minütige DrRacket-Instanz mit zwei
-Tabs, mehreren Run-Zyklen, Preferences (Colors-Tab + Style-&-Color-Names-Unterdialog) und
-menügeführtem Cross-Tab-Copy/Paste, am Ende über zwei separate „Don't Save"-Dialoge
-(einer pro Tab) geschlossen — **schließt sauber, 6/6 insgesamt**. Damit ist die
-Ein-Prozess-Variante des Fundes durchgetestet; **nicht abgedeckt bleibt die
-Mehrprozess-Form** aus `2026-09-17-2` (separate `racket`-Prozesse für Clipboard-/
-Teardown-/Scroll-Proben parallel zu einer laufenden DrRacket-Instanz) — dort liegt der
-nächste sinnvolle Schritt, falls der Befund noch einmal auftritt.
+**Windows: seit 2026-09-17 (7) reproduziert (4/4), Qt-spezifisch, root cause offen**
+(`docs/2026-09-17-7_report-win.md`). Vorgeschichte: `2026-09-17-2` meldete einen
+n=1-Befund (echter Klick auf Schließen + „Don't Save", `DrRacket.exe` blieb ohne
+sichtbares Fenster am Leben), gestützt allein auf `Process.Responding = True` — `2026-
+09-17 (3)` entwertete diesen Beleg (`Responding` ist für ein fensterloses Fenster
+trivial `True`) und fand in fünf gezielten Versuchen 5/5 saubere Exits; `2026-09-17 (5)`
+bestätigte das für eine lange, ~20-minütige Live-Sitzung (6/6 sauber), aber deckte nur
+die Ein-Prozess-Variante ab. **`2026-09-17 (7)` hat den offen gebliebenen
+Mehrprozess-Schritt nachgeholt und den Befund reproduziert:** vier Versuche (2× mit drei
+parallel laufenden/endenden `racket`-Probenprozessen neben der offenen DrRacket-Instanz,
+2× ganz ohne) zeigten **alle** denselben Zombie — **die Mehrprozess-Bedingung ist damit
+widerlegt als notwendige Ursache**, reproduziert auch im reinen Einzelprozess-Fall.
+Messung (zwei Versuche): CPU-Delta über 5 s = 0 ms, ein Thread, `WaitReason=UserRequest`
+— kein Hang an einer blockierenden Ressource, sondern ein Prozess, der im normalen
+Pump-Leerlauf weiterläuft, weil ihm nie gesagt wird, dass er beenden soll. **Nativer
+Kontrollversuch** (kein `PLT_QT`, identische Schließ-Methodik) beendete sich sauber in
+3 s — grenzt den Befund klar auf das **Qt-Backend** ein. Automatisierungshürde dieser
+Sitzung: echte Mausklicks trafen wiederholt das falsche Fenster (ein anderes Fenster
+stahl in dieser RDP-Sitzung wiederholt den Vordergrund zurück), daher `UIAutomation.
+InvokePattern.Invoke()` bzw. `WM_SYSCOMMAND`/`SC_CLOSE` statt echtem Klick verwendet —
+der native Kontrollversuch mit derselben Methodik spricht gegen ein Methodik-Artefakt,
+schließt einen Qt-spezifischen Unterschied zwischen echtem Klick und `SC_CLOSE` aber
+nicht hundertprozentig aus (einziger noch unkontrollierter Unterschied zu `-3`s 5/5
+sauberen Real-Klick-Versuchen). Nebenfund: jede Zombie-Instanz behielt ein zusätzliches
+`ConsoleWindowClass`-Fenster (Artefakt des `Start-Process`-Starts aus PowerShell, nicht
+von `wx/qt` erzeugt) — dessen Schließen beendete den Prozess (Windows'
+`CTRL_CLOSE_EVENT`-Default-Handler), ein normal per Doppelklick gestarteter Prozess hat
+dieses Sicherheitsnetz nicht. **Root cause nicht lokalisiert** — nur
+reproduziert/eingegrenzt, keine Code-Änderung; nächster Schritt für eine künftige
+Session: `wx/qt/frame.rkt`s `on-close`/`direct-show`-Kette gegen `register-frame-shown`
+prüfen.
 **gefixt 2026-07-14 (§22):**
 macOS-App-Menü-Eintrag an der „Preferences"-Stelle löste den falschen Callback aus
 (DrRackets Help-Menü-Punkt „Configure Command Line for Racket…" statt

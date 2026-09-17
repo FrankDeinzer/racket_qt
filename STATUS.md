@@ -5,6 +5,51 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-17 (Windows, 10) — Zombie-Prozess reproduziert und auf Qt-Backend eingegrenzt
+
+**Kontext:** letzter offener Punkt aus der `-3`-Session: der Windows-Zombie-Nebenbefund
+war in fünf Einzelprozess-Versuchen nicht reproduzierbar; die Mehrprozess-Form (parallele
+`racket`-Probenprozesse neben laufender DrRacket-Instanz) blieb ungetestet.
+
+**Ergebnis: 4/4 reproduziert, Qt-spezifisch, kein Hang.** Per `advisor()` korrigiertes
+Vorgehen: Prämisse geprüft (Mehrprozess in `-2` wahrscheinlich sequenziell, nicht
+parallel), Messkriterium vor dem ersten Versuch festgelegt (`Process.Responding` war in
+`-3` als Nullaussage entlarvt worden), Stop-Regel vorab (K=3). **Automatisierungshürde:**
+echte Mausklicks trafen wiederholt das falsche Fenster (ein anderes Fenster stahl in
+dieser RDP-Sitzung wiederholt den Vordergrund zurück, per `GetForegroundWindow()`
+bestätigt) — Fix: `UIAutomation.InvokePattern.Invoke()` auf den Button bzw.
+`WM_SYSCOMMAND`/`SC_CLOSE` für den Schließen-Knopf (dieselbe Nachricht wie ein echter
+Klick, nicht `WM_CLOSE` direkt).
+
+Vier Qt-Versuche (2× mit drei parallel laufenden/endenden Probenprozessen, 2× ganz ohne)
+zeigten **alle** denselben Zombie: Fenster/Warnungsdialog werden `vis=False`, Prozess
+bleibt am Leben. **Mehrprozess-Bedingung damit widerlegt als notwendige Ursache**
+(Versuch 3/4 ohne jede Begleit-Probe). Messung bei zwei Versuchen: CPU-Delta über 5 s =
+0 ms, ein Thread, `WaitReason=UserRequest` — **kein Hang an einer Ressource**, sondern ein
+Prozess, der im normalen Pump-Leerlauf weiterläuft, weil ihm nie gesagt wird, dass er
+beenden soll. **Nativer Kontrollversuch** (kein `PLT_QT`, identische Schließ-Methodik)
+beendete sich sauber in 3 s — grenzt den Befund klar auf das Qt-Backend ein und schließt
+aus, dass die synthetische Schließmethode selbst der Auslöser ist.
+
+**Nebenfund:** jede Zombie-Instanz behielt ein zusätzliches `ConsoleWindowClass`-Fenster
+(Artefakt des `Start-Process`-Starts aus PowerShell, nicht von `wx/qt` erzeugt) — dessen
+Schließen beendete den ganzen Prozess (vermutlich Windows' `CTRL_CLOSE_EVENT`-
+Default-Handler). Ein normal per Doppelklick gestarteter Prozess hat dieses
+Sicherheitsnetz nicht.
+
+**Root cause nicht lokalisiert** — nur reproduziert/eingegrenzt, keine Code-Änderung.
+Offen für künftige Session: `wx/qt/frame.rkt`s `on-close`/`direct-show`-Kette gegen
+`register-frame-shown` prüfen; ungeklärt, warum `-3`s fünf Real-Klick-Versuche 5/5 sauber
+blieben (einziger verbliebener Unterschied: `InvokePattern`/`SC_CLOSE` vs. echter Klick,
+in dieser Sitzung nicht fair testbar).
+
+`racket-prefs.rktd` vor der ersten Interaktion gesichert
+(`prefs-backup\racket-prefs.rktd.2026-09-17-7`), zwischen den Zyklen wiederholt
+zurückgespielt, am Ende Hash-verifiziert identisch. Details:
+`docs/2026-09-17-7_report-win.md`.
+
+---
+
 ## Session 2026-09-17 (Windows, 9) — `printer-dc%` implementiert (§43)
 
 **Kontext:** letzter der vier seit §36 als Stub bekannten Punkte (nach `cursor-driver%`,
