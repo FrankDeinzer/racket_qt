@@ -5,6 +5,45 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-17 (Windows, 2) — Gebündelter Cross-Platform-Sweep, restliche sechs Punkte
+
+**Kontext:** direkte Fortsetzung der vorigen Windows-Sitzung (kritischer Kern bereits
+erledigt). Nutzerentscheidung: alle sechs verbliebenen Punkte der „später zu
+validieren"-Liste in einem Zug abarbeiten.
+
+**Ergebnis — alle sechs PASS:**
+- §39 Teardown-Probe: Accept + Cancel je 1/1, kein Absturz.
+- §36 Zwischenablage cross-process: beide Richtungen 1/1 (`racket`↔PowerShell
+  `Get-Clipboard`/`Set-Clipboard`, natives OLE-Clipboard).
+- §33 Mausrad: Richtung korrekt, Schrittweite sinnvoll (~15 px/Notch).
+- §34 Colors → Color Schemes: alle drei Buttons nach Scrollen sichtbar **und**
+  klickbar (echter Klick öffnete Folgedialog).
+- §31 Preferences-Button-Zeile: initial erreichbar bei 1076×773.
+- §37 Menü-Enable-States: Edit-Menü Copy/Cut und Tabs-Menü Previous/Next Tab beide
+  Übergänge bestätigt (per UI Automation `IsEnabled` gelesen, nicht nur visuell).
+
+**Methodik-Neuerung:** `System.Windows.Automation` (UIAutomationClient/-Types) liefert
+unter Windows einen vollständigen Qt-Accessibility-Baum — exakte Klick-Koordinaten aus
+`BoundingRectangle`, Enable-States direkt aus `IsEnabled`, Scrollbar-Sprung über
+`RangeValuePattern.SetValue`. Eine Falle: `IsOffscreen` ist bei Scroll-Clipping
+unzuverlässig (meldete `False` für tatsächlich verdeckte Buttons) — Screenshot bleibt
+nötig, um Sichtbarkeit wirklich zu verifizieren.
+
+**Nebenbefund:** Zombie-Prozess beim Schließen des letzten Fensters jetzt mit einem
+echten Klick (nicht nur Automatisierung) auf Windows reproduziert — widerspricht der
+Linux-Auflösung (dort behebt ein echter Klick das Symptom). Nicht root-caused, eigene
+künftige Session.
+
+`racket-prefs.rktd` gesichert/gehasht vor der Sitzung, am Ende zurückgespielt und Hash
+verifiziert (identisch). `git status` beider Repos am Ende sauber. **Kein Push in
+dieser Sitzung** (Nutzervorgabe — lokal committet, Push nach Rückfrage der
+Hauptsitzung). Details: `docs/2026-09-17-2_report-win.md`.
+
+Damit ist die ursprüngliche elfteilige „später zu validieren"-Liste für Windows
+vollständig abgearbeitet. Offen bleibt der komplette macOS-Sweep.
+
+---
+
 ## Session 2026-09-17 (Windows) — Gebündelter Cross-Platform-Sweep, kritischer Kern
 
 **Kontext:** Fortsetzung von `docs/2026-09-13_prompt.md` — Linux hatte den Cluster-1-Block
