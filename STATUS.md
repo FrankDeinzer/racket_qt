@@ -5,6 +5,35 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-17 (Windows, 3) — Zombie-Prozess-Nebenbefund nicht reproduzierbar
+
+**Kontext:** Fortsetzung des Nebenbefunds aus der vorigen Sitzung
+(`docs/2026-09-17-2_report-win.md`): DrRacket blieb nach echtem Klick auf
+Schließen-Button + „Don't Save" angeblich als Zombie-Prozess am Leben. Auftrag:
+root-causen.
+
+**Ergebnis: nicht reproduzierbar, ursprünglicher Beleg entwertet.** Zwei bare-Proben
+(`frame%` ohne/mit modaler Message-Box in `on-close`, mimickt die §39-Teardown-Familie)
+schließen beide sauber. Fünf gezielte Versuche an echtem DrRacket (3× frisch, 1× mit
+aktiv abgefragter UIA-Accessibility-Bridge, 1× mit vorangegangener Codeausführung)
+enden **5/5 mit sauberem Prozessende**. Entscheidender Gegencheck: `Process.Responding`
+ist für einen Prozess ohne sichtbares Fenster (`MainWindowHandle=0`) trivial `True` —
+der einzige Beleg des ursprünglichen n=1-Fundes war eine Nullaussage, kein Messwert.
+
+**Einordnung:** weder bestätigt noch aktiv widerlegt — die fünf Proben stellen keine
+lange, interaktionsreiche Sitzung nach, wie sie den ursprünglichen Fund umgab (der als
+beiläufige Beobachtung am Ende eines langen Sweeps auftrat). Ein Autosave-Recovery-Dialog
+beim ersten Start dieser Sitzung belegt, dass eine frühere Session tatsächlich hart
+beendet wurde — sagt aber nichts über den Mechanismus. Nächster Schritt: Reproduktion in
+einer echten langen Live-Sitzung statt einer rekonstruierten kurzen Sequenz.
+
+`racket-prefs.rktd` gesichert/gehasht vor der Sitzung, am Ende zurückgespielt und Hash
+verifiziert (identisch). Keine Code-Änderung. `CLAUDE.md`-Zombie-Absatz korrigiert (nicht
+nur ergänzt) — Status auf „n=1, unbestätigt" zurückgestuft. Details:
+`docs/2026-09-17-3_report-win.md`.
+
+---
+
 ## Session 2026-09-17 (Windows, 2) — Gebündelter Cross-Platform-Sweep, restliche sechs Punkte
 
 **Kontext:** direkte Fortsetzung der vorigen Windows-Sitzung (kritischer Kern bereits

@@ -198,14 +198,24 @@ Details: `docs/HACKING.md` §38. **Als Lehre für künftige Sessions: `xdotool w
 nicht mehr als Ersatz für „Klick auf den nativen Schließen-Button" verwenden** — wie bei
 jeder anderen Widget-Interaktion (§21.10/§34.7) echte Klickkoordinaten aus der
 Fenstergeometrie ableiten und per `xdotool mousemove`+`click` simulieren.
-**Windows-Gegenprobe 2026-09-17 (2)** (`docs/2026-09-17-2_report-win.md`): mit einem
-echten Klick auf den Schließen-Button (kein Tastatur-/Simulations-Shortcut) und einem
-echten Klick auf „Don't Save" blieb der `DrRacket.exe`-Prozess ohne sichtbares Fenster
-am Leben, `Process.Responding = True` (kein Hänger). **Widerspricht der Linux-Auflösung
-oben** (dort behob ein echter Klick das Symptom, n=3/3) — auf Windows bleibt der
-Zombie-Zustand auch bei echtem Klick bestehen. Nicht root-caused (außerhalb des
-Sitzungsumfangs), aber jetzt eine belastbarere, nicht auf ein Automatisierungsartefakt
-zurückführbare Windows-Beobachtung — eigene künftige Session.
+**Windows-Gegenprobe 2026-09-17 (2)** (`docs/2026-09-17-2_report-win.md`) hatte einen
+n=1-Befund gemeldet: nach echtem Klick auf den Schließen-Button und echtem Klick auf
+„Don't Save" blieb `DrRacket.exe` ohne sichtbares Fenster am Leben, gestützt allein auf
+`Process.Responding = True`. **In der Folgesitzung 2026-09-17 (3)
+(`docs/2026-09-17-3_report-win.md`) widerlegt/entwertet:** (1) `Process.Responding` ist
+für einen Prozess ganz ohne Fenster (`MainWindowHandle=0`) trivial `True` — der einzige
+Beleg des ursprünglichen Fundes war eine Nullaussage, kein Messwert. (2) Zwei bare-Proben
+(bare `frame%` mit echtem Klick; dieselbe Probe mit einer modalen Message-Box in
+`on-close`, analog zur §39-Teardown-Familie) schließen sauber. (3) Fünf gezielte
+Reproduktionsversuche an echtem DrRacket (drei frische Instanzen, eine mit aktiv
+abgefragter UIA-Accessibility-Bridge, eine mit vorangegangener Codeausführung) enden
+**5/5 mit sauberem Prozessende** — keiner reproduziert das Symptom. **Status jetzt: n=1,
+unbestätigt, nicht auf einen belegten Mechanismus zurückführbar** — weder bestätigt noch
+aktiv widerlegt, da die fünf Proben eine lange, interaktionsreiche Sitzung (wie sie den
+ursprünglichen Fund umgab) nicht nachstellen konnten. Einzig belegt: eine frühere Session
+endete tatsächlich hart (Autosave-Recovery-Dialog beim nächsten Start), das sagt aber
+nichts über den Mechanismus. Nächster sinnvoller Schritt: Reproduktion in einer echten,
+langen Live-Sitzung statt einer rekonstruierten kurzen Sequenz.
 **gefixt 2026-07-14 (§22):**
 macOS-App-Menü-Eintrag an der „Preferences"-Stelle löste den falschen Callback aus
 (DrRackets Help-Menü-Punkt „Configure Command Line for Racket…" statt
