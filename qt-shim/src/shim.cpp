@@ -33,6 +33,9 @@
 #include <QEnterEvent>
 #include <QClipboard>
 #include <QMimeData>
+#include <QCursor>
+#include <QPixmap>
+#include <QString>
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
@@ -573,6 +576,71 @@ void shim_widget_get_size_hint(void* widget, int* out_w, int* out_h)
     QSize s = static_cast<QWidget*>(widget)->sizeHint();
     *out_w = s.width();
     *out_h = s.height();
+}
+
+// ---- cursor ---------------------------------------------------------------
+// wx/qt/platform.rkt's cursor-driver% names the shape by string (not a raw
+// Qt::CursorShape int) so the enum mapping lives in one place, symbolically,
+// instead of two backends agreeing on magic numbers (contrast gtk/cursor.rkt's
+// own "ugly!"-flagged raw GDK_* constants).
+void* shim_cursor_create_standard(const char* name)
+{
+    QString s = QString::fromUtf8(name);
+    Qt::CursorShape shape = Qt::ArrowCursor;
+    if      (s == "arrow")       shape = Qt::ArrowCursor;
+    else if (s == "cross")       shape = Qt::CrossCursor;
+    else if (s == "hand")        shape = Qt::PointingHandCursor;
+    else if (s == "ibeam")       shape = Qt::IBeamCursor;
+    else if (s == "watch")       shape = Qt::WaitCursor;
+    else if (s == "blank")       shape = Qt::BlankCursor;
+    else if (s == "size-n/s")    shape = Qt::SizeVerCursor;
+    else if (s == "size-e/w")    shape = Qt::SizeHorCursor;
+    else if (s == "size-ne/sw")  shape = Qt::SizeBDiagCursor;
+    else if (s == "size-nw/se")  shape = Qt::SizeFDiagCursor;
+    else if (s == "arrow+watch") shape = Qt::BusyCursor;
+    return new QCursor(shape);
+}
+
+// Custom-image cursor (cursor-driver%'s set-image, and the 'bullseye standard
+// shape Qt has no native equivalent for). `src` is exactly the byte layout
+// bitmap%'s get-argb-pixels already produces (A,R,G,B per pixel, tightly
+// packed, no stride padding) -- same convention as shim_canvas_blit_argb
+// below, just without that function's cairo-surface stride parameter, since
+// this buffer is never a cairo surface.
+void* shim_cursor_create_from_argb(const uint8_t* src, int w, int h, int hot_x, int hot_y)
+{
+    QImage img(w, h, QImage::Format_ARGB32_Premultiplied);
+    for (int y = 0; y < h; y++) {
+        auto*          dst_row = reinterpret_cast<uint32_t*>(img.scanLine(y));
+        const uint8_t* src_row = src + (std::ptrdiff_t)y * w * 4;
+        for (int x = 0; x < w; x++) {
+            uint8_t a = src_row[x * 4 + 0];
+            uint8_t r = src_row[x * 4 + 1];
+            uint8_t g = src_row[x * 4 + 2];
+            uint8_t b = src_row[x * 4 + 3];
+            dst_row[x] = (uint32_t(a) << 24)
+                       | (uint32_t(r) << 16)
+                       | (uint32_t(g) <<  8)
+                       |  uint32_t(b);
+        }
+    }
+    return new QCursor(QPixmap::fromImage(img), hot_x, hot_y);
+}
+
+// QWidget::setCursor() copies the QCursor by value, so the heap-allocated
+// QCursor from the two functions above is never freed here -- matching
+// win32's un-freed HCURSOR/gtk's un-freed GdkCursor (docs/HACKING.md's
+// "Shim bleibt minimal" -- neither existing backend tracks cursor lifetime,
+// and cursor-driver% instances are cached forever by wx/common/cursor.rkt's
+// `standards` hash, so this leaks at most once per distinct symbol/image).
+void shim_widget_set_cursor(void* widget, void* cursor)
+{
+    static_cast<QWidget*>(widget)->setCursor(*static_cast<QCursor*>(cursor));
+}
+
+void shim_widget_unset_cursor(void* widget)
+{
+    static_cast<QWidget*>(widget)->unsetCursor();
 }
 
 // ---- canvas -------------------------------------------------------------

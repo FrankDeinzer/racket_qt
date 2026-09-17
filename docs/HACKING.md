@@ -4653,3 +4653,111 @@ spätere Session). Crash A (der zweite, seltenere §19-Nebenbefund, `arity misma
 beim allerersten Interaktionsversuch) bleibt unberührt — anderer Codepfad
 (`wx/common/queue.rkt`s `pre-event-sync`-Boundary vs. hier `deleteLater()`/Exit-Timing),
 nicht Teil dieser Session.
+
+## 40. `cursor-driver%` implementiert — vierter der vier Stubs aus der §36-Bestandsaufnahme (Windows, 2026-09-17)
+
+### 40.1 Auftrag
+
+`cursor-driver%` (`wx/qt/platform.rkt`) war seit dem Spike-Anfang ein reiner No-op-Stub
+(`set-standard`/`set-image` tun nichts, `get-handle` liefert immer `#f`) — Teil der
+§36-Bestandsaufnahme „weiterhin offen" neben `gauge%`, `get-current-mouse-state`,
+`printer-dc%`. Sichtbares Symptom: kein I-Beam über Text, kein Warte-Cursor, keine
+Resize-Pfeile — überall nur der Standard-Pfeil.
+
+### 40.2 Vertrag gelesen, bevor Code entstand (Regel 8)
+
+`wx/common/cursor.rkt`s `cursor%` (backend-unabhängig, alle drei etablierten Backends
+teilen sich diese Datei) ruft auf einem frisch erzeugten `cursor-driver%`:
+`set-standard sym` (für die zwölf Symbole aus dessen `case-args`:
+`arrow bullseye cross hand ibeam watch blank size-n/s size-e/w size-ne/sw size-nw/se
+arrow+watch`) oder `set-image image mask hot-spot-x hot-spot-y` (für einen
+benutzerdefinierten 16×16-Monochrom-Cursor), dazu `ok?`. `wx/qt/window.rkt`s
+`set-cursor` (der eigentliche Konsument) braucht zusätzlich `get-handle`. win32/gtk/
+cocoa-Vorbild verglichen (`wx/win32/cursor.rkt`, `wx/gtk/cursor.rkt`) — beide bauen für
+`'bullseye` denselben `wx/common/cursor-draw.rkt`-Bitmap-Pfad (`make-cursor-image
+draw-bullseye`), Rest sind native Plattform-Cursor-Konstanten.
+
+### 40.3 Architektur-Entscheidung: Qt macht die Kaskade selbst
+
+win32 (`window.rkt:526-546`) und gtk (`window.rkt:780-793`) tragen je ein eigenes,
+mehrzeiliges Cursor-Kaskade-System (`mouse-in?`, `cursor-updated-here`,
+`reset-cursor-in-child`, `set-window-cursor`/`set-parent-window-cursor`) — nötig, weil
+HWND-Fenstermeldungen (`WM_SETCURSOR`) bzw. GDK-Fenster pro Widget-Baum manuell verwaltet
+werden müssen. `QWidget::setCursor()`/`unsetCursor()` übernehmen genau das bereits nativ:
+ein Kind ohne eigenen Cursor erbt automatisch den des Eltern-Widgets, und beim Verlassen
+wird automatisch zurückgeschaltet — **gemessen, nicht angenommen** (§40.6, Toolbar-Check).
+`wx/qt/window.rkt`s `set-cursor` ist deshalb nur ein direkter Shim-Aufruf, `reset-cursor`
+bleibt bewusst `(void)` (kein Shared-Code-Aufrufer außerhalb von win32/gtk selbst,
+geprüft per Grep vor der Implementierung).
+
+### 40.4 QCursor statt AND/XOR-Maske — win32s `set-image`-Komplexität entfällt
+
+win32 baut für einen Custom-Cursor ein AND/XOR-Bitmasken-Paar für `CreateCursor`, weil
+`HCURSOR` monochrome Bitmasken erwartet. `QCursor(QPixmap, hotX, hotY)` nimmt eine echte
+ARGB-Pixmap mit Alphakanal — **kein Masken-Dance nötig**. `image->argb-handle` (neu,
+`platform.rkt`) ruft `bitmap%.get-argb-pixels` exakt nach dem win32-Muster auf (Farbe aus
+`image`, Alpha aus `mask` oder — falls kein Mask übergeben — aus `image` selbst, zweiter
+Aufruf mit `get-alpha?=#t`) und reicht den resultierenden Byte-String direkt an eine neue
+Shim-Funktion durch. Das Byte-Layout (A,R,G,B pro Pixel, dicht gepackt) ist exakt das, was
+`get-argb-pixels` ohnehin liefert und was `shim_canvas_blit_argb` bereits erwartet — keine
+neue Konvention.
+
+### 40.5 Vier neue Shim-Exporte (ABI-Änderung)
+
+- `shim_cursor_create_standard(const char* name) -> QCursor*` — Name statt rohem
+  `Qt::CursorShape`-Integer, damit die Enum-Zuordnung symbolisch in C++ bleibt (`s ==
+  "arrow"` → `Qt::ArrowCursor` usw.) statt als Magic-Number auf beiden Seiten der FFI-
+  Grenze synchron gehalten werden zu müssen (Gegenbeispiel, bewusst nicht kopiert:
+  gtk/cursor.rkt hardcodet rohe `GDK_ARROW = 2`-Konstanten, selbst als „ugly!" markiert).
+- `shim_cursor_create_from_argb(src, w, h, hot_x, hot_y) -> QCursor*` — für `'bullseye`
+  und jeden benutzerdefinierten `set-image`-Cursor.
+- `shim_widget_set_cursor(widget, cursor)` / `shim_widget_unset_cursor(widget)` —
+  `QWidget::setCursor()`/`unsetCursor()`.
+
+Die beiden `create`-Funktionen geben einen `new QCursor(...)` nie wieder frei —
+`setCursor()` kopiert den Wert, und `cursor-driver%`-Instanzen werden von
+`wx/common/cursor.rkt`s `standards`-Hash ohnehin für die Prozesslaufzeit gecacht.
+Entspricht win32s nie freigegebenem `HCURSOR` aus `CreateCursor` und gtks nie
+freigegebenem `GdkCursor` — kein neues Leck-Muster, sondern dieselbe bestehende
+Konvention aller drei etablierten Backends.
+
+### 40.6 Ein echter, nicht offensichtlicher Bug unterwegs gefunden: `get-driver` ist ein lokaler Member-Name
+
+Erster Testlauf (`examples/cursor-probe.rkt`, `(send c set-cursor (make-object cursor%
+sym))`) schlug fehl: `send: no such method / method name: get-driver / class name:
+cursor%` — **obwohl** `wx/common/cursor.rkt` `(define/public (get-driver) driver)`
+sichtbar definiert. Root-Cause: `wx/common/local.rkt` deklariert `get-driver` als
+`define-local-member-name` (`protect-out`et) — ein Racket-Mechanismus, der einen
+Methodennamen an die Modul-Identität bindet, nicht an den String. Code, der `get-driver`
+aufrufen will, braucht die tatsächliche Bindung im Scope (`(require ".../local.rkt")`),
+sonst adressiert `send` einen anderen, gleichnamigen aber nicht existierenden Slot.
+win32/gtk/cocoa's `window.rkt` requiren `"../common/local.rkt"` bereits — `wx/qt/
+window.rkt` tat das nie (nie gebraucht, solange `cursor-driver%` ein No-op war). Fix:
+ein `(require "../common/local.rkt")` in `wx/qt/window.rkt` ergänzt. Ohne dieses Detail
+hätte die Implementierung isoliert (über `get-handle`/`shim_widget_set_cursor` direkt)
+funktioniert, aber jeder echte Aufruf über die öffentliche `set-cursor`-API wäre mit
+genau diesem Fehler abgestürzt — **gefunden durch Testen, nicht durch Lesen.**
+
+### 40.7 Verifikation
+
+- **`examples/cursor-probe.rkt`** (neu, committet): zwölf nebeneinander liegende
+  Canvases, je ein Standard-Cursor, plus ein Canvas mit selbstgebautem 16×16-Plus-Bitmap
+  (`set-image`-Pfad). Per echtem `SetCursorPos` über jedes Canvas gefahren, Screenshot
+  mit eingezeichnetem System-Cursor (`GetCursorInfo`+`DrawIcon`, da `CopyFromScreen`
+  den Cursor selbst nicht mitfotografiert) — visuell bestätigt: `arrow`, `cross`, `hand`
+  (echte Zeigehand), `ibeam`, `bullseye` (das selbstgezeichnete Doppelkreis-Bitmap,
+  korrekt via ARGB-Pfad), `blank` (kein sichtbarer Cursor), `size-ne/sw` (diagonaler
+  Resize-Pfeil), und der eigene Plus-Bitmap-Cursor — alle korrekt.
+- **Echtes DrRacket** (`PLT_QT=1`): Definitions-Pane zeigt jetzt einen echten I-Beam
+  (auf weißem Hintergrund nur im gezoomten Screenshot sichtbar, aber eindeutig ein
+  I-Beam, kein Pfeil) — vorher zeigte diese Fläche durchgehend den Standard-Pfeil.
+  Toolbar-Bereich direkt daneben zeigt weiterhin den normalen Pfeil — bestätigt §40.3s
+  Kaskade-Annahme empirisch, nicht nur laut Qt-Doku.
+- **Regressions-Gate:** Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ ohne `PLT_QT` — keine
+  Divergenz durch die vier neuen additiven Shim-Exporte.
+
+**Nur auf Windows implementiert/getestet.** macOS/Linux brauchen nach dem nächsten Pull
+einen `qt-shim`-Rebuild (vier neue Exporte, wie jeder vorige ABI-Fund) — reiht sich in
+den bestehenden Rebuild-Hinweis (§32/§33/§36/§37) ein. Bild-Cursor (Farbcursor mit >2
+Farben) nicht Teil des Kontrakts (`is-16x16?` erzwingt monochrom für die öffentliche
+`(new cursor% ...)`-API) — keine Lücke, sondern deckungsgleich mit win32/gtk/cocoa.

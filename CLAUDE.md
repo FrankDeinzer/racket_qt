@@ -46,17 +46,21 @@ Qt Widgets backend ("wx/qt/") für `racket/gui`. Additiver Spike: aktiviert via 
 
 ## Build
 
-> **⚠ Offener Shim-Rebuild für macOS (Stand 2026-09-17, Windows erledigt).**
-> Vier Fixes haben je neue Exporte eingeführt: `shim_window_set_resize_cb`
+> **⚠ Offener Shim-Rebuild für macOS und Linux (Stand 2026-09-17, Windows erledigt).**
+> Fünf Fixes haben je neue Exporte eingeführt: `shim_window_set_resize_cb`
 > (`resizeEvent`-Fix, §32), `shim_canvas_set_wheel_cb` (Scroll-Block, §33),
 > `shim_clipboard_set_text`/`shim_clipboard_get_text`/`shim_clipboard_has_text`
-> (Zwischenablage, §36) und `shim_menu_set_about_to_show_cb` (Menü-Enable-States, §37).
-> Windows hat `qt-shim` am 2026-09-17 neu gebaut (alle sechs Exporte per `dumpbin`
-> verifiziert), Linux war bereits gebaut. Auf **macOS** muss `qt-shim` nach dem nächsten
-> Pull noch **einmalig neu gebaut** werden — **ein** Rebuild deckt alle vier ab.
-> Ohne Rebuild schlägt schon das Laden des Forks fehl, laut und sofort: `ffi-obj: could
-> not find export … undefined symbol: shim_window_set_resize_cb`. Diesen Hinweis
-> entfernen, sobald auch macOS gebaut hat. Gleiche Klasse wie der §27-Rebuild.
+> (Zwischenablage, §36), `shim_menu_set_about_to_show_cb` (Menü-Enable-States, §37) und
+> `shim_cursor_create_standard`/`shim_cursor_create_from_argb`/`shim_widget_set_cursor`/
+> `shim_widget_unset_cursor` (`cursor-driver%`, §40). Windows hat `qt-shim` zuletzt am
+> 2026-09-17 neu gebaut (alle zehn Exporte per `dumpbin` verifiziert). Linux war bis §37
+> aktuell, hat aber die vier §40-Cursor-Exporte noch **nicht** — braucht also jetzt
+> ebenfalls einen Rebuild, nicht nur macOS. Auf **beiden** Maschinen muss `qt-shim` nach
+> dem nächsten Pull noch **einmalig neu gebaut** werden — **ein** Rebuild deckt jeweils
+> alle ausstehenden Exporte ab. Ohne Rebuild schlägt schon das Laden des Forks fehl, laut
+> und sofort: `ffi-obj: could not find export … undefined symbol: shim_window_set_resize_cb`
+> (oder `shim_cursor_create_standard` auf Linux). Diesen Hinweis entfernen, sobald beide
+> gebaut haben. Gleiche Klasse wie der §27-Rebuild.
 
 **Windows:**
 ```powershell
@@ -356,12 +360,29 @@ Edit-Menü waren trotz aktiver Selektion durchgehend ausgegraut, deckte sich mit
 damals offenem Befund zu nicht nachgeführten Menü-Enable-States; **seit §37 (2026-09-16,
 gleicher Tag) gefixt**, GUI-Bedienung damit ebenfalls bestätigt. Scope bewusst nur Text — `get-bitmap-data`/
 `set-bitmap-data` bleiben No-op-Stubs. Nur auf Linux gefixt/getestet. Im selben Zug
-erhoben (weiterhin offen, aus derselben Bestandsaufnahme):
-`cursor-driver%` (`platform.rkt:164`, kein I-Beam/Warte-Cursor), `gauge%`
-(`platform.rkt:96`, zeichnet nichts), `get-current-mouse-state` (`platform.rkt:192`,
-fest `(0,0)`), `printer-dc%` (`platform.rkt:115`, Drucken tut nichts) sind ebenfalls
-Stubs. Bestandsaufnahme aus dem Quelltext, nicht untersucht — Details und Tabelle:
-`docs/2026-09-14-4_report-linux.md`, Abschnitt „Nachtrag nach Abschluss".
+erhoben, drei von vier weiterhin offen, aus derselben Bestandsaufnahme:
+`gauge%` (`platform.rkt:96`, zeichnet nichts), `get-current-mouse-state`
+(`platform.rkt:192`, fest `(0,0)`), `printer-dc%` (`platform.rkt:115`, Drucken tut
+nichts) sind Stubs. Bestandsaufnahme aus dem Quelltext, nicht untersucht — Details und
+Tabelle: `docs/2026-09-14-4_report-linux.md`, Abschnitt „Nachtrag nach Abschluss".
+**`cursor-driver%` implementiert, 2026-09-17, Windows (§40)** — echte Standard-Cursor
+(`Qt::CursorShape`, symbolisch per Namensstring aus Racket ausgewählt statt rohem Enum-
+Wert) plus `set-image`/`'bullseye` über eine ARGB-`QCursor(QPixmap, hotX, hotY)`, ohne
+win32s AND/XOR-Masken-Komplexität. Vier neue Shim-Exporte (ABI-Änderung, s. Build-Banner
+oben). Dabei ein echter, nicht offensichtlicher Bug gefunden und gefixt: `wx/qt/
+window.rkt` fehlte `(require "../common/local.rkt")` — `get-driver` ist ein
+`define-local-member-name` (an die Modul-Identität gebunden, nicht an den Methodennamen-
+String), ohne diesen Require schlägt jeder Aufruf über die öffentliche `set-cursor`-API
+mit `send: no such method` fehl, obwohl `wx/common/cursor.rkt` die Methode sichtbar
+`define/public` definiert — win32/gtk/cocoa requiren `local.rkt` bereits, `wx/qt` tat es
+nie (nie gebraucht, solange der Stub ein No-op war). Verifiziert: neue Probe
+`examples/cursor-probe.rkt` (zwölf Standard-Cursor + ein selbstgebauter Bitmap-Cursor,
+per echtem `SetCursorPos` und `GetCursorInfo`+`DrawIcon`-Screenshot visuell bestätigt),
+echtes DrRacket zeigt jetzt einen I-Beam über der Definitions-Pane (vorher durchgehend
+Pfeil) und fällt beim Verlassen automatisch auf den Pfeil zurück — bestätigt, dass Qts
+native `QWidget::setCursor()`-Kaskade win32/gtks manuelle `mouse-in?`/`reset-cursor-in-
+child`-Buchführung überflüssig macht. Smoke 3/3 beide Wege. **Nur auf Windows
+implementiert/getestet** — macOS/Linux brauchen den Shim-Rebuild (s. Build-Banner).
 
 Die übereinander gezeichneten Toolbar-Controls (`Untitled`/`Undock`) sind **2026-09-14
 gefixt (§35)** — Nativ-Gate bestand, Ursache war der unter Qt nie beachtete Fensterstil

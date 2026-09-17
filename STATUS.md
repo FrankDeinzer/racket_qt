@@ -5,6 +5,45 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-17 (Windows, 6) — `cursor-driver%` implementiert (§40)
+
+**Kontext:** einer von vier seit §36 als Stub bekannten Punkten
+(`cursor-driver%`/`gauge%`/`get-current-mouse-state`/`printer-dc%`). Nutzerauftrag:
+`cursor-driver%` implementieren.
+
+**Ergebnis: implementiert und verifiziert.** Standard-Cursor über `Qt::CursorShape`
+(Name statt rohem Enum-Wert, symbolisch in C++ aufgelöst), `set-image`/`'bullseye` über
+eine ARGB-`QCursor(QPixmap, hotX, hotY)` — kein AND/XOR-Masken-Aufwand wie bei win32.
+Vier neue Shim-Exporte (`shim_cursor_create_standard`, `shim_cursor_create_from_argb`,
+`shim_widget_set_cursor`, `shim_widget_unset_cursor`), Windows-Build verifiziert per
+`dumpbin`. `wx/qt/window.rkt`s `set-cursor` ist nur ein direkter Shim-Aufruf — Qt
+kaskadiert Cursor an Kind-Widgets und beim Mausverlassen bereits nativ, win32/gtks
+manuelle Buchführung (`mouse-in?`, `reset-cursor-in-child` etc.) entfällt komplett.
+
+**Ein echter Bug unterwegs gefunden:** `get-driver` (auf `cursor%`) ist ein
+`define-local-member-name` — `wx/qt/window.rkt` fehlte der nötige `(require
+"../common/local.rkt")`, den win32/gtk/cocoa längst haben. Ohne den Fix schlägt jeder
+Aufruf über die öffentliche `set-cursor`-API mit `send: no such method` fehl, obwohl die
+Methode sichtbar `define/public` ist — gefunden durch tatsächliches Testen mit einer
+neuen Probe, nicht durch Code-Lesen allein.
+
+**Verifiziert:** neue Probe `examples/cursor-probe.rkt` (zwölf Standard-Cursor + ein
+selbstgebauter 16×16-Bitmap-Cursor), visuell per echtem `SetCursorPos` +
+`GetCursorInfo`/`DrawIcon`-Screenshot bestätigt — alle korrekt. Echtes DrRacket: die
+Definitions-Pane zeigt jetzt einen echten I-Beam-Cursor (vorher durchgehend Pfeil),
+Toolbar daneben bleibt beim Pfeil. Smoke-Gate 3/3 mit `PLT_QT=1`, 3/3 nativ ohne
+`PLT_QT`.
+
+`racket-prefs.rktd` war durch die DrRacket-Verifikationsläufe verändert (harmlose
+Reihenfolge-/Cache-Drift, keine echte Korruption) — aus dem letzten bekannten Backup
+zurückgespielt, Hash danach identisch. Lehre für künftige Sessions: Backup **vor** jedem
+Start von DrRacket ziehen, auch wenn die Session als reine Coding-Session beginnt.
+
+**Nur auf Windows implementiert/getestet** — macOS/Linux brauchen den Shim-Rebuild (vier
+neue Exporte, s. `CLAUDE.md`-Build-Banner). Details: `docs/HACKING.md` §40.
+
+---
+
 ## Session 2026-09-17 (Windows, 5) — Zombie-Befund: lange Live-Sitzung getestet, weiterhin unbestätigt
 
 **Kontext:** Lücke aus `docs/2026-09-17-3_report-win.md` schließen — eine echte lange,
