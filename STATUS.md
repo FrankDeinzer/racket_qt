@@ -5,6 +5,32 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-17 (Windows, 5) — Zombie-Befund: lange Live-Sitzung getestet, weiterhin unbestätigt
+
+**Kontext:** Lücke aus `docs/2026-09-17-3_report-win.md` schließen — eine echte lange,
+interaktionsreiche DrRacket-Sitzung fahren statt einer kurzen rekonstruierten Sequenz.
+
+**Ergebnis: sauberer Exit, 6/6 insgesamt.** Eine reale DrRacket-Instanz über ~20 Minuten
+mit zwei Tabs, mehreren Run-Zyklen, Preferences (Colors-Tab + Style-&-Color-Names-
+Unterdialog) und menügeführtem Cross-Tab-Copy/Paste genutzt, am Ende über **zwei separate**
+„Don't Save"-Dialoge (einer pro Tab) geschlossen — Prozess beendet sich sauber, kein
+Zombie. Getestet wurde nur die Ein-Prozess-Form des ursprünglichen Fundes; die
+Mehrprozess-Form (parallele kurzlebige `racket`-Probenprozesse neben einer laufenden
+DrRacket-Instanz, wie in der Ursprungssitzung) bleibt ungetestet und ist der nächste
+Schritt, falls der Befund erneut auftritt.
+
+**Nebenbefund, als Automatisierungslehre festgehalten:** `SendKeys("^v")` erreicht den
+Qt-Editor nicht zuverlässig (Zwischenablage nachweislich korrekt gefüllt, Text kam trotzdem
+nicht an); Edit-Menü → Paste per echtem Mausklick funktioniert einwandfrei. Einfache
+Zeichen-`SendKeys` ohne Modifikator funktionieren dagegen zuverlässig.
+
+`racket-prefs.rktd` gesichert/gehasht vor der Sitzung (Hash hatte sich durch die
+Preferences-Nutzung tatsächlich geändert), am Ende zurückgespielt und Hash verifiziert
+(identisch zum Backup). Keine Code-Änderung. `CLAUDE.md`-Zombie-Absatz korrigiert (letzte
+zwei Sätze ersetzt). Details: `docs/2026-09-17-5_report-win.md`.
+
+---
+
 ## Session 2026-09-17 (Windows, 4) — §35-Hypothese 1 (gestreiftes Rechteck) geschlossen
 
 **Kontext:** offener Punkt aus `docs/2026-09-17_report-win.md`: der Windows-Nebenbefund

@@ -214,8 +214,15 @@ unbestätigt, nicht auf einen belegten Mechanismus zurückführbar** — weder b
 aktiv widerlegt, da die fünf Proben eine lange, interaktionsreiche Sitzung (wie sie den
 ursprünglichen Fund umgab) nicht nachstellen konnten. Einzig belegt: eine frühere Session
 endete tatsächlich hart (Autosave-Recovery-Dialog beim nächsten Start), das sagt aber
-nichts über den Mechanismus. Nächster sinnvoller Schritt: Reproduktion in einer echten,
-langen Live-Sitzung statt einer rekonstruierten kurzen Sequenz.
+nichts über den Mechanismus. **Die lange Live-Sitzung nachgeholt, 2026-09-17 (5)**
+(`docs/2026-09-17-5_report-win.md`): eine echte, ~20-minütige DrRacket-Instanz mit zwei
+Tabs, mehreren Run-Zyklen, Preferences (Colors-Tab + Style-&-Color-Names-Unterdialog) und
+menügeführtem Cross-Tab-Copy/Paste, am Ende über zwei separate „Don't Save"-Dialoge
+(einer pro Tab) geschlossen — **schließt sauber, 6/6 insgesamt**. Damit ist die
+Ein-Prozess-Variante des Fundes durchgetestet; **nicht abgedeckt bleibt die
+Mehrprozess-Form** aus `2026-09-17-2` (separate `racket`-Prozesse für Clipboard-/
+Teardown-/Scroll-Proben parallel zu einer laufenden DrRacket-Instanz) — dort liegt der
+nächste sinnvolle Schritt, falls der Befund noch einmal auftritt.
 **gefixt 2026-07-14 (§22):**
 macOS-App-Menü-Eintrag an der „Preferences"-Stelle löste den falschen Callback aus
 (DrRackets Help-Menü-Punkt „Configure Command Line for Racket…" statt
