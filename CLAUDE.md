@@ -47,23 +47,26 @@ Qt Widgets backend ("wx/qt/") für `racket/gui`. Additiver Spike: aktiviert via 
 ## Build
 
 > **⚠ Offener Shim-Rebuild für macOS und Linux (Stand 2026-09-17, Windows erledigt).**
-> Sieben Fixes haben je neue Exporte eingeführt: `shim_window_set_resize_cb`
+> Acht Fixes haben je neue Exporte eingeführt: `shim_window_set_resize_cb`
 > (`resizeEvent`-Fix, §32), `shim_canvas_set_wheel_cb` (Scroll-Block, §33),
 > `shim_clipboard_set_text`/`shim_clipboard_get_text`/`shim_clipboard_has_text`
 > (Zwischenablage, §36), `shim_menu_set_about_to_show_cb` (Menü-Enable-States, §37),
 > `shim_cursor_create_standard`/`shim_cursor_create_from_argb`/`shim_widget_set_cursor`/
 > `shim_widget_unset_cursor` (`cursor-driver%`, §40), `shim_gauge_create`/
 > `shim_gauge_set_range`/`shim_gauge_get_range`/`shim_gauge_set_value`/
-> `shim_gauge_get_value` (`gauge%`, §41) und `shim_get_mouse_state`
-> (`get-current-mouse-state`, §42). Windows hat `qt-shim` zuletzt am 2026-09-17 neu
-> gebaut (alle sechzehn Exporte per `dumpbin` verifiziert). Linux war bis §37 aktuell,
-> hat aber weder die vier §40-Cursor- noch die fünf §41-Gauge- noch den einen
-> §42-Mouse-State-Export — braucht also jetzt ebenfalls einen Rebuild, nicht nur macOS.
-> Auf **beiden** Maschinen muss `qt-shim` nach dem nächsten Pull noch **einmalig neu
-> gebaut** werden — **ein** Rebuild deckt jeweils alle ausstehenden Exporte ab. Ohne
-> Rebuild schlägt schon das Laden des Forks fehl, laut und sofort: `ffi-obj: could not
-> find export … undefined symbol: shim_window_set_resize_cb` (oder
-> `shim_cursor_create_standard`/`shim_gauge_create`/`shim_get_mouse_state` auf Linux).
+> `shim_gauge_get_value` (`gauge%`, §41), `shim_get_mouse_state`
+> (`get-current-mouse-state`, §42) und die zehn `shim_printer_*`-Exporte plus
+> `shim_printer_set_output_pdf` (`printer-dc%`, §43 — braucht zusätzlich die
+> Qt-Komponente `PrintSupport`, s. `qt-shim/CMakeLists.txt`). Windows hat `qt-shim`
+> zuletzt am 2026-09-17 neu gebaut (alle sechsundzwanzig Exporte per `dumpbin`
+> verifiziert). Linux war bis §37 aktuell, hat aber weder die vier §40-Cursor- noch die
+> fünf §41-Gauge- noch den einen §42-Mouse-State- noch die elf §43-Printer-Exporte —
+> braucht also jetzt ebenfalls einen Rebuild, nicht nur macOS. Auf **beiden** Maschinen
+> muss `qt-shim` nach dem nächsten Pull noch **einmalig neu gebaut** werden — **ein**
+> Rebuild deckt jeweils alle ausstehenden Exporte ab. Ohne Rebuild schlägt schon das
+> Laden des Forks fehl, laut und sofort: `ffi-obj: could not find export … undefined
+> symbol: shim_window_set_resize_cb` (oder `shim_cursor_create_standard`/
+> `shim_gauge_create`/`shim_get_mouse_state`/`shim_printer_create` auf Linux).
 > Diesen Hinweis entfernen, sobald beide gebaut haben. Gleiche Klasse wie der
 > §27-Rebuild.
 
@@ -366,7 +369,8 @@ damals offenem Befund zu nicht nachgeführten Menü-Enable-States; **seit §37 (
 gleicher Tag) gefixt**, GUI-Bedienung damit ebenfalls bestätigt. Scope bewusst nur Text — `get-bitmap-data`/
 `set-bitmap-data` bleiben No-op-Stubs. Nur auf Linux gefixt/getestet. Im selben Zug
 erhoben, eine von vier weiterhin offen, aus derselben Bestandsaufnahme:
-`printer-dc%` (`platform.rkt:115`, Drucken tut nichts) ist Stub. Bestandsaufnahme aus
+`printer-dc%` (`platform.rkt:115`, Drucken tat nichts) war Stub — **seit 2026-09-17
+implementiert, s. eigener Absatz (§43) weiter unten.** Bestandsaufnahme aus
 dem Quelltext, nicht untersucht — Details und Tabelle:
 `docs/2026-09-14-4_report-linux.md`, Abschnitt „Nachtrag nach Abschluss".
 **`gauge%` implementiert, 2026-09-17, Windows (§41)** — echter `QProgressBar`, dessen
@@ -379,6 +383,51 @@ Widget-Klassen dieses Backends), `message.rkt` als nähere Vorlage als `slider.r
 `examples/gauge-probe.rkt` (horizontaler + vertikaler Gauge, per Screenshot bei zwei
 Ständen als echter, wachsender Balken bestätigt — vorher zeichnete der Stub gar
 nichts). Smoke 3/3 beide Wege. **Nur auf Windows implementiert/getestet.**
+**`printer-dc%` implementiert, 2026-09-17, Windows (§43)** — letzter der vier seit §36
+bekannten Stubs. Qt6 hat `QPrinter::getDC()` ersatzlos gestrichen und bietet keinen
+öffentlichen Weg von einem `cairo_t*` in einen `QPainter` — anders als win32
+(`cairo_win32_printing_surface_create(HDC)`) und gtk (natives `GtkPrintOperation`-
+Cairo-Fenster) bleibt hier also nur ein Raster-Bridge: jede aufgezeichnete Seite wird
+in eine ARGB32-Cairo-Image-Surface (fest 300dpi) repliziert, der rohe prämultiplizierte
+Puffer geht als `QImage` an `QPainter::drawImage`, gestreckt auf die volle Druckseite —
+**Text/Vektorgrafik kommt auf diesem Backend als Raster aus dem Drucker, nicht vektoriell**
+(bewusst offengelegt, nicht verschwiegen). `QPrintDialog`/`QPageSetupDialog` laufen
+nicht-modal (`open()` + `finished`-Signal, exakt das `filedialog.rkt`-Muster) — `exec()`
+öffnet einen verschachtelten `QEventLoop` und verstößt damit gegen Regel 1, ganz gleich
+ob darunter ein natives Betriebssystem-Fenster hängt. Elf neue Shim-Exporte (ABI-
+Änderung, s. Build-Banner oben, zusätzlich die Qt-Komponente `PrintSupport`). Eigene
+Datei `wx/qt/printer-dc.rkt` (Konvention aller echten Widget-/DC-Klassen). Seitengeometrie
+kommt direkt aus `ps-setup%`s eigenen `orientation`/`paper-name`-Feldern (Punkte, über
+`paper-sizes`) statt aus einem nativen `PAGESETUPDLG`-artigen Objekt — Qt hat dafür kein
+Äquivalent, und `show-print-setup` hält dieses Racket-seitige Feld ohnehin schon mit dem,
+was der Nutzer im `QPageSetupDialog` wählt, synchron (Paper-Name-Rückweg nur für die vier
+von `ps-setup%` akzeptierten Größen A4/A3/Letter/Legal, sonst bleibt der alte Name
+stehen). **Ein nicht offensichtlicher Bug unterwegs gefunden:** `(class (dc-mixin
+default-dc-backend%) (define/override (init-cr-matrix cr) ...) ...)` — 1:1 aus win32/
+gtks eigenem Vorbild abgeschrieben — schlug mit `superclass does not provide an expected
+method for override` fehl, reproduzierbar sogar in einem Zwei-Zeilen-Minimalskript ganz
+ohne `wx/qt`-Bezug. Root-Cause per Bisektion gefunden, nicht geraten: `init-cr-matrix`/
+`get-cr`/etc. sind in `racket/draw/private/local.rkt` als `define-local-member-name`
+deklariert (Bindung an Lexikalische Identität, nicht an den bloßen Symboltext) — win32/
+gtks `printer-dc.rkt` requiren `local.rkt` bereits, meine erste Fassung nicht; ohne
+diesen Require griff `define/override` einen bloßen, öffentlichen, aber *anderen*
+`init-cr-matrix` statt der lokalen Member-Name-Bindung, die `default-dc-backend%`
+tatsächlich trägt. **Verifiziert:** neue Probe `examples/printer-probe.rkt` mit
+`PLT_QT_PRINT_TO_PDF=<pfad>` (Test-Escape-Hatch, umgeht den echten Dialog für einen
+reproduzierbaren Lauf) — zwei Seiten (Ellipse+Linie+Text, Rundrechteck+Text), per
+ImageMagick zu PNG gerastert und sichtgeprüft: beide Seiten korrekt, MediaBox 612×792pt
+(Letter, Default), Inhalt an der richtigen Position, kein Verzerren/Clipping. Echter,
+interaktiver Pfad separat geprüft (`examples/printer-dialog-probe.rkt`): `QPageSetupDialog`
+öffnet nicht-modal, per `WM_CLOSE` sauber geschlossen, Ergebnis (`#f`/`reject`) korrekt bis
+`get-page-setup-from-user` zurückgereicht, kein Crash, kein Hänger. `QPrintDialog` selbst
+erzeugt unter dieser RDP-Automatisierungssitzung zwar sein Fenster (Titel „Print“,
+`GetWindowRect` liefert plausible Koordinaten), bleibt aber dauerhaft `IsWindowVisible=
+False` und rendert nicht — Spooler-Dienst lief, zwölf Drucker installiert (u. a.
+„Microsoft Print to PDF“), also kein Spooler-/Treiberproblem; plausibel eine
+Automatisierungsgrenze des nativen `PrintDlgEx`-Fensters in dieser Fernwartungssitzung,
+kein Produktbefund (Prozess blieb durchgehend `Responding=True`, kein Absturz) — nicht
+abschließend bewiesen, da von hier aus nicht weiter diagnostizierbar. Smoke 3/3 beide
+Wege. **Nur auf Windows implementiert/getestet.** Details: `docs/HACKING.md` §43.
 **`get-current-mouse-state` implementiert, 2026-09-17, Windows (§42)** — Position aus
 `QCursor::pos()`, Modifikatoren aus `QGuiApplication::queryKeyboardModifiers()` (echter
 synchroner Hardware-Query laut Qt-Doku), Maustasten + Caps Lock aus `GetAsyncKeyState`

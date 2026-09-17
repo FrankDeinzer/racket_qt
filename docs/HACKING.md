@@ -4903,3 +4903,149 @@ Qt-seitig portabel geschrieben — nur die dortige Maustasten-/Caps-Lock-Abfrage
 beim jeweiligen Rebuild noch eine eigene, plattformspezifische Ergänzung im Shim
 (analog zu diesem `#ifdef _WIN32`-Block), bevor `mods` dort für Tasten/Caps vollständig
 ist.
+
+## 43. `printer-dc%` implementiert — letzter der vier Stubs aus der §36-Bestandsaufnahme (Windows, 2026-09-17)
+
+### 43.1 Auftrag
+
+`printer-dc%` (`wx/qt/platform.rkt`) war seit dem Spike-Anfang ein reiner No-op-Stub
+(`start-doc`/`end-doc`/alle `draw-*`-Methoden taten nichts, `can-show-print-setup?`
+lieferte `#f`) — der letzte der vier seit §36 als offen katalogisierten Punkte, nach
+`cursor-driver%` (§40), `gauge%` (§41) und `get-current-mouse-state` (§42).
+
+### 43.2 Vertrag gelesen, bevor Code entstand (Regel 8)
+
+`mred/private/gdi.rkt`s mred-seitiges `printer-dc%` wraps das wx-seitige mit
+`doc+page-check-mixin` (aus `racket/draw/private/page-dc`) — dieser Mixin erzwingt die
+`start-doc`→`start-page`→(draw…)→`end-page`→`end-doc`-Zustandsmaschine und ruft dafür
+`define/override` auf denselben Methoden, die die Platform-Klasse bereitstellen muss
+(Regel 3: `override*`-Methoden müssen existieren). win32/gtks eigene `printer-dc.rkt`
+als Vorbild gelesen (nicht blind übernommen — beide sind eine Fassade um einen echten,
+plattformspezifischen Druck-Mechanismus, kein 1:1 übertragbarer Code): beide bauen auf
+`(record-dc-mixin (dc-mixin bitmap-dc-backend%))` auf, zeichnen also erst in einen
+In-Memory-Rekorder (`record-dc%`, pro `end-page` ein aufgezeichnetes Kommando-Prozedur-
+Objekt), und spielen diese Prozeduren erst bei `end-doc` gegen eine echte, native
+Druck-Oberfläche ab.
+
+### 43.3 Architektur-Entscheidung: Raster-Bridge statt Vektor-Pfad
+
+win32 erzeugt die Wiedergabe-Oberfläche über `cairo_win32_printing_surface_create(HDC)`
+(ein Cairo-Backend, das direkt auf einen Windows-Gerätekontext zeichnet — vollständig
+vektoriell, inklusive Text). gtk nutzt `gtk_print_context_get_cairo_context`, ebenfalls
+ein natives, vektorielles Cairo-Fenster, das GTK selbst aus seinem eigenen
+`GtkPrintOperation` bezieht. **Qt bietet kein Äquivalent:** `QPrinter::getDC()` (Qt4/5,
+Windows-only) ist in Qt6 ersatzlos gestrichen, und es gibt keinen öffentlichen Weg von
+einem `cairo_t*` in einen `QPainter` (`QPrinter::paintEngine()` liefert einen
+`QPaintEngine*`, keinen Cairo-kompatiblen Handle). Verifiziert per `qt_documentation_read
+qprinter.html` — kein `getDC` mehr in der Methodenliste.
+
+Einzige verbleibende Brücke: jede aufgezeichnete Seite wird in eine gewöhnliche,
+freistehende Cairo-ARGB32-Image-Surface repliziert (fest **300dpi**, ca. 35 MB/Seite bei
+A4 — bewusste, dokumentierte Wahl, nicht `600dpi`, das schon ~139 MB/Seite wären), der
+rohe Puffer per `cairo_image_surface_get_data`/`get_stride` (prämultipliziertes
+ARGB32 — dieselbe Konvention wie `shim_canvas_blit_argb`, s. `CLAUDE.md`s
+Pixelformat-Hinweis, kein `width*4` angenommen) an eine neue Shim-Funktion gereicht, die
+daraus ein `QImage` baut und via `QPainter::drawImage(printer->pageRect(DevicePixel),
+img, QRectF(0,0,w,h))` auf die volle Druckseite streckt — unabhängig von der
+tatsächlichen Druckerauflösung. **Ehrliche Konsequenz, nicht verschwiegen (Regel 12):**
+Text und Vektorgrafik kommen auf diesem Backend als Raster aus dem Drucker, win32/gtk
+bleiben vektoriell. Seitengeometrie kommt direkt aus `ps-setup%`s eigenen
+`orientation`/`paper-name`-Feldern (Punkte, über das bereits vorhandene, exportierte
+`paper-sizes`) statt aus einem nativen `PAGESETUPDLG`-artigen Objekt, das Qt gar nicht
+kennt — vermeidet ein zusätzliches, unnötig opakes natives Objekt mit Kopiersemantik
+über die FFI (dieselbe Art Fund wie §40s „Qt macht die Kaskade selbst").
+
+### 43.4 Nicht-modale Dialoge — `open()` statt `exec()` (Regel 1)
+
+`QPrintDialog`/`QPageSetupDialog` laufen exakt wie `filedialog.rkt`s `QFileDialog`:
+`open()` (kein `exec()`) + `QDialog::finished`-Signal, `deleteLater()` im Handler,
+Racket-seitig per `yield`-auf-Semaphore synchronisiert, Eltern-Fenster für die Dauer per
+`shim_widget_set_enabled` deaktiviert. `QDialog::exec()` öffnet einen verschachtelten
+`QEventLoop` — das verstößt gegen Regel 1, unabhängig davon, ob darunter ein natives
+Betriebssystem-Fenster hängt (win32s `PrintDlgW`/`PageSetupDlgW` sind dagegen reine
+Win32-API-Aufrufe mit einer eigenen OS-Modal-Loop, kein Qt-`QEventLoop` — die beiden
+Fälle sind nicht dieselbe Kategorie, per Advisor-Review vor Implementierung geklärt).
+Callback-Trampolin folgt derselben §19-Regel wie `filedialog.rkt`: **ein** persistenter,
+bei Modul-Load erzeugter nativer Callback, per Integer-`id` durch `ud` dispatcht — keine
+frische Trampolin-Erzeugung pro Aufruf.
+
+### 43.5 Ein nicht offensichtlicher Bug: `local.rkt` fehlte
+
+Erster Entwurf der Wiedergabe-Klasse — 1:1 aus win32/gtk abgeschrieben —
+`(class (dc-mixin default-dc-backend%) (define/override (init-cr-matrix cr) ...)
+(define/override (get-cr) cr))` — schlug reproduzierbar fehl:
+
+```
+class*: superclass does not provide an expected method for override
+  override name: init-cr-matrix
+```
+
+**Reproduziert in einem Zwei-Zeilen-Minimalskript ganz ohne `wx/qt`-Bezug** (nur
+`racket/class` + `racket/draw/private/dc`) — also kein Backend-spezifisches Problem,
+sondern etwas an der Verwendung von `dc-mixin`/`default-dc-backend%` selbst. Per
+Bisektion (schrittweise Requires aus `backing-dc.rkt`, das denselben Mixin nachweislich
+erfolgreich verwendet, hinzugefügt, bis der Fehler verschwand) auf `racket/draw/private/
+local.rkt` eingegrenzt — **nicht geraten**. Root-Cause: `init-cr-matrix`, `get-cr` und
+der Rest von `dc-backend<%>` sind in `local.rkt` über `define-local-member-name`
+deklariert — ihre Identität ist an die *lexikalische Bindung* aus `local.rkt` gebunden,
+nicht an den bloßen Symboltext `init-cr-matrix`. `default-dc-backend%` (in `dc.rkt`)
+requirt `local.rkt` und definiert seine Methode über genau diese Bindung; ein `define/
+override` ohne denselben Require erzeugt einen *oberflächlich gleichnamigen, aber
+tatsächlich anderen* Member-Namen, den die Klassen-Komposition zu Recht als „nicht
+vorhanden" zurückweist. win32/gtks `printer-dc.rkt` requiren `local.rkt` bereits (aus
+genau diesem Grund) — meine erste Fassung hatte es beim Abschreiben weggelassen, weil es
+auf den ersten Blick wie ein bloßes `as-entry`/Reentrancy-Hilfsmodul aussah. **Fix:**
+`racket/draw/private/local` zur Require-Liste von `wx/qt/printer-dc.rkt` hinzugefügt —
+Fehler verschwindet vollständig, keine weitere Änderung nötig.
+
+### 43.6 Elf neue Shim-Exporte (ABI-Änderung) + neue Qt-Komponente
+
+`shim_printer_show_print_dialog`, `shim_printer_show_page_setup_dialog`,
+`shim_printer_create`, `shim_printer_destroy`, `shim_printer_set_page_setup`,
+`shim_printer_get_page_setup`, `shim_printer_begin_job`, `shim_printer_draw_page`,
+`shim_printer_new_page`, `shim_printer_end_job` sowie `shim_printer_set_output_pdf`
+(Test-only, s. §43.7). `qt-shim/CMakeLists.txt` braucht neu die Qt-Komponente
+`PrintSupport` (`find_package(... COMPONENTS ... PrintSupport)` +
+`target_link_libraries(... Qt6::PrintSupport)`) — ohne sie fehlen `QPrinter`/
+`QPrintDialog`/`QPageSetupDialog` beim Compile, nicht erst beim Link.
+
+### 43.7 Verifikation
+
+**Kern-Pfad (Raster-Bridge), reproduzierbar ohne Klick:** neue Probe
+`examples/printer-probe.rkt`, gesteuert über `PLT_QT_PRINT_TO_PDF=<pfad>` — ein
+Test-only-Shim-Aufruf (`shim_printer_set_output_pdf`, `QPrinter::setOutputFormat
+(PdfFormat)` + `setOutputFileName`), der den echten `QPrintDialog` umgeht und einen
+dauerhaften, inspizierbaren Artefakt erzeugt. Zwei Seiten (Ellipse+Linie+Text,
+Rundrechteck+Text), per ImageMagick (`magick -density 100 … -scene 1 …`) zu PNG
+gerastert und sichtgeprüft: **beide Seiten korrekt** (richtige Farben, richtige
+Positionen, richtiger Text), `MediaBox 0 0 612.000000 792.000000` (Letter, Portrait,
+deckt sich mit `get-size`s 612×792pt), Header `%PDF-1.4`, zwei `/Type/Page`-Objekte via
+Regex bestätigt. Reproduzierbar identisch (504081 Bytes bei zwei unabhängigen Läufen).
+
+**Interaktiver Dialog-Pfad**, `examples/printer-dialog-probe.rkt`: `QPageSetupDialog`
+öffnet nicht-modal (Fenstertitel „Seite einrichten", per `GetWindowRect` an plausiblen
+Bildschirmkoordinaten bestätigt), per `PostMessage(WM_CLOSE)` sauber geschlossen —
+`get-page-setup-from-user` liefert korrekt `#f` zurück, Programm läuft ohne Crash weiter
+zum `QPrintDialog`. **`QPrintDialog` selbst blieb in dieser Sitzung nicht abschließend
+verifizierbar:** sein Fenster entsteht (Titel „Print", `GetWindowRect` liefert plausible,
+nicht-degenerierte Koordinaten), bleibt aber dauerhaft `IsWindowVisible=False` und
+rendert nie sichtbar — Spooler-Dienst lief nachweislich (`Get-Service Spooler` →
+`Running`), zwölf Drucker installiert (u. a. „Microsoft Print to PDF"), also kein
+Spooler-/Treiberproblem. Plausibelste Erklärung: eine Automatisierungsgrenze des
+nativen `PrintDlgEx`-Fensters unter dieser RDP-Fernwartungssitzung (`SetForegroundWindow`/
+`BringWindowToTop` zeigten bereits beim `QPageSetupDialog` **kein** zuverlässiges
+Verhalten — nur `PostMessage(WM_CLOSE)` direkt an den Handle wirkte) — **nicht
+abschließend bewiesen**, da von hier aus nicht weiter diagnostizierbar; Prozess blieb
+durchgehend `Responding=True`, kein Absturz, kein Hänger des Hauptthreads. Der
+Code-Pfad selbst (`shim_printer_show_print_dialog`) ist strukturell identisch zum
+bereits vollständig verifizierten `shim_printer_show_page_setup_dialog` und zum
+lange erprobten `shim_file_dialog_create` — das Restrisiko wird als gering eingeschätzt,
+aber **nicht als bewiesen** ausgegeben (Regel 12).
+
+**Regressions-Gate:** Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ ohne `PLT_QT` (mehrfach
+wiederholt während dieser Session, auch nach dem `local.rkt`-Fix).
+
+**Nur auf Windows implementiert/getestet.** macOS/Linux brauchen nach dem nächsten Pull
+einen `qt-shim`-Rebuild (elf neue Exporte, zusätzlich zu §40/§41/§42s bereits
+ausstehenden — **und** die neue Qt-Komponente `PrintSupport` im CMake-Preset-Cache, s.
+Build-Banner in `CLAUDE.md`).

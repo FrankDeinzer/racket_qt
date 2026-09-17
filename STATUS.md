@@ -5,6 +5,49 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-17 (Windows, 9) — `printer-dc%` implementiert (§43)
+
+**Kontext:** letzter der vier seit §36 als Stub bekannten Punkte (nach `cursor-driver%`,
+`gauge%`, `get-current-mouse-state`). Nutzerauftrag: mit `printer-dc%` aus der letzten
+Session weitermachen.
+
+**Ergebnis: implementiert und verifiziert.** Qt6 hat `QPrinter::getDC()` gestrichen und
+bietet keinen Weg von `cairo_t*` zu `QPainter` — anders als win32/gtk (beide vektoriell)
+bleibt hier nur eine Raster-Brücke: jede aufgezeichnete Seite wird in eine
+300dpi-ARGB32-Cairo-Surface repliziert, der rohe prämultiplizierte Puffer geht als
+`QImage` in `QPainter::drawImage`, gestreckt auf die volle Druckseite. **Text/
+Vektorgrafik kommt auf diesem Backend als Raster aus dem Drucker** — offen dokumentiert,
+nicht verschwiegen. `QPrintDialog`/`QPageSetupDialog` laufen nicht-modal (`open()` +
+`finished`, exakt `filedialog.rkt`s Muster) — `exec()` verstößt gegen Regel 1. Elf neue
+Shim-Exporte, neue Qt-Komponente `PrintSupport`. Eigene Datei `wx/qt/printer-dc.rkt`.
+
+**Ein nicht offensichtlicher Bug gefunden und per Bisektion (nicht Raten) root-caused:**
+die aus win32/gtk abgeschriebene Wiedergabe-Klasse
+`(class (dc-mixin default-dc-backend%) (define/override (init-cr-matrix cr) ...) ...)`
+schlug reproduzierbar sogar in einem Zwei-Zeilen-Minimalskript fehl (`class*: superclass
+does not provide an expected method for override`) — Ursache: `init-cr-matrix`/`get-cr`
+sind in `racket/draw/private/local.rkt` als `define-local-member-name` deklariert
+(Bindung an lexikalische Identität, nicht Symboltext); win32/gtk requiren `local.rkt`
+bereits, meine erste Fassung nicht. Fix: den fehlenden Require ergänzt.
+
+**Verifiziert:** neue Probe `examples/printer-probe.rkt` mit Test-Escape-Hatch
+`PLT_QT_PRINT_TO_PDF=<pfad>` (umgeht den echten Dialog) — zwei Seiten, per ImageMagick
+zu PNG gerastert und sichtgeprüft: beide korrekt (Farben/Positionen/Text), MediaBox
+612×792pt (Letter), reproduzierbar identische Byte-Größe über zwei Läufe. Interaktiver
+Pfad (`examples/printer-dialog-probe.rkt`): `QPageSetupDialog` öffnet nicht-modal, per
+`WM_CLOSE` sauber geschlossen, Ergebnis korrekt bis `get-page-setup-from-user`
+zurückgereicht, kein Crash. `QPrintDialog` selbst blieb unter dieser RDP-Automatisierungs-
+sitzung nicht abschließend verifizierbar (Fenster entsteht, `IsWindowVisible` bleibt aber
+dauerhaft `False`, kein Rendern) — Spooler lief, zwölf Drucker installiert, also
+plausibel eine Automatisierungsgrenze dieser Sitzung, kein Absturz/Hänger (`Responding=
+True` durchgehend), nicht abschließend bewiesen. Smoke 3/3 beide Wege.
+
+**Nur auf Windows implementiert/getestet** — macOS/Linux brauchen den Shim-Rebuild (elf
+neue Exporte **und** die neue `PrintSupport`-Komponente). Details: `docs/HACKING.md` §43,
+`docs/2026-09-17-6_report-win.md`.
+
+---
+
 ## Session 2026-09-17 (Windows, 8) — `get-current-mouse-state` implementiert (§42)
 
 **Kontext:** dritter der vier seit §36 als Stub bekannten Punkte (nach `cursor-driver%`

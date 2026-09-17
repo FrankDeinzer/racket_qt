@@ -24,6 +24,11 @@
 #include <QFileDialog>
 #include <QImage>
 #include <QPainter>
+#include <QPrinter>
+#include <QPrintDialog>
+#include <QPageSetupDialog>
+#include <QPageSize>
+#include <QPageLayout>
 #include <QResizeEvent>
 #include <QPaintEvent>
 #include <QShowEvent>
@@ -77,6 +82,7 @@ typedef void (*shim_wheel_cb_t)(void* ud, int dx, int dy, int mods);
 typedef void (*shim_resize_cb_t)(void* ud, int w, int h);
 // File dialog result: ud, path (UTF-8 C string, NULL if the user canceled).
 typedef void (*shim_file_dialog_cb_t)(void* ud, const char* path);
+typedef void (*shim_printer_dialog_cb_t)(void* ud, int accepted);
 
 static int    s_argc = 0;
 static char** s_argv = nullptr;
@@ -1535,6 +1541,146 @@ void shim_file_dialog_create(void* parent_widget, int mode,
                 filter ? filter : "");
 
     dlg->open();
+}
+
+// ---- printer (printer-dc% / show-print-setup) ----------------------------
+// Qt6 removed QPrinter::getDC() and there is no public path from a cairo_t*
+// into QPainter, so wx/qt/printer-dc.rkt cannot reuse win32's
+// cairo_win32_printing_surface_create(HDC) or gtk's native GtkPrintOperation
+// cairo context. Instead, each recorded page is rasterized Racket-side into
+// an ARGB32 cairo image surface and handed to shim_printer_draw_page as a
+// raw premultiplied-ARGB32 buffer (same convention as shim_canvas_blit_argb),
+// which wraps it in a QImage and draws it into the QPrinter's QPainter,
+// stretched to fill the page -- text and vector art come out rasterized,
+// not vector, on this backend only.
+//
+// QPrintDialog/QPageSetupDialog run non-modally (open() + finished), exactly
+// like the QFileDialog above -- QDialog::exec() opens a nested QEventLoop,
+// which CLAUDE.md Regel 1 forbids outright, native-dialog convenience or not.
+void shim_printer_show_print_dialog(void* printer_ptr, void* parent_widget,
+                                    shim_printer_dialog_cb_t cb, void* ud)
+{
+    auto* printer = static_cast<QPrinter*>(printer_ptr);
+    auto* parent = static_cast<QWidget*>(parent_widget);
+    auto* dlg = new QPrintDialog(printer, parent);
+    QObject::connect(dlg, &QDialog::finished, [dlg, cb, ud](int result) {
+        if (cb) cb(ud, result == QDialog::Accepted ? 1 : 0);
+        dlg->deleteLater();
+    });
+    dlg->open();
+}
+
+void shim_printer_show_page_setup_dialog(void* printer_ptr, void* parent_widget,
+                                         shim_printer_dialog_cb_t cb, void* ud)
+{
+    auto* printer = static_cast<QPrinter*>(printer_ptr);
+    auto* parent = static_cast<QWidget*>(parent_widget);
+    auto* dlg = new QPageSetupDialog(printer, parent);
+    QObject::connect(dlg, &QDialog::finished, [dlg, cb, ud](int result) {
+        if (cb) cb(ud, result == QDialog::Accepted ? 1 : 0);
+        dlg->deleteLater();
+    });
+    dlg->open();
+}
+
+void* shim_printer_create(void)
+{
+    return new QPrinter();
+}
+
+void shim_printer_destroy(void* printer_ptr)
+{
+    delete static_cast<QPrinter*>(printer_ptr);
+}
+
+// paper_id: 1=A4 2=A3 3=Letter 4=Legal (mirrors ps-setup.rkt's paper-sizes
+// order) -- the only four page sizes racket/draw's ps-setup% contract
+// accepts, so no "unknown" case can arrive here.
+static QPageSize::PageSizeId paper_id_to_qt(int paper_id)
+{
+    switch (paper_id) {
+        case 2:  return QPageSize::A3;
+        case 3:  return QPageSize::Letter;
+        case 4:  return QPageSize::Legal;
+        default: return QPageSize::A4;
+    }
+}
+
+void shim_printer_set_page_setup(void* printer_ptr, int paper_id, int landscape)
+{
+    auto* printer = static_cast<QPrinter*>(printer_ptr);
+    printer->setPageSize(QPageSize(paper_id_to_qt(paper_id)));
+    printer->setPageOrientation(landscape ? QPageLayout::Landscape
+                                          : QPageLayout::Portrait);
+}
+
+// Returns 0 (unrecognized paper -- caller keeps its previous paper-name) or
+// 1..4 as above; *out_landscape is always meaningful.
+int shim_printer_get_page_setup(void* printer_ptr, int* out_landscape)
+{
+    auto* printer = static_cast<QPrinter*>(printer_ptr);
+    QPageLayout layout = printer->pageLayout();
+    *out_landscape = (layout.orientation() == QPageLayout::Landscape) ? 1 : 0;
+    switch (layout.pageSize().id()) {
+        case QPageSize::A4:     return 1;
+        case QPageSize::A3:     return 2;
+        case QPageSize::Letter: return 3;
+        case QPageSize::Legal:  return 4;
+        default:                return 0;
+    }
+}
+
+// Test-only escape hatch (examples/printer-probe.rkt, PLT_QT_PRINT_TO_PDF):
+// redirects the job straight to a PDF file, bypassing QPrintDialog, so the
+// probe can produce a durable, inspectable artifact without a real click.
+void shim_printer_set_output_pdf(void* printer_ptr, const char* path)
+{
+    auto* printer = static_cast<QPrinter*>(printer_ptr);
+    printer->setOutputFormat(QPrinter::PdfFormat);
+    printer->setOutputFileName(QString::fromUtf8(path));
+}
+
+// Begins the print job (first page is implicitly ready once QPainter::begin
+// returns); returns the QPainter* to pass to draw_page/new_page/end_job, or
+// NULL if the printer/driver refused (e.g. output file not writable).
+void* shim_printer_begin_job(void* printer_ptr, const char* doc_name)
+{
+    auto* printer = static_cast<QPrinter*>(printer_ptr);
+    if (doc_name && doc_name[0])
+        printer->setDocName(QString::fromUtf8(doc_name));
+    auto* painter = new QPainter();
+    if (!painter->begin(printer)) {
+        delete painter;
+        return nullptr;
+    }
+    return painter;
+}
+
+// argb_data: premultiplied ARGB32, w*h*stride bytes, same layout
+// shim_canvas_blit_argb already assumes -- stretched to fill the printer's
+// full printable-area rect, so the caller's raster resolution need not match
+// the printer's native device resolution.
+void shim_printer_draw_page(void* printer_ptr, void* painter_ptr,
+                            const unsigned char* argb_data,
+                            int w, int h, int stride)
+{
+    auto* printer = static_cast<QPrinter*>(printer_ptr);
+    auto* painter = static_cast<QPainter*>(painter_ptr);
+    QImage img(argb_data, w, h, stride, QImage::Format_ARGB32_Premultiplied);
+    painter->drawImage(printer->pageRect(QPrinter::DevicePixel), img,
+                       QRectF(0, 0, w, h));
+}
+
+int shim_printer_new_page(void* printer_ptr)
+{
+    return static_cast<QPrinter*>(printer_ptr)->newPage() ? 1 : 0;
+}
+
+void shim_printer_end_job(void* painter_ptr)
+{
+    auto* painter = static_cast<QPainter*>(painter_ptr);
+    painter->end();
+    delete painter;
 }
 
 // ---- tab-panel (tab-panel%) ----------------------------------------------
