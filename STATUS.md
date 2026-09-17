@@ -5,6 +5,38 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-17 (Windows, 8) — `get-current-mouse-state` implementiert (§42)
+
+**Kontext:** dritter der vier seit §36 als Stub bekannten Punkte (nach `cursor-driver%`
+und `gauge%`). Nutzerauftrag: `get-current-mouse-state` implementieren; die größeren
+verbleibenden Punkte (`printer-dc%`, Zombie-Mehrprozess-Form) bewusst auf eine künftige
+Session verschoben.
+
+**Ergebnis: implementiert und verifiziert.** Position aus `QCursor::pos()`,
+Modifikatoren aus `QGuiApplication::queryKeyboardModifiers()` (echter synchroner
+Hardware-Query), Maustasten + Caps Lock aus `GetAsyncKeyState` (Windows-spezifisch, wie
+win32s eigene Implementierung — Qt bietet dafür keinen portablen Query). Volle
+Symbol-Menge `left middle right shift control alt meta caps` implementiert statt win32s
+unvollständiger Teilmenge, da `wx/qt` auf allen drei Plattformen läuft.
+
+**Ein Messfehler unterwegs gefunden und korrigiert:** `QGuiApplication::mouseButtons()`
+sah wie das portable Äquivalent für Maustasten aus, spiegelt aber nur Events, die die
+eigene Anwendung tatsächlich empfangen hat — ein synthetischer Klick ohne Fensterfokus
+tauchte darin nie auf. Durch gezieltes Testen gefunden, nicht durch Doku-Lesen allein;
+`queryKeyboardModifiers()` (dieselbe Klasse) ist dagegen ein echter Hardware-Query und
+funktionierte von Anfang an korrekt.
+
+**Verifiziert:** neue Probe `examples/mouse-state-probe.rkt` + gezielte Einzel-Checks —
+Position exakt, Shift/Strg über `keybd_event`, alle drei Maustasten über `mouse_event`
+(erst nach dem Fix korrekt). Caps Lock nicht live getestet (hätte den System-Zustand der
+Maschine umgeschaltet). Smoke-Gate 3/3 mit `PLT_QT=1`, 3/3 nativ ohne `PLT_QT`.
+
+**Nur auf Windows implementiert/getestet** — Positions-/Modifikator-Teil ist bereits
+Qt-seitig portabel, nur Maustasten/Caps Lock brauchen bei macOS/Linux noch eine eigene
+plattformspezifische Ergänzung im Shim. Details: `docs/HACKING.md` §42.
+
+---
+
 ## Session 2026-09-17 (Windows, 7) — `gauge%` implementiert (§41)
 
 **Kontext:** zweiter der vier seit §36 als Stub bekannten Punkte (nach `cursor-driver%`

@@ -4829,3 +4829,77 @@ nichts, worauf der Benutzer reagieren könnte).
 **Nur auf Windows implementiert/getestet.** macOS/Linux brauchen nach dem nächsten Pull
 einen `qt-shim`-Rebuild (fünf neue Exporte, zusätzlich zu §40s vier Cursor-Exporten,
 beide noch ausstehend auf beiden Maschinen).
+
+## 42. `get-current-mouse-state` implementiert — dritter der vier Stubs aus der §36-Bestandsaufnahme (Windows, 2026-09-17)
+
+### 42.1 Auftrag
+
+`get-current-mouse-state` (`wx/qt/platform.rkt`) war fest auf `(values (point 0 0) '())`
+verdrahtet — keine reale Mausposition, keine gedrückten Tasten/Knöpfe. Genutzt u. a. für
+Kontextmenü-Platzierung (laut altem Kommentar im Quelltext).
+
+### 42.2 Vertrag: drei Backends, drei verschiedene Symbol-Mengen
+
+win32 (`wx/win32/procs.rkt:145`), gtk (`wx/gtk/frame.rkt:678`) und cocoa
+(`wx/cocoa/procs.rkt:275`) verglichen — alle liefern `(values point% (listof symbol))`,
+aber mit **unterschiedlichen** Symbol-Mengen: win32 nur `left right shift control alt
+caps` (kein `middle`/`meta` — Windows hat keinen Meta-Key, `middle` schlicht nicht
+abgefragt, obwohl `VK_MBUTTON` existiert), gtk zusätzlich `middle`/`meta`, cocoa
+`left right shift meta alt control caps` (kein `middle`). Die Reihenfolge der
+zurückgegebenen Liste unterscheidet sich ebenfalls zwischen allen dreien — kein Teil des
+Vertrags, Aufrufer nutzen `memq`/`member`, keine Positions-Abhängigkeit.
+
+### 42.3 Entscheidung: volle Symbol-Menge statt win32-Parität, weil Qt es kann
+
+Da `wx/qt` auf allen drei Plattformen läuft (nicht nur Windows), wurde bewusst **nicht**
+win32s unvollständige Menge kopiert, sondern die größtmögliche über Qt erreichbare
+Menge implementiert (`left middle right shift control alt meta caps`) — sowohl
+`Qt::MiddleButton` als auch `Qt::MetaModifier` sind echte, portable Qt-Konzepte, win32s
+Lücke ist eine Unvollständigkeit der bestehenden Racket-Implementierung, kein
+Windows-Limit.
+
+### 42.4 Ein Messfehler unterwegs — `QGuiApplication::mouseButtons()` ist kein globaler Hardware-Query
+
+Erster Entwurf nutzte `QGuiApplication::mouseButtons()` für die drei Maustasten
+(portabel, dokumentiert als „aktueller Tastenzustand"). **Beim Testen widerlegt:** ein
+synthetischer Klick (`mouse_event`), während das Test-Fenster keinen Fokus hatte,
+tauchte in `mouseButtons()` nie auf — die Funktion spiegelt nur Events, die die
+**eigene** Anwendung tatsächlich empfangen hat, kein systemweites Hardware-Polling.
+`QGuiApplication::queryKeyboardModifiers()` ist dagegen laut Qt-Doku ein echter
+synchroner Hardware-Query (bestätigt: Shift/Strg wurden korrekt erkannt, auch ohne
+Fokus) — dieselbe Klasse, zwei verschiedene Semantiken, nicht durch Lesen
+unterscheidbar, nur durch Testen. **Fix:** Maustasten (und Caps Lock, das ohnehin keinen
+Qt-Query hat) laufen stattdessen über `GetAsyncKeyState`/`GetSystemMetrics
+(SM_SWAPBUTTON)` — exakt win32s eigener Mechanismus, da dieser Backend ebenfalls unter
+Windows läuft. Modifikatoren bleiben bei `queryKeyboardModifiers()` (verifiziert
+korrekt). Ohne den empirischen Gegentest wäre dieser Bug erst bei einem Menü-Rechtsklick
+o. Ä. aufgefallen, bei dem der Klick selbst dem Fenster keinen Fokus mehr gibt.
+
+### 42.5 Ein neuer Shim-Export (ABI-Änderung)
+
+`shim_get_mouse_state(int* out_x, int* out_y, int* out_flags)` — Position aus
+`QCursor::pos()` (bereits portabel, unverändert vom ersten Entwurf), Flags-Bitlayout ist
+ein reiner Racket↔Shim-interner Vertrag (kein Abbild irgendeines Qt-Enums), in
+`wx/qt/platform.rkt` per `bitwise-and` in die Symbol-Liste zurücküberführt.
+
+### 42.6 Verifikation
+
+- **`examples/mouse-state-probe.rkt`** (neu, committet) plus ein Einweg-Skript
+  (Scratchpad, nicht committet) für gezielte Einzel-Checks.
+- Position: `SetCursorPos(300,400)` → `pos=(300,400)` exakt.
+- Modifikatoren: `Shift` und `Strg` per `keybd_event` gehalten, beide korrekt als
+  `(shift)`/`(control)` erkannt, auch ohne Fenster-Fokus.
+- Maustasten: `left`/`middle`/`right` je per `mouse_event` gehalten, alle drei korrekt
+  erkannt (erst nach dem §42.4-Fix — vorher blieb `mods` bei jeder Taste leer).
+- Caps Lock nicht live getestet (hätte den tatsächlichen System-Zustand der Maschine
+  umgeschaltet) — Code-Pfad ist wortwörtlich win32s eigener, bereits production-erprobter
+  `GetAsyncKeyState(VK_CAPITAL)`-Check, kein neues Risiko.
+- **Regressions-Gate:** Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ ohne `PLT_QT`.
+
+**Nur auf Windows implementiert/getestet.** macOS/Linux brauchen nach dem nächsten Pull
+einen `qt-shim`-Rebuild (ein neuer Export, zusätzlich zu §40/§41s neun bereits
+ausstehenden). Positions-/Modifikator-Teil ist bereits jetzt für macOS/Linux
+Qt-seitig portabel geschrieben — nur die dortige Maustasten-/Caps-Lock-Abfrage bräuchte
+beim jeweiligen Rebuild noch eine eigene, plattformspezifische Ergänzung im Shim
+(analog zu diesem `#ifdef _WIN32`-Block), bevor `mods` dort für Tasten/Caps vollständig
+ist.

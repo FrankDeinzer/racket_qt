@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <QGuiApplication>
 #include <QMainWindow>
 #include <QWidget>
 #include <QPushButton>
@@ -642,6 +643,50 @@ void shim_widget_set_cursor(void* widget, void* cursor)
 void shim_widget_unset_cursor(void* widget)
 {
     static_cast<QWidget*>(widget)->unsetCursor();
+}
+
+// ---- input state (get-current-mouse-state) --------------------------------
+// QCursor::pos() (global desktop position) and
+// QGuiApplication::queryKeyboardModifiers() (a genuine synchronous hardware
+// query per Qt's own docs, unlike keyboardModifiers()/mouseButtons(), which
+// only reflect events the application has actually received) are portable
+// across all three platforms. QGuiApplication::mouseButtons() looked like
+// the equivalent for buttons but is NOT -- measured, not assumed: a
+// synthetic click delivered while this process's window lacked focus never
+// showed up in mouseButtons() at all, because it reflects the app's own
+// event stream, not real hardware state. Mouse buttons and Caps Lock (which
+// has no Qt-level query either way) therefore both stay Windows-specific,
+// mirroring wx/win32/procs.rkt's own GetAsyncKeyState checks (including the
+// swapped-buttons handling via GetSystemMetrics(SM_SWAPBUTTON)) exactly,
+// since this backend also runs on Windows. Middle button and the Meta
+// modifier are included even though win32's own backend omits them --
+// GetAsyncKeyState(VK_MBUTTON) and Qt::MetaModifier are both genuinely
+// available, so there is no reason to reproduce that gap here.
+// `out_flags` bit layout is a private contract with wx/qt/platform.rkt's
+// get-current-mouse-state, not a mirror of any Qt enum's bit values.
+void shim_get_mouse_state(int* out_x, int* out_y, int* out_flags)
+{
+    QPoint p = QCursor::pos();
+    *out_x = p.x();
+    *out_y = p.y();
+
+    int flags = 0;
+
+    Qt::KeyboardModifiers mods = QGuiApplication::queryKeyboardModifiers();
+    if (mods & Qt::ShiftModifier)   flags |= 0x08;
+    if (mods & Qt::ControlModifier) flags |= 0x10;
+    if (mods & Qt::AltModifier)     flags |= 0x20;
+    if (mods & Qt::MetaModifier)    flags |= 0x40;
+
+#ifdef _WIN32
+    bool swapped = GetSystemMetrics(SM_SWAPBUTTON) != 0;
+    if (GetAsyncKeyState(swapped ? VK_RBUTTON : VK_LBUTTON) < 0) flags |= 0x01;
+    if (GetAsyncKeyState(VK_MBUTTON) < 0)                        flags |= 0x02;
+    if (GetAsyncKeyState(swapped ? VK_LBUTTON : VK_RBUTTON) < 0) flags |= 0x04;
+    if (GetAsyncKeyState(VK_CAPITAL) < 0)                        flags |= 0x80;
+#endif
+
+    *out_flags = flags;
 }
 
 // ---- canvas -------------------------------------------------------------
