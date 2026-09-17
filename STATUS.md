@@ -5,6 +5,44 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-17 (Windows) — Gebündelter Cross-Platform-Sweep, kritischer Kern
+
+**Kontext:** Fortsetzung von `docs/2026-09-13_prompt.md` — Linux hatte den Cluster-1-Block
+abgearbeitet und seither zehn weitere Fixes nachgeliefert (§23.3–§39). Windows war seit
+§27 (2026-09-12) nicht mehr gesynct. Nutzerentscheidung: Sync + Shim-Rebuild jetzt, Sweep
+auf den kritischen Kern begrenzt statt aller elf offenen Punkte.
+
+**Sync:** Submodul per `merge --ff-only` von `a71d2e9a` auf `cbc506c5` (11 Commits,
+identisch mit `origin/qt-backend`-Spitze) — kein neuer Umbrella-Commit nötig, Zeiger
+stimmte bereits. `qt-shim` neu gebaut, alle 6 seit §32/§33/§36/§37 fälligen Exporte per
+`dumpbin` verifiziert. Smoke-Gate 3/3 beide Wege.
+
+**Ergebnis:**
+- `test-dock-size`-Akzeptanztest (1→2-Tab-Sequenz, echte Maus-Automatisierung):
+  **n=3, 0/3 Crash** — historisch 10/10 auf Windows, der Linux-Fix (§23.3-Cluster)
+  generalisiert.
+- Resize/Drag (§32): Verkleinern per echtem Maus-Drag reflowt Kind-Controls korrekt,
+  Mindestgröße wird ohne Hänger verweigert (`Responding=True` durchgehend). Kein
+  Kaskadieren, kein Hänger — das Kernrisiko dieses Fixes ist für Windows entkräftet.
+  Wieder-Vergrößern per Drag automatisiert nicht reproduzierbar (Automatisierungsgrenze,
+  kein Produktbefund).
+- §24.5-Windows-Symptom (Editor-Inhalt komplett weiß): in drei getesteten Tabs nicht
+  mehr aufgetreten, Inhalt rendert korrekt.
+- §35-Hypothese 1 (gestreiftes Rechteck): in keinem Lauf sichtbar, aber ursprünglicher
+  Auslöseschritt nicht gezielt rekonstruiert — vorsichtig statt endgültig als erledigt
+  eingestuft.
+
+**Nicht bearbeitet (bewusst, Umfang begrenzt):** Zwischenablage cross-process (§36),
+Mausrad (§33), Preferences-Button-Zeile (§31), Colors-Tab-Scroll (§34), Menü-Enable-
+States (§37), Teardown-Probe (§39) — bleiben offen für eine Folgesitzung. macOS-Sweep
+steht komplett aus.
+
+`racket-prefs.rktd` gesichert/gehasht vor jeder GUI-Interaktion, am Ende zurückgespielt
+und Hash verifiziert (identisch). `git status` beider Repos am Ende sauber. Details:
+`docs/2026-09-17_report-win.md`.
+
+---
+
 ## Session 2026-09-16 (Linux, 5) — §33.7-Tab-2-Befund: 14/14 sauber, weiterhin nicht reproduzierbar
 
 **Kontext:** Nutzerfrage — ist der einmalige, nicht reproduzierbare Tab-2-Befund aus
