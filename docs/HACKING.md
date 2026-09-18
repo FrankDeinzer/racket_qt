@@ -6068,3 +6068,104 @@ weiter aus, ganz ohne `-k`. Für künftige native Debugging-Sessions in diesem
 Projekt: dieses Muster (Kommandodatei mit `process handle .../run/bt all/
 register read/image lookup .../quit`) direkt wiederverwenden statt erneut
 `-k`-Ketten zu versuchen.
+
+## 51. macOS — „8 statt 9 Menüs" root-caused und gefixt; Tools-Listbox-Klick als Automatisierungsartefakt entlarvt (2026-09-18, macOS 7)
+
+**Kontext:** Zwei seit Längerem offene macOS-Nebenbefunde aus dem Backlog
+(CLAUDE.md, `docs/2026-09-13_report-macos.md` §29/§29.2). Auftrag: beide in
+einer Session bearbeiten. Auf aktuellem HEAD (nach §47/§50) neu gemessen statt
+blind auf den alten Befund aufgesetzt — beide Male zahlte sich das aus.
+
+### 51.1 „8 statt 9 Menüs" — root-caused und gefixt
+
+**Erst re-gemessen:** 3/3 kalte `PLT_QT=1 racket -l drracket`-Starts zeigten
+weiterhin konsistent **9** statt 10 App-Menüs (`racket, File, Edit, View,
+Language, Racket, Insert, Scripts, Help`) — `Windows` fehlte in allen drei
+Läufen. Nativer Kontrolllauf (identische Methodik) zeigt **10** Einträge
+inkl. `Windows` — echte, reproduzierbare Qt-spezifische Divergenz, kein
+Session-Intermittenz-Artefakt (die in `CLAUDE.md` vermerkte „mal 8, mal 9"-
+Beobachtung bezieht sich, wie schon §29.2-D vermutete, vermutlich auf
+Unterschiede zwischen früheren, unterschiedlich alten Codeständen, nicht auf
+echten Zufall).
+
+**Root cause:** Das „Windows"-Menü ist **nicht** Cocoas automatisches
+`NSApplication`-Fenstermenü (das hat `wx/cocoa` separat, `queue.rkt:128`,
+unabhängig davon) — es ist `framework/private/group.rkt`s eigenes
+`create-windows-menu` (macOS-Label für das plattformübergreifende „Tabs"-
+Konzept, `group.rkt:42-45`), das **unbedingt** und **immer leer** angelegt
+wird und sich erst per `demand-callback` (`update-windows-menu`) füllt, wenn
+es tatsächlich geöffnet wird — exakt das gleiche Lazy-Populate-Muster wie bei
+den Enable-States aus §37.
+
+Per isolierter Probe verifiziert (kein Vermuten): ein `menu%` mit **null**
+Items bei Erzeugung, nur mit `demand-callback`, taucht in `osascript`s
+Menüband-Enumeration unter Qt **gar nicht auf** — kein Menüband-Slot, also
+auch kein Klick möglich, also feuert `about-to-show-cb` (§37) nie, also bleibt
+es für immer leer und unsichtbar. win32/gtk/cocoa rendern ein leeres
+Top-Level-Menü dagegen problemlos. Ein reiner Timing-Zufall (Menü wird
+zufällig doch mal befüllt, bevor Qt synct) ist unwahrscheinlich, aber nicht
+ausgeschlossen — erklärt zumindest plausibel, warum ältere Sessions
+gelegentlich 9/9 sahen.
+
+**Fix (`wx/qt/menu.rkt`, keine Shim-ABI-Änderung):** `menu%` hält jetzt
+immer mindestens eine native `QAction` — einen deaktivierten, blanko
+Platzhalter (`shim_action_create ... "" 0 #f #f` + `shim_action_set_enabled
+... 0`), angelegt bei Konstruktion und immer dann, wenn die Item-Liste auf
+null fällt; entfernt beim ersten echten `append`/`append-separator`. Bewusst
+außerhalb von `item-table`/`items-in-order` geführt, damit `number`/
+`delete-by-position` weiterhin nur den logischen (wx-seitigen) Item-Bestand
+zählen. **Ein Separator funktioniert nicht als Platzhalter** — gemessen: Qt
+ignoriert Separatoren bei der Leerheits-Prüfung fürs Menüband-Sync, ein
+nur-Separator-Menü bleibt trotzdem unsichtbar; erst eine echte (wenn auch
+blanke) `QAction` zählt.
+
+**Verifiziert:**
+- Drei kalte DrRacket-Starts nach dem Fix: **3/3 zeigen 10 Einträge inkl.
+  `Windows`.**
+- Nativer Kontrolllauf (unverändert, `wx/qt` betrifft ihn nicht): weiterhin
+  10/10, keine Regression.
+- Echter Klick (`cliclick`, Koordinaten aus `AXPosition`/`AXSize` des
+  Menüband-Eintrags, kein `osascript "click menu"`, das bei diesem Menü
+  wiederholt hing) öffnet das `Windows`-Menü mit vollem, korrektem Inhalt
+  (`Minimize`/`Zoom`/`Bring Frame to Front…`/`Most Recent Window`/
+  `Previous Tab`/`Next Tab`/`Move Tab Left/Right`/`Tab 1`-`9`/`Untitled`) —
+  Akzeptanzkriterium erfüllt, nicht nur der Menüband-Slot.
+- Smoke 3/3 beide Wege.
+
+**Nur auf macOS relevant** (einziges Backend mit `wx/cocoa`-losem, aber
+macOS-typischem App-Menu-Verhalten unter Qt); kein Rebuild auf Windows/Linux
+nötig, da keine Shim-ABI-Änderung.
+
+### 51.2 Tools-Listbox-Klick (§29/§29.2-C) — kein Produktbefund, reines Automatisierungsartefakt
+
+**Isolierte Probe zuerst** (`list-box%`, 5 Einträge, Callback loggt
+Selektion): `osascript`/AX (`click row N`, `AXPress`, `click at {x,y}`) war
+in §29 dreimal gescheitert. Diesmal `cliclick` (echtes `CGEvent`, kein
+AppleEvent) mit vorherigem `set frontmost of process "racket" to true`
+(dieselbe Kombination, die §45.1 für einen ähnlich gelagerten Button-Befund
+auflöste) — Klick-Koordinaten aus dem Widget selbst (`client->screen`), nicht
+aus einem Screenshot geschätzt (§21.10/§34.7-Lehre).
+
+**Ergebnis: 2/2 Klicks lösen die Selektion korrekt aus** (Callback feuert mit
+korrektem Index/String, visuell per Screenshot als blaue Zeilen-Hervorhebung
+bestätigt). Zusätzlich der ursprüngliche Akzeptanztest aus §25/§28 in echtem
+DrRacket nachgeholt: Preferences → Tools → Klick auf `Optimization Coach` —
+Zeile wird blau selektiert **und** das `Tool:`-Feld aktualisiert sich live zu
+`(lib "optimization-coach/tool.rkt")`, identisch zum Windows/Linux-Befund.
+
+**Verdikt:** `list-box%`-Selektion unter Qt auf macOS funktioniert korrekt.
+Die drei in §29 gescheiterten Strategien waren eine reine AppleScript/AX-
+Automatisierungsgrenze bei diesem einen Widget-Typ (aus unbekanntem Grund —
+nicht weiter verfolgt, da die eigentliche Frage jetzt beantwortet ist), kein
+Qt- oder `wx/qt`-Bug. Keine Code-Änderung.
+
+**Betriebsdisziplin:** `org.racket-lang.prefs.rktd` vor der Preferences-
+Interaktion gehasht und danach exakt zurückgespielt (Hash-Vergleich
+bestätigt).
+
+### 51.3 Zwei-Repo-Commit
+
+`wx/qt/menu.rkt` ist die einzige Codeänderung dieser Session — gui-Submodul
+(`qt-backend`) committet + gepusht, danach Umbrella-Zeiger nachgezogen (Regel
+8: Submodul-Commit war bereits auf `origin/qt-backend`, bevor der
+Umbrella-Pointer-Commit entstand).

@@ -5,6 +5,51 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-18 (macOS, 7) — „8 statt 9 Menüs" root-caused + gefixt, Tools-Listbox-Klick als Automatisierungsartefakt entlarvt
+
+**Kontext:** Fortsetzung, zwei offene Backlog-Punkte aus §29/§29.2
+(`docs/2026-09-13_report-macos.md`). Beide zuerst auf aktuellem HEAD (nach
+§47/§50) neu gemessen statt blind auf den alten Befund aufgesetzt.
+
+- **„8 statt 9 Menüs": root-caused und gefixt.** Re-Messung bestätigt: 3/3
+  Qt-Starts zeigen weiterhin 9 statt 10 Menüs, `Windows` fehlt; nativer
+  Kontrolllauf zeigt 10/10 — echte, reproduzierbare Qt-Divergenz. Root
+  Cause: `framework/private/group.rkt`s `create-windows-menu` (macOS-Label
+  für das plattformübergreifende „Tabs"-Konzept) legt das Menü **immer
+  leer** an und füllt es nur lazy per `demand-callback`, wenn es geöffnet
+  wird. Isolierte Probe bewiesen: ein unter Qt bei Erzeugung leeres
+  Top-Level-`menu%` taucht in der nativen Menüband-Enumeration **gar nicht**
+  auf — ohne Menüband-Slot kein Klick, ohne Klick kein `aboutToShow`, also
+  bleibt es für immer unsichtbar (Deadlock). win32/gtk/cocoa haben dieses
+  Problem nicht. **Fix** (`wx/qt/menu.rkt`, keine Shim-ABI-Änderung):
+  `menu%` hält jetzt immer mindestens eine deaktivierte, blanke Platzhalter-
+  `QAction`, solange keine echten Items vorhanden sind (angelegt bei
+  Konstruktion + bei jedem Leerwerden, entfernt beim ersten echten Item). Ein
+  Separator funktioniert dafür **nicht** (gemessen: Qts Leerheits-Check fürs
+  Menüband-Sync ignoriert Separatoren). Verifiziert: 3/3 Qt-Starts zeigen
+  jetzt 10 Einträge inkl. `Windows`, nativer Kontrolllauf weiterhin 10/10
+  (keine Regression), echter Klick (`cliclick`) öffnet das Menü mit vollem,
+  korrektem Inhalt (Minimize/Zoom/Bring Frame to Front/Tab-Liste/Untitled),
+  Smoke 3/3 beide Wege. Nur auf macOS relevant.
+- **Tools-Listbox-Klick (§29/§29.2-C): kein Produktbefund.** Isolierte
+  `list-box%`-Probe mit `cliclick` + `set frontmost` (statt der drei zuvor
+  gescheiterten `osascript`/AX-Strategien) — 2/2 Klicks lösen die Selektion
+  korrekt aus. Akzeptanztest in echtem DrRacket nachgeholt: Preferences →
+  Tools → Klick auf „Optimization Coach" selektiert die Zeile **und**
+  aktualisiert das `Tool:`-Feld live zu `(lib "optimization-coach/tool.rkt")`
+  — identisch zum Windows/Linux-Befund aus §25/§28. Die drei in §29
+  gescheiterten Automatisierungsstrategien waren ein reines
+  AppleScript/AX-Artefakt, kein Qt-Bug. Keine Code-Änderung.
+- **Betriebsdisziplin:** `org.racket-lang.prefs.rktd` vor/nach jeder
+  Preferences-Interaktion gehasht, exakt zurückgespielt.
+
+Gate: Smoke 3/3 beide Wege. Zwei-Repo-Commit: gui-Submodul (`qt-backend`,
+`wx/qt/menu.rkt`) committet + gepusht, danach Umbrella-Zeiger nachgezogen
+(Regel 8 eingehalten). Details: `docs/HACKING.md` §51,
+`docs/2026-09-18-6_report-macos.md`.
+
+---
+
 ## Session 2026-09-18 (macOS, 6) — Windows-exklusive Features (cursor/gauge/mouse-state/printer-dc) auf macOS: drei validiert, mouse-state implementiert, Printer-Dialog-Crash gefunden + root-caused + gefixt
 
 **Kontext:** Fortsetzung des offenen Punkts aus der Windows-Session
