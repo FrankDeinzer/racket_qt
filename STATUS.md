@@ -5,6 +5,46 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-18 (macOS) — gebündelter Validierungs-Sweep (kritischer Kern) zu docs/2026-09-13_prompt.md
+
+**Kontext:** Cluster-1-Block (Linux-geführt, `docs/2026-09-13_prompt.md`) war auf
+Linux gefixt und auf Windows validiert; macOS war der letzte fällige Durchlauf.
+Nutzerentscheidung: Umfang auf den kritischen Kern begrenzen (Akzeptanztest +
+Enable-Kaskade + macOS-exklusive offene Fragen + Resize/Drag), analog zum ersten
+Windows-Sweep.
+
+**Ergebnis: `test-dock-size`-Akzeptanztest n=3, 0/3 Crash — Linux-Fix generalisiert
+auf macOS.** `qt-shim` war bereits mit allen seit §32 fälligen Exporten gebaut (Build-
+Banner in `CLAUDE.md` für macOS damit überholt, aktualisiert). §32-Resize/Reflow-Fix
+ebenfalls auf macOS bestätigt (Kind-Control folgt der Fensterbreite über zwei
+Resizes, Mindestgröße korrigiert sich einmalig und bleibt stabil) — vorher „macOS
+weiterhin offen".
+
+**Automatisierungsfund:** rohe Koordinaten-Klicks (`osascript`/System Events
+`click at`) auf custom-gezeichnete Qt-Widgets (DrRacket-Toolbar, Panel-Buttons)
+lieferten **keinen** funktionalen Klick, selbst bei pixelgenauen Koordinaten oder
+AX-Namen — native Menüs/Dialoge/Fenstersteuerung funktionierten über denselben
+Mechanismus zuverlässig. Ersatz: Menüpfade statt Koordinaten (`click menu item`).
+Deshalb blieb die Enable-Kaskade (§26) ohne eigene interaktive Klick-Bestätigung —
+strukturell ersatzverifiziert (identisches `is-shown?`-Verhalten nativ/Qt, reiner
+plattformunabhängiger Fix-Code, Akzeptanztest durchläuft denselben Codepfad grün).
+
+**§29.2-Zombie reproduziert, teilweise reklassifiziert:** per echtem Klick auf den
+nativen Schließen-Button gemessen — Fenster schließt, Prozess bleibt idle am Leben.
+**Nativer Kontrollversuch zeigt dasselbe Verhalten** (Standard-macOS-App-Konvention,
+kein Qt-Bug) — analog zu §38 (Linux) reklassifiziert. **Neuer, isolierter Befund
+dabei gefunden:** natives Menüband kollabiert nach dem Schließen korrekt auf den
+Drei-Einträge-Zustand, die Qt-Variante bleibt beim vollen Achtmenü-Band — neuer
+Backlog-Punkt.
+
+**Keine Code-Änderung diese Session** (reine Validierung, Gate 3/3 beide Wege
+grün, `git status` sauber). Details: `docs/2026-09-18_report-macos.md`,
+`docs/HACKING.md` §44. Rest des gebündelten Sweeps (Clipboard/Menü-Enable/
+Colors-Scroll/Toolbar-Overlap/Crash B/Mausrad + Windows-exklusive Features
+cursor/gauge/mouse-state/printer-dc) bleibt für eine künftige macOS-Session offen.
+
+---
+
 ## Session 2026-09-17 (Windows, 10) — Zombie-Prozess reproduziert und auf Qt-Backend eingegrenzt
 
 **Kontext:** letzter offener Punkt aus der `-3`-Session: der Windows-Zombie-Nebenbefund

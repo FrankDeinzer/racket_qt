@@ -5049,3 +5049,164 @@ wiederholt während dieser Session, auch nach dem `local.rkt`-Fix).
 einen `qt-shim`-Rebuild (elf neue Exporte, zusätzlich zu §40/§41/§42s bereits
 ausstehenden — **und** die neue Qt-Komponente `PrintSupport` im CMake-Preset-Cache, s.
 Build-Banner in `CLAUDE.md`).
+
+## 44. macOS: gebündelter Validierungs-Sweep (kritischer Kern) zu §23.3/§26 (Cluster 1) + §32 (Resize/Reflow) — plus §29.2-Reklassifizierung
+
+**Kontext:** Fortsetzung von `docs/2026-09-13_prompt.md` (Linux-geführter Cluster-1-Block)
+auf macOS, nachdem Linux und Windows den kritischen Kern bereits abgedeckt hatten
+(`docs/2026-09-13_report-linux.md`, `docs/2026-09-17_report-win.md`). Nutzerentscheidung
+zu Sessionbeginn: Umfang auf den kritischen Kern begrenzen (Akzeptanztest + Enable-
+Kaskade + macOS-exklusive offene Fragen + Resize/Drag), Rest folgt in einer künftigen
+Session, analog zum Windows-Vorgehen.
+
+`racket --version`: 9.3 [cs] (Homebrew, arm64, unverändert seit 2026-08-19, §23.2).
+
+### 44.1 Umgebung bereits aktuell — kein Rebuild nötig
+
+Anders als der Build-Banner in `CLAUDE.md` (Stand 2026-09-17) vermuten ließ, war
+`qt-shim/build/macos-arm64/libracketqtshim.dylib` zu Sessionbeginn bereits am
+2026-09-18 gebaut (Timestamp vor dieser Session) und trug per `nm -gU` verifiziert
+**alle** seit §32 fälligen Exporte: `shim_window_set_resize_cb`,
+`shim_canvas_set_wheel_cb`, `shim_clipboard_{set,get,has}_text`,
+`shim_menu_set_about_to_show_cb`, `shim_cursor_create_standard`,
+`shim_cursor_create_from_argb`, `shim_widget_{set,unset}_cursor`,
+`shim_gauge_{create,set_range,get_range,set_value,get_value}`,
+`shim_get_mouse_state`, `shim_printer_create`, `shim_printer_set_output_pdf`. Fork
+bereits per `raco pkg update --link` verlinkt (§29.1), Umbrella/Submodul bereits
+synchron zu `origin` (kein Pull nötig, keine `AskUserQuestion` nach Regel 7
+erforderlich). Smoke 3/3 mit **und** ohne `PLT_QT=1` grün vor jeder Messung.
+
+### 44.2 Akzeptanztest `test-dock-size` — n=3, 0/3 Crash
+
+Methode: `osascript`/System Events, `examples/htdp-tests-probe.rkt` als Startdatei,
+je frischer `racket -l drracket --`-Prozess. **Wichtiger Automatisierungsfund, der
+diese Messung erst zuverlässig machte:** rohe Koordinaten-Klicks
+(`click at {x,y}` von System Events) auf den Toolbar-„Run"-Button — einen
+custom-gezeichneten Qt-Button ohne Accessibility-Namen (bestätigt per
+`entire contents of window 1`: nur Scrollbars, drei kleine Buttons und ein
+Statictext sind AX-exponiert, der komplette Toolbar-Inhalt ist für die Accessibility
+schlicht unsichtbar) — hatten **trotz pixelgenau verifizierter Koordinaten** (Crop-
+Analyse, dreifach nachgemessen) **keine Wirkung**, obwohl derselbe Mechanismus für
+Klicks auf die native Menüleiste (`click at {60,20}` öffnete nachweislich das
+„racket"-Menü) und auf natively gerenderte Dialoge (`QFileDialog`) zuverlässig
+funktionierte. **Root-Cause nicht abschließend geklärt** (Budget nicht investiert,
+kein Fix-Gegenstand dieser Session) — plausibelste Erklärung: Qts eigene
+Input-Verarbeitung auf macOS verlangt für Toolbar-Buttons einen echten HID-Mausklick
+mit Fensteraktivierung, den die reine `CGEventPost`-Klick-Simulation von System
+Events nicht liefert, während native Cocoa-Menüs/-Dialoge über den regulären
+Menu-/Panel-Server laufen und davon unberührt bleiben. **Funktionierender Ersatz:**
+denselben Befehl über sein Menü-Äquivalent auslösen — `click menu item "Run" of
+menu 1 of menu bar item 7 of menu bar 1` (Index statt Name nötig, da AppleScripts
+Namensvergleich case-insensitiv ist und sonst mit dem App-Menü „racket" kollidiert)
+lief zuverlässig, ebenso `File → Open…` reindeutig über `click menu item`.
+
+Drei Durchläufe (`racket -l drracket -- examples/htdp-tests-probe.rkt`, Run per
+Menü, danach `File → Open…` von `examples/htdp-image-probe.rkt` als zweiter Tab,
+per `Windows`-Menü verifiziert: „Tab 1: htdp-tests-probe.rkt" / „Tab 2:
+htdp-image-probe.rkt"): **0/3 Crash**, kein „DrRacket Internal Error", jeweils per
+„Quit racket" sauber beendet (kein Zombie in diesen drei Durchläufen). **Der
+Linux-Fix (Commit `2f0755bd`) generalisiert auf macOS.**
+
+### 44.3 Enable-Kaskade (§26 Fund 2) — Klick-Validierung durch Automatisierungsgrenze blockiert, strukturell verifiziert
+
+`examples/enable-cascade-probe.rkt` erfordert einen echten Klick auf einen
+`button%` innerhalb eines `vertical-panel%` (Positivkontrolle: Klick bei aktiviertem
+Button muss zählen). Anders als der DrRacket-Toolbar-Button trägt dieser Button
+sogar einen AX-Namen (`button "click-me"`, per Hit-Test **und** per Rollen-Query
+gefunden) — trotzdem zählte **weder** ein Koordinaten-Klick **noch** ein
+AX-`click button`-Action-Aufruf (`AXPress`) den Klick (n1=0 in drei unabhängigen
+Läufen, Positivkontrolle damit laut Probe selbst „UNGÜLTIG"). Frontmost-Status von
+`racket` vor jedem Klick explizit verifiziert (kein Fokus-Problem). **Klassifiziert
+als macOS-spezifische Automatisierungsgrenze für Qt-Widget-Content, nicht als
+Produktbefund** — nach Regel 4 geparkt, kein spekulativer Fix versucht.
+
+**Ersatzverifikation (strukturell, ohne Klick):** eigenes Scratch-Skript instanziiert
+`frame%` → `vertical-panel%` → `button%`, prüft `is-shown?` vor/nach `show`/`hide` auf
+allen drei Ebenen — Ergebnis **identisch zwischen nativ (Cocoa) und Qt**: `is-shown?`
+bleibt bei Panel/Button nach `(send f show #f)` `#t` (das per-Widget-Flag, nicht der
+rekursive Zustand — genau das von §23.3/§26 beabsichtigte Verhalten, symmetrisch zu
+win32). Zusammen mit der Tatsache, dass der Cluster-1-Fix (`is-shown?`-Basis +
+Enable-Kaskade, Commits `2f0755bd`/`a787b43f`) **reiner, plattformunabhängiger
+Racket-Code ohne einen einzigen macOS-Zweig** ist (identisch zu dem bereits auf
+Linux **und** Windows bestätigten Code), und dass der Akzeptanztest (44.2), der
+denselben `is-shown-to-root?`-Pfad im Render-/Remove-Codepfad von `test-panel%`
+durchläuft, sauber grün ist, wird die Enable-Kaskade als **auf macOS funktional
+äquivalent** eingeschätzt — **ohne** eine eigene interaktive Klick-Bestätigung wie
+auf Windows. Diese Einschränkung ist im Report explizit ausgewiesen, nicht
+verschwiegen.
+
+### 44.4 §32 Resize/Reflow — auf macOS validiert (bisher offen)
+
+`examples/live-resize-probe.rkt`, Resize **von außen** über
+`tell process "racket" to set size of window "live-resize-probe" to {…}` (AX-Level,
+funktioniert zuverlässig — anders als 44.2/44.3 ist das native Fenster-Resizing kein
+custom-gezeichneter Qt-Inhalt, sondern eine reguläre `NSWindow`/Qt-Fenstergrenzen-
+Operation über den Window-Server). Zwei Resizes, `stretchable-width`-Button verfolgt
+die Fensterbreite korrekt: 300×200 (Start) → 700×372 (Button 696px) → 870×472 (Button
+866px). Kein Hänger, kein Kaskadieren über mehrere Ticks beobachtet. **Der
+Windows-validierte §32-Fix (`resizeEvent`-Verdrahtung) generalisiert auf macOS.**
+
+`examples/minsize-resize-probe.rkt`: Versuch, unter die Mindestgröße zu ziehen
+(Zielgröße 50×50) korrigiert **einmalig** auf 327×432 und bleibt dort über mindestens
+zwölf weitere Ticks stabil — kein Oszillieren, kein Zurückkehren des `set-size`-Echos
+(die in Fix-Versuch 1 beobachtete Rückkopplungsschleife tritt nicht auf).
+
+### 44.5 §29.2 „Zombie-Prozess" — reproduziert per echtem Klick, aber teilweise reklassifiziert; neuer, enger gefasster Befund
+
+Bisher war dieser Punkt auf macOS nur über eine andere (nicht na¨her spezifizierte)
+Automatisierung gemessen worden, nie über einen echten Klick auf den nativen
+Schließen-Button. Nachgeholt: `click button 1 of window "hello.rkt - DrRacket"`
+(Traffic-Light-Button, echtes `AXButton`, per Positions-Query 8,37/28,37/48,37 als
+Close/Minimize/Zoom identifiziert) unter `PLT_QT=1` — Fenster verschwindet
+(Fensterliste danach leer), Prozess bleibt am Leben (`pgrep` findet ihn weiterhin),
+CPU-Delta über 5 s ≈ 20 ms (idle, kein Hang) — **reproduziert**, deckt sich mit dem
+Windows-Befund (§10-Report) exakt im Muster.
+
+**Nativer Kontrollversuch (ohne `PLT_QT`, identische Klick-Methodik) zeigt
+dasselbe Verhalten:** Prozess bleibt ebenfalls am Leben, Fenster verschwindet. **Das
+ist kein Bug, sondern Standard-macOS-App-Verhalten** (Cocoa-Apps beenden sich per
+Konvention nicht automatisch, wenn das letzte Fenster schließt, sofern sie es nicht
+explizit implementieren — `applicationShouldTerminateAfterLastWindowClosed` liefert
+für DrRacket in beiden Fällen dasselbe „nein"). **Der „Prozess überlebt"-Teil von
+§29.2 ist damit auf macOS analog zu §38 (Linux) reklassifiziert: kein Qt-Bug,
+sondern erwartetes Plattformverhalten**, das nur unter Windows als Anomalie auffiel
+(dort beenden sich normale Anwendungen beim Schließen des letzten Fensters).
+
+**Dabei aber ein neuer, enger gefasster, echter Befund gefunden:** nach dem Schließen
+zeigt das **native** `racket`-Menüband korrekt den reduzierten „Keine Dokumente
+offen"-Zustand (`racket, File, Help` — drei Einträge), während die **Qt**-Variante
+nach identischem Klick weiterhin das **volle** Menüband zeigt (`Apple, racket, File,
+Edit, View, Language, Racket, Insert, Scripts, Help` — alle acht App-Menüs), obwohl
+die Fensterliste in beiden Fällen leer ist. **Root-Cause nicht untersucht** (Budget
+nicht investiert, außerhalb des kritischen Kerns dieser Session) — plausibelste
+Stelle: die App-weite Menü-Rebuild-Logik, die bei „letztes Fenster geschlossen" auf
+ein reduziertes Menü umschalten sollte, hängt vermutlich an `wx/qt/frame.rkt`s
+`on-close`/Fensterzähler-Pfad, analog zum in `CLAUDE.md` bereits offen vermerkten
+„Windows-Menü fehlt manchmal"-Nebenbefund, aber ein eigenständiges Symptom (nicht
+Ein-/Ausblenden eines einzelnen Menüs, sondern Nicht-Kollabieren des gesamten
+App-Menüs). **Neuer Backlog-Punkt, eigene künftige Session.**
+
+### 44.6 Automatisierungs-Lehre für künftige macOS-Sessions
+
+**Rohe `click at {x,y}`-Koordinatenklicks (System Events) und selbst AX-`click`-
+Actions auf benannte Elemente liefern bei custom-gezeichnetem Qt-Widget-Content
+(Buttons in einem `panel%`, DrRacket-Toolbar-Icons) keinen zuverlässigen
+Mausklick** — verifiziert an zwei unabhängigen Fällen (Toolbar-Run-Button ohne
+AX-Namen, Panel-Button mit AX-Namen), beide negativ, während native Cocoa-Menüs,
+-Dialoge und -Fenstersteuerelemente (Traffic-Lights, `NSOpenPanel`-Nachbau via
+`QFileDialog`, native Fenstergrößenänderung über `set size of window`) über
+denselben Mechanismus zuverlässig funktionierten. **Für künftige macOS-GUI-
+Automatisierung:** wo ein Menüpfad existiert, `click menu item …` statt Koordinaten
+verwenden; wo kein Menüpfad existiert (z. B. reine Canvas-/Widget-Interaktion),
+noch keine zuverlässige Methode etabliert — eigener Diagnosepunkt für eine
+künftige Session, falls dort ein Block genau das braucht (z. B. Mausrad/Scroll-
+Validierung, die auf Linux/Windows bereits gelang).
+
+### 44.7 Gate
+
+Smoke 3/3 mit **und** ohne `PLT_QT=1` (vor und nach allen Messungen). `git status`
+(Umbrella + Submodul) am Ende sauber — keine Code-Änderung diese Session (reine
+Validierung), keine neue Datei in `examples/` (alle Scratch-Skripte nur im
+Scratchpad). `org.racket-lang.prefs.rktd` vor der ersten GUI-Interaktion gesichert
+(SHA-256 `be9b38f2…deefb9`) und nach jeder DrRacket-Session-Runde zurückgespielt,
+Hash abschließend verifiziert identisch.
