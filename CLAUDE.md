@@ -507,12 +507,30 @@ Prozess reproduzierbar 3/3 (`invalid memory reference`). Fünf Hypothesen
 `queue-event`/`yield`-Indirektion, `printer-dc%`s eigener Bitmap/Cairo-Zustand,
 `moredialogs.rkt`s `parameterize`+`ps-setup%`-Wrapper) per Racket-Ebene-Bisektion
 geprüft und **alle widerlegt** — die Speicherbeschädigung zeigt sich vermutlich
-dort, wo als Nächstes alloziert wird, nicht an ihrem Ursprung. `lldb`-Versuch
-scheiterte an `task_for_pid`-Berechtigungen, auch nach `sudo DevToolsSecurity
--enable`. **Root cause offen, eigene künftige Session** (braucht funktionierende
-native Debugging-Tools) — PDF-Pfad produktionsreif, interaktiver Dialog-Pfad
-(der einzige, den ein Nutzer über File → Print sieht) **nicht**. Details:
-`docs/HACKING.md` §43, §49.4.
+dort, wo als Nächstes alloziert wird, nicht an ihrem Ursprung. Erster `lldb`-
+Versuch scheiterte an `task_for_pid`-Berechtigungen, auch nach `sudo
+DevToolsSecurity -enable`. **Root-caused und gefixt, noch in derselben
+Session (§50):** eine zweite Hürde (`get-task-allow`-Entitlement fehlte dem
+Racket-Binary selbst, Hardened Runtime) wurde durch Neusignieren einer Kopie
+umgangen — Xcodes `lldb` hängt damit erfolgreich an, nativer Backtrace zeigt
+den Crash in `libsystem_c.dylib`'s `__cxa_finalize_ranges` (Qts eigene
+statische C++-Destruktoren), aufgerufen von `exit()`. Ursache: `shim_app_quit()`
+(zerstört `QApplication` ordentlich) existierte im Shim bereits, hatte aber
+**nirgends im Racket-Code einen Aufrufer** — ohne geordnete
+`QApplication`-Zerstörung läuft die Qt-Statics-Abbaureihenfolge in einem nie
+vorgesehenen Zustand, sobald ein lazy geladenes Plugin (hier: Print-Support,
+erst beim ersten Dialog geladen) eigene Globals hinterlassen hat — dieselbe
+Bug-Klasse wie §39 (Crash B). **Fix (gui-Submodul, `wx/qt/queue.rkt`):** ein
+`(plumber-add-flush! (current-plumber) (lambda (handle) (shim_app_quit)))` in
+`qt-init!` — läuft synchron innerhalb von `(exit)`, bevor die eigentliche
+`exit()` aufgerufen wird. Keine Shim-/ABI-Änderung. Verifiziert: alle drei
+ursprünglichen Repros je 3/3 crashfrei, Smoke 3/3 beide Wege. PDF-Pfad **und**
+interaktiver Dialog-Pfad sind auf macOS jetzt produktionsreif. **Nur auf
+macOS reproduziert/gefixt/verifiziert** — derselbe tote Code-Pfad
+(`shim_app_quit` ohne Aufrufer) besteht identisch auf Windows/Linux, dort aber
+nicht nachgeprüft (auf Windows blieb `QPrintDialog` laut §43.7 unsichtbar,
+das Plugin also vermutlich nie voll initialisiert). Details:
+`docs/HACKING.md` §43, §49.4, §50.
 **`get-current-mouse-state` implementiert, 2026-09-17, Windows (§42)** — Position aus
 `QCursor::pos()`, Modifikatoren aus `QGuiApplication::queryKeyboardModifiers()` (echter
 synchroner Hardware-Query laut Qt-Doku), Maustasten + Caps Lock aus `GetAsyncKeyState`

@@ -5,7 +5,7 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
-## Session 2026-09-18 (macOS, 6) — Windows-exklusive Features (cursor/gauge/mouse-state/printer-dc) auf macOS: drei validiert, mouse-state implementiert, neuer Printer-Dialog-Crash gefunden
+## Session 2026-09-18 (macOS, 6) — Windows-exklusive Features (cursor/gauge/mouse-state/printer-dc) auf macOS: drei validiert, mouse-state implementiert, Printer-Dialog-Crash gefunden + root-caused + gefixt
 
 **Kontext:** Fortsetzung des offenen Punkts aus der Windows-Session
 (§40–§43): `cursor-driver%`/`gauge%`/`printer-dc%`/`get-current-mouse-state`
@@ -19,19 +19,32 @@ Build-Banner bereits mit allen 26 Exporten neu gebaut.
   `GetCursorInfo`+`DrawIcon`) visuell bestätigt.
 - **`printer-dc%` PDF-Rasterpfad validiert** — zweiseitige PDF korrekt
   gerastert (deckt sich mit §43.7).
-- **`printer-dc%` Dialog-Pfad: neuer, reproduzierbarer Crash gefunden**
-  (`invalid memory reference` beim Prozessende nach Cancel auf
-  `QPrintDialog`/`QPageSetupDialog`, n=3/3 über drei Einstiegspunkte) — auf
-  Windows nie beobachtbar, da der Dialog dort laut §43.7 nie sichtbar
-  wurde. Ausführliche Racket-Ebene-Bisektion (fünf Hypothesen: Pump-Timing
-  vor `destroy`, Parent-Handle+Enable-Kaskade, `queue-event`/`yield`-
-  Indirektion, `printer-dc%`s Bitmap/Cairo-Zustand, `parameterize`+
-  `ps-setup%`-Wrapper) hat jede Hypothese widerlegt, ohne die Ursache zu
-  finden. `lldb`-Versuch scheiterte an `task_for_pid`-Berechtigungen (auch
-  nach `sudo DevToolsSecurity -enable`, vom Nutzer ausgeführt) — nicht
-  weiter verfolgt (Advisor-Rat: ein Versuch, dann dokumentieren). **Root
-  cause offen, eigene künftige Session** (braucht funktionierende native
-  Debugging-Tools). PDF-Pfad ist produktionsreif, Dialog-Pfad nicht.
+- **`printer-dc%` Dialog-Pfad: reproduzierbarer Crash gefunden, root-caused
+  und gefixt, alles in derselben Session (§49.4/§50)** — `invalid memory
+  reference` beim Prozessende nach Cancel auf `QPrintDialog`/
+  `QPageSetupDialog`, n=3/3 über drei Einstiegspunkte, auf Windows nie
+  beobachtbar (Dialog dort laut §43.7 nie sichtbar). Racket-Ebene-Bisektion
+  (fünf Hypothesen: Pump-Timing vor `destroy`, Parent-Handle+Enable-Kaskade,
+  `queue-event`/`yield`-Indirektion, `printer-dc%`s Bitmap/Cairo-Zustand,
+  `parameterize`+`ps-setup%`-Wrapper) widerlegte jede Hypothese. Erster
+  `lldb`-Versuch scheiterte an `task_for_pid` trotz `sudo DevToolsSecurity
+  -enable` — zweite Hürde gefunden: Racket-Binary selbst lief mit Hardened
+  Runtime ohne `get-task-allow`-Entitlement. Fix (nur lokal, Original
+  unangetastet): Kopie ad-hoc neu signiert + Quarantäne entfernt + `-X` auf
+  echte `collects` — Xcodes `lldb` hängt damit an. **Nativer Backtrace**
+  (2× identisch reproduziert) zeigt den Crash in `__cxa_finalize_ranges`
+  (Qts eigene C++-Statics-Destruktoren), aufgerufen von `exit()`. **Root
+  Cause:** `shim_app_quit()` (zerstört `QApplication` ordentlich) existierte
+  im Shim bereits, hatte aber nirgends im Racket-Code einen Aufrufer — ohne
+  geordnete `QApplication`-Zerstörung crasht die Qt-Statics-Abbaureihenfolge,
+  sobald ein lazy geladenes Plugin (hier: Print-Support) eigene Globals
+  hinterlassen hat. Dieselbe Bug-Klasse wie §39 (Crash B). **Fix**
+  (gui-Submodul, `wx/qt/queue.rkt`): `(plumber-add-flush! (current-plumber)
+  (lambda (handle) (shim_app_quit)))` in `qt-init!` — läuft synchron
+  innerhalb von `(exit)`, vor der eigentlichen `exit()`. Keine Shim-/
+  ABI-Änderung. Verifiziert: alle drei ursprünglichen Repros je 3/3
+  crashfrei, Smoke 3/3 beide Wege. PDF-Pfad **und** interaktiver Dialog-Pfad
+  jetzt produktionsreif auf macOS.
 - **`get-current-mouse-state` implementiert** — neuer
   `#elif defined(__APPLE__)`-Zweig in `shim_get_mouse_state`
   (`CGEventSourceButtonState`/`CGEventSourceFlagsState`), keine neuen
@@ -42,9 +55,12 @@ Build-Banner bereits mit allen 26 Exporten neu gebaut.
   mit `wx/qt/key-map.rkt`s eigener, ebenfalls unverswappter
   Modifier-Behandlung, deshalb bewusst nicht "korrigiert".
 
-Gate: Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ, nach dem Shim-Rebuild. Nur
-`qt-shim/` (Umbrella) geändert, kein gui-Submodul-Commit nötig. Details:
-`docs/HACKING.md` §49, `docs/2026-09-18-5_report-macos.md`.
+Gate: Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ, nach dem Shim-Rebuild bzw. nach
+`raco make`. `qt-shim/` (Umbrella) für mouse-state geändert; `wx/qt/queue.rkt`
+(gui-Submodul `qt-backend`) für den Printer-Dialog-Fix — **zwei-Repo-Commit
+nötig** (Submodul-Commit `5a6da709`, danach Umbrella-Zeiger nachziehen, s.
+CLAUDE.md Regel 8). Details: `docs/HACKING.md` §49/§50,
+`docs/2026-09-18-5_report-macos.md`.
 
 ---
 

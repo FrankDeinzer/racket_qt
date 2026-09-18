@@ -11,7 +11,7 @@ Details/Vollversion: `docs/HACKING.md` §49.
 | `gauge%` | ✅ validiert (Screenshot: wachsender Balken h+v, `get-value`/`get-range` roundtrippen) |
 | `cursor-driver%` | ✅ validiert (`arrow`/`hand`/`bullseye`/custom-plus per `cliclick`+`screencapture -C`) |
 | `printer-dc%`, PDF-Rasterpfad | ✅ validiert (2-seitige PDF, per ImageMagick sichtgeprüft) |
-| `printer-dc%`, Dialog-Pfad | 🔴 **neuer Crash** beim Prozessende nach `QPrintDialog`/`QPageSetupDialog`-Nutzung, n=3/3 |
+| `printer-dc%`, Dialog-Pfad | ✅ Crash gefunden, root-caused **und gefixt** — s. „Update" unten |
 | `get-current-mouse-state` | ✅ implementiert (macOS-Zweig: `CGEventSourceButtonState`/`CGEventSourceFlagsState`) + validiert |
 
 ## Der neue Crash-Befund (Kern)
@@ -34,11 +34,50 @@ Ein `lldb`-Versuch zur nativen Backtrace-Analyse scheiterte an
 und mit dem Xcode-eigenen `lldb`. Nicht weiter verfolgt (Advisor-Empfehlung:
 ein Versuch, dann dokumentieren).
 
-**Auswirkung:** `printer-dc%`s PDF-Pfad ist auf macOS produktionsreif, der
-interaktive Dialog-Pfad (der einzige, den ein echter Nutzer über File → Print
-zu sehen bekommt) crasht beim Beenden nach jedem Druckvorgang mit sichtbarem
-Dialog. Root-Cause-Lokalisierung braucht funktionierende native
-Debugging-Tools — eigene künftige Session.
+**Auswirkung (zum Zeitpunkt dieses Befunds):** `printer-dc%`s PDF-Pfad ist auf
+macOS produktionsreif, der interaktive Dialog-Pfad crasht beim Beenden nach
+jedem Druckvorgang mit sichtbarem Dialog. **Siehe Update unten — inzwischen
+gefixt, noch in derselben Session.**
+
+## Update: root-caused und gefixt (§50)
+
+Der Nutzer hat `sudo DevToolsSecurity -enable` ausgeführt und iTerm2 unter
+Entwicklerwerkzeuge freigegeben — `task_for_pid` scheiterte trotzdem. Ursache:
+`/Applications/Racket v9.3/bin/racket` läuft mit Hardened Runtime ohne das
+Entitlement `com.apple.security.get-task-allow`. Fix (nur lokal, Original
+unangetastet): eine Kopie ad-hoc mit diesem Entitlement neu signiert,
+Quarantäne-Flag entfernt, `-X "<echte collects>"` übergeben — Xcodes eigenes
+`lldb` hängt damit erfolgreich an.
+
+**Nativer Backtrace** (2× identisch reproduziert, Nutzer hat im Dialog auf
+„Cancel" geklickt):
+
+```
+* thread #1, stop reason = EXC_BAD_ACCESS (code=1, address=0xa9417bfdaa1303e0)
+  frame #0: QtGui`___lldb_unnamed_symbol_399a70 + 44   (virtueller Call, this=Müll)
+  frame #1-3: QtCore`...
+  frame #4: libsystem_c.dylib`__cxa_finalize_ranges + 416
+  frame #5: libsystem_c.dylib`exit + 44
+  frame #6: racket-debug`c_exit + 12
+```
+
+**Root Cause:** `(exit)` löst über `__cxa_finalize_ranges` Qts eigene
+C++-Statics-Destruktoren aus — aber nichts hat vorher `QApplication` zerstört.
+Der Shim hatte dafür schon `shim_app_quit()`, nur ohne jeden Aufrufer im
+Racket-Code. Sobald das lazy geladene Print-Support-Plugin (erst beim ersten
+Dialog initialisiert) eigene Globals hinterlassen hat, crasht die
+nie-vorgesehene Statics-Abbaureihenfolge — dieselbe Bug-Klasse wie §39
+(Crash B).
+
+**Fix** (gui-Submodul, `wx/qt/queue.rkt`, Commit `5a6da709`): ein
+`(plumber-add-flush! (current-plumber) (lambda (handle) (shim_app_quit)))` in
+`qt-init!` — läuft synchron innerhalb von `(exit)`, vor der eigentlichen
+`exit()`. Keine Shim-/ABI-Änderung.
+
+**Verifiziert:** alle drei ursprünglichen Repros (`printer-onlypagesetup.rkt`,
+`printer-onlyprint.rkt`, `examples/printer-dialog-probe.rkt`) je 3/3
+crashfrei nach dem Fix. Smoke 3/3 beide Wege. PDF-Pfad **und** interaktiver
+Dialog-Pfad jetzt produktionsreif auf macOS. Details: `docs/HACKING.md` §50.
 
 ## `get-current-mouse-state`
 
@@ -53,11 +92,13 @@ ebenfalls unverswappter Modifier-Behandlung, deshalb **bewusst nicht
 
 ## Nicht in dieser Session
 
-- Root-Cause des neuen Printer-Dialog-Crashes.
 - `middle`/`right`-Maustasten einzeln durchgeklickt (Automatisierungsgrenze
   von `cliclick`, Code-Pfad aber identisch zu `left`).
-- Linux/Windows-Gegenprüfung von irgendetwas in dieser Session.
+- Linux/Windows-Gegenprüfung von irgendetwas in dieser Session — insbesondere
+  der Printer-Dialog-Fix betrifft plattformneutrales `wx/qt/queue.rkt`, ist
+  aber nur auf macOS verifiziert.
 
 ## Gate
 
-Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ ohne `PLT_QT`, nach dem Shim-Rebuild.
+Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ ohne `PLT_QT`, nach dem Shim-Rebuild bzw.
+`raco make`.

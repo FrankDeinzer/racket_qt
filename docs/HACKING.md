@@ -5843,21 +5843,8 @@ verworfen:**
   nötig) — **nicht weiter verfolgt** (Advisor-Empfehlung: ein lldb-Versuch,
   dann dokumentieren statt offen weitersuchen).
 
-**Bewertung:** ein echter, reproduzierbarer (n=3/3) Speicherfehler beim
-Beenden nach einem genutzten `QPrintDialog`/`QPageSetupDialog` auf macOS,
-sauber vom sicheren PDF-Pfad abgegrenzt, aber die exakte Speicherstelle bleibt
-unlokalisiert. Plausibelste, nicht bewiesene Hypothese (per Advisor):
-`QPrintDialog`s natives `NSPrintPanel`/Core-Printing-Objekt hält intern eine
-Referenz auf das `QPrinter`, die durch `shim_printer_destroy`s `delete`
-verletzt wird (analog zu §40.5s bewusst nie freigegebenem `QCursor`) — aber
-ausdrücklich **nicht verifiziert**, nur die nächstliegende Erklärung. **Kein
-Fix in dieser Session** — Root-Cause-Lokalisierung bräuchte native
-Backtrace-Tools, die auf dieser Maschine (noch) nicht funktionieren, oder
-eine zukünftige Session mit funktionierendem lldb/Instruments. Bis dahin:
-`printer-dc%`s PDF-Pfad ist auf macOS produktionsreif, der interaktive
-Dialog-Pfad **nicht** — ein Absturz beim Beenden nach jedem echten
-Druckvorgang mit sichtbarem Dialog ist ein Nutzerfront-Defekt, kein bloßer
-Diagnosebefund. **Nur auf macOS reproduziert/untersucht.**
+**Update, noch in dieser Session — root-caused und gefixt, s. §50 weiter
+unten.**
 
 ### 49.5 `get-current-mouse-state` — macOS-Zweig implementiert
 
@@ -5920,7 +5907,164 @@ Caps-Lock-Äquivalent ohne XKB) in einer eigenen künftigen Session.
 | `gauge%` | ✅ validiert |
 | `cursor-driver%` | ✅ validiert |
 | `printer-dc%` (PDF-Pfad) | ✅ validiert |
-| `printer-dc%` (Dialog-Pfad) | 🔴 neuer Crash beim Beenden nach Dialog-Nutzung, root cause nicht lokalisiert |
+| `printer-dc%` (Dialog-Pfad) | ✅ gefixt, s. §50 |
 | `get-current-mouse-state` | ✅ implementiert + validiert (Position, Maustaste `left`, alle vier Modifikatoren) |
 
 Details/Reproduktionsschritte: `docs/2026-09-18-5_report-macos.md`.
+
+## 50. macOS: Printer-Dialog-Crash aus §49.4 root-caused und gefixt — `QApplication` wurde nie vor `exit()` zerstört
+
+### 50.1 lldb funktionierte doch — zwei zusätzliche Hürden gefunden
+
+§49.4s lldb-Versuch scheiterte an `task_for_pid` trotz `sudo DevToolsSecurity
+-enable`. Zwei weitere, in dieser Session gefundene Hürden mussten zusätzlich
+fallen, beide vom Nutzer bzw. gemeinsam behoben:
+
+1. **iTerm2 fehlte in Systemeinstellungen → Datenschutz & Sicherheit →
+   Entwicklerwerkzeuge** (App-spezifische Freigabe, unabhängig vom globalen
+   Developer Mode) — vom Nutzer ergänzt, änderte aber nichts (`task_for_pid`
+   weiterhin `err = 0x00000005`).
+2. **Die eigentliche Ursache:** `/Applications/Racket v9.3/bin/racket`
+   läuft mit Hardened Runtime (`codesign -dv`: `flags=0x10100(hard,runtime)`),
+   aber ohne das Entitlement `com.apple.security.get-task-allow` — ohne das
+   verweigert der Kernel `task_for_pid` für den Prozess, unabhängig von jeder
+   App- oder Nutzer-Berechtigung. Fix: eine **Kopie** des Binaries (Original
+   unangetastet) ad-hoc neu signiert mit einem Entitlements-Plist, das zu den
+   bestehenden Einträgen (`allow-jit`, `allow-unsigned-executable-memory`,
+   `disable-library-validation`, `allow-dyld-environment-variables`,
+   `inherit`) `get-task-allow=true` hinzufügt (`codesign --sign - --entitlements
+   ... --force`). Die Kopie brauchte zusätzlich `xattr -d com.apple.quarantine`
+   (sonst `syspolicyd`/Gatekeeper-`ASP`-Block, „Security policy would not allow
+   process") und `-X "<echte collects>"` (sonst `standard-module-name-resolver:
+   collection not found`, da die Kopie außerhalb der Installation liegt und ihre
+   eigenen Collects nicht findet). Mit allen drei Fixes hängt Xcodes eigenes
+   `lldb` (`/Applications/Xcode.app/Contents/Developer/usr/bin/lldb`, **nicht**
+   der `xcode-select`-Tool-Shim unter `/usr/bin/lldb`) erfolgreich an.
+
+### 50.2 Nativer Backtrace
+
+Der Nutzer hat die crashende Probe (`printer-onlypagesetup.rkt`, nur
+`get-page-setup-from-user`, kein `printer-dc%`) unter diesem lldb laufen
+lassen und im Dialog auf „Cancel" geklickt. Ein `lldb`-Skript mit
+`process handle SIGSEGV/SIGBUS --stop true --pass false`, `run`, `bt all`,
+`register read`, `image lookup -a $pc -v` (als normale, nach `run` folgende
+Kommandos — die `-k`/„nur bei Crash"-Flags von `lldb -b` liefen aus
+unbekanntem Grund nur einmal, ein zweites/drittes `-k` wurde ignoriert; direkt
+im Skript nach `run` funktionierte zuverlässig, da lldb nach einem Stop im
+selben Interpreter-Kontext weiterläuft) ergab, **reproduziert in zwei
+unabhängigen Läufen identisch**:
+
+```
+* thread #1, queue = 'com.apple.main-thread', stop reason = EXC_BAD_ACCESS (code=1, address=0xa9417bfdaa1303e0)
+   frame #0: QtGui`___lldb_unnamed_symbol_399a70 + 44      ; ldr x8,[x0]; ldr x8,[x8,#0x58]; blr x8 -- virtueller Call, x0 (=`this`) ist Müll
+   frame #1: QtCore`___lldb_unnamed_symbol_253a0c + 408
+   frame #2: QtCore`___lldb_unnamed_symbol_24ccf0 + 180
+   frame #3: QtCore`___lldb_unnamed_symbol_24cdb8 + 44
+   frame #4: libsystem_c.dylib`__cxa_finalize_ranges + 416
+   frame #5: libsystem_c.dylib`exit + 44
+   frame #6: racket-debug`c_exit + 12
+   frame #7: 0x0000000103d18244
+   frame #8: racket-debug`Scall2 + 120
+   frame #9: racket-debug`racket_boot + 1680
+   frame #10: racket-debug`main + 2268
+   frame #11: dyld`start + 6992
+```
+
+Identische Absturzadresse in beiden Läufen (nicht nur derselbe Frame) —
+ein starkes Indiz für einen deterministischen Strukturfehler, keine
+heap-layout-abhängige Race, was zur Bisektions-Beobachtung aus §49.4 passt
+(jede Racket-seitige Testvariante änderte das Layout genug, um das Symptom
+verschwinden zu lassen, ohne die Ursache zu berühren — genau das Verhalten,
+das man erwartet, wenn die Ursache tiefer liegt als jede dieser Varianten
+reicht).
+
+### 50.3 Root Cause
+
+`frame #4`/`#5` sind der Schlüssel: `(exit)` ruft die libc-`exit()`, die über
+`__cxa_finalize_ranges` die **statischen C++-Destruktoren jeder geladenen
+Shared Library** abarbeitet — hier: QtCore/QtGui. Ein Blick in `shim.cpp`
+zeigte: es gibt bereits ein fertiges `shim_app_quit()` (`delete s_app`,
+Zeile ~321-325), symmetrisch zu `shim_app_init()` — **aber `shim_app_quit`
+hatte in der gesamten Racket-Seite keinen einzigen Aufrufer.** `wx/qt/
+queue.rkt`s `qt-init!` ruft `shim_app_init` beim Modul-Load, nie aber das
+Gegenstück vor Prozessende.
+
+Ohne eine geordnete `QApplication`-Zerstörung läuft die
+Statics-Abbaureihenfolge der Qt-Bibliotheken in einem Zustand, den Qt so nie
+vorgesehen hat (normalerweise räumt `~QApplication()` u. a. lazy geladene
+Plattform-Plugins ab, bevor irgendwelche globalen Statics dran sind). Sobald
+ein solches Plugin lazy geladen wurde — hier das Print-Support-Plugin, das
+erst beim ersten `QPrintDialog`/`QPageSetupDialog` initialisiert wird (§49.4s
+Beobachtung, dass **nur** der Dialog-Pfad crasht, PDF-Pfad nie) — hinterlässt
+es eigene Globals, deren Zerstörungsreihenfolge relativ zu anderen
+QtCore/QtGui-Statics nie mit einer sauberen `~QApplication()` vorher getestet
+wurde und mit einem Müll-„this" endet. **Dieselbe Bug-Klasse wie §39 (Crash
+B)** — dort fehlte ein Pump-Zyklus vor `exit`, der `QFileDialog::deleteLater()`
+hätte abarbeiten sollen, und Qts eigener `atexit`-Flush übernahm das stattdessen
+in einem bereits halb abgebauten Zustand. Hier ist es keine Deferred-Delete-
+Warteschlange, sondern die `QApplication` selbst, die nie geordnet
+zurückgefahren wurde — verwandtes Muster, andere Stelle.
+
+### 50.4 Fix
+
+Ein `(plumber-add-flush! (current-plumber) (lambda (handle) (shim_app_quit)))`
+in `wx/qt/queue.rkt`s `qt-init!`, direkt nach `(shim_app_init)`. Racket ruft
+alle registrierten Plumber-Flushes synchron ab, **bevor** `(exit)` die
+libc-`exit()` tatsächlich aufruft — exakt der Zeitpunkt, an dem
+`~QApplication()` noch geordnet laufen kann, bevor `__cxa_finalize_ranges`
+die Statics-Kaskade auslöst. **Keine Shim-Änderung, keine ABI-Änderung** —
+`shim_app_quit` existierte unverändert seit dem allerersten Spike, nur der
+Aufrufer fehlte.
+
+### 50.5 Verifikation
+
+Alle drei ursprünglichen §49.4-Repros je **3/3 crashfrei** nach dem Fix
+(vorher je 3/3 `invalid memory reference`):
+- `printer-onlypagesetup.rkt` (nur `get-page-setup-from-user`, kein
+  `printer-dc%`)
+- `printer-onlyprint.rkt` (nur `QPrintDialog` über `printer-dc%.end-doc`,
+  kein Page-Setup-Dialog vorher)
+- `examples/printer-dialog-probe.rkt` (beide Dialoge + echtes `printer-dc%`
+  mit `start-doc`/`start-page`/`draw-text`/`end-page`/`end-doc`)
+
+Regressions-Gate: Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ, nach `raco make`.
+`examples/hello.rkt` unter Qt (Beendigung per `SIGTERM`, kein echter
+Fensterschluss getestet) zeigt weiterhin normales Verhalten, kein Hang, kein
+neuer Fehler.
+
+### 50.6 Bewertung / Tragweite
+
+Die Änderung sitzt in `qt-init!`, das **jedes** `wx/qt`-Skript beim Start
+durchläuft — nicht nur `printer-dc%`-Nutzer. Der Crash selbst wurde nur über
+`printer-dc%` sichtbar, weil das (bislang) der einzige Konsument in diesem
+Backend ist, der ein lazy geladenes Qt-Subsystem (Print-Support-Plugin)
+berührt — andere Widgets/Features laden vermutlich keine vergleichbaren
+Plugins und haben das Problem deshalb nie ausgelöst, obwohl der zugrunde
+liegende Strukturfehler (`shim_app_quit` nie aufgerufen) auf **allen drei
+Plattformen** gleich vorliegt. `printer-dc%`s interaktiver Dialog-Pfad ist
+damit auf macOS jetzt ebenfalls produktionsreif, nicht nur der PDF-Pfad.
+
+**Nur auf macOS reproduziert, root-caused, gefixt und verifiziert.**
+Windows/Linux haben denselben toten Code-Pfad (`shim_app_quit` ohne Aufrufer)
+— der Fix selbst ist plattformneutrales Racket (`wx/qt/queue.rkt`), sollte
+also identisch mitwirken, aber **nicht auf Windows/Linux nachgeprüft**.
+Empfehlung für eine künftige Session dort: Smoke-Test + einmal
+`printer-onlyprint.rkt` (oder das Windows-Äquivalent, falls `QPrintDialog`
+dort inzwischen sichtbar wird) wiederholen, um auszuschließen, dass derselbe
+Absturz dort unter anderen Umständen ebenfalls vorlag, nur bislang unbeobachtet
+blieb (auf Windows blieb `QPrintDialog` laut §43.7 unsichtbar, das Plugin
+also vermutlich nie voll initialisiert — plausibler Grund, warum es dort nie
+auffiel, nicht bewiesen).
+
+### 50.7 Lektion: `-k`/„nur bei Crash"-Flags von `lldb -b` nicht verlässlich mehrfach nutzbar
+
+Mehrere `-k "cmd"`-Flags in derselben `lldb -b`-Aufrufzeile liefen nur beim
+ersten Vorkommen zuverlässig; ein zweiter/dritter `-k` (z. B. `register read`
+nach `bt all`) blieb wortlos aus. Zuverlässiger: die Diagnosekommandos direkt
+in die per `-s`/`command source` geladene Kommando-Datei schreiben, **nach**
+`run` — sobald der Prozess durch ein Signal stoppt, führt `lldb -b` die
+restlichen Datei-Kommandos im selben, bereits gestoppten Interpreter-Kontext
+weiter aus, ganz ohne `-k`. Für künftige native Debugging-Sessions in diesem
+Projekt: dieses Muster (Kommandodatei mit `process handle .../run/bt all/
+register read/image lookup .../quit`) direkt wiederverwenden statt erneut
+`-k`-Ketten zu versuchen.
