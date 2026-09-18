@@ -5,6 +5,47 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-18 (macOS, 3) — horizontales Mausrad geklärt, §44.5-Menüband-Kollaps root-caused (kein Fix)
+
+**Kontext:** Fortsetzung, Nutzerwunsch: die zwei aus der letzten Runde
+verbliebenen Punkte — horizontales Mausrad (§33) und der §44.5-Menüband-Befund.
+Nutzerentscheidung: der große verbleibende Block (Windows-exklusive Features
+cursor/gauge/mouse-state/printer-dc) bleibt bewusst einer neuen Session
+vorbehalten.
+
+**§33 horizontal:** per Klick-Drag auf den horizontalen Scrollbar-Thumb (statt
+Wheel-Simulation) bestätigt — Inhalt scrollt sichtbar horizontal. Die
+Scroll-Funktionalität ist vollständig symmetrisch funktionsfähig; nur die
+Quartz-Wheel-Simulation für die horizontale Achse hatte keine Wirkung
+(Simulationsartefakt, kein Produktbefund). **§33 auf macOS damit vollständig
+abgeschlossen.**
+
+**§44.5 Menüband-Kollaps — Root-Cause lokalisiert:** `mred/private/app.rkt`s
+`current-eventspace-has-menu-root?` schließt Qt nicht aus (anders als die
+benachbarte, Qt-ausschließende `current-eventspace-has-standard-menus?`) —
+`mrtop.rkt` erzeugt deshalb auch unter Qt ein unsichtbares „Root"-Hilfsfenster
+(per `CGWindowListCopyWindowInfo` zweimal unabhängig verifiziert), aber
+`wx/qt/frame.rkt`s `designate-root-frame` ist ein wirkungsloser No-op-Stub, und
+Qt hat kein Äquivalent zu cocoas nativem `windowDidResignMain:`-Mechanismus, der
+die Menüband-Umschaltung überhaupt auslöst; der Shim kann zudem keine Menübar
+ohne zugehöriges Fenster setzen. **Fix berührt Shared Code
+(`mred/private/app.rkt`) und potenziell eine neue Shim-ABI — kein Fix-Versuch
+diese Session** (Prompt-Regel 3), zwei Optionen (minimal: Qt aus dem
+Root-Frame-Gate ausschließen, räumt nur das tote Artefakt weg; vollständig: neues
+Qt-Aktivierungssignal + App-weite Fallback-Menübar) für eine künftige Session
+dokumentiert.
+
+**Nebenbefund (Automatisierung, keine Code-Auswirkung):** ein Klickversuch traf
+versehentlich die Definitions- statt der Interactions-Pane (Puffer nie
+gespeichert, per `git diff`/`md5` bestätigt unverändert); der folgende
+`Cmd+Q`-Neustart löste DrRackets Autosave-Recovery-Dialog aus (bekanntes
+Verhalten, §13) und wurde per „Delete"/„Done" bereinigt.
+
+**Keine Code-Änderung diese Session.** Gate: Smoke 3/3 beide Wege, `git status`
+sauber. Details: `docs/HACKING.md` §46.
+
+---
+
 ## Session 2026-09-18 (macOS, 2) — Rest des gebündelten Sweeps validiert, Automatisierungsgrenze aus §44 als Fokus-Problem korrigiert
 
 **Kontext:** direkte Fortsetzung der vorherigen macOS-Session (kritischer Kern

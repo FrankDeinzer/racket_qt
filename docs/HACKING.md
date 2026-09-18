@@ -5382,9 +5382,125 @@ auto-vscroll)`):
 **Vertikal: Fix generalisiert vollständig auf macOS. Horizontal: unentschieden,
 kein Fix-Versuch (Regel 4).**
 
+**Nachgeholt (Folgesession, §46.1): horizontal per Klick-Drag bestätigt.** Siehe
+§46.1 — die Scroll-Funktionalität selbst ist symmetrisch funktionsfähig, nur die
+Quartz-Wheel-Simulation für die horizontale Achse hatte keine Wirkung
+(Simulationsartefakt, kein Produktbefund, wie hier bereits vermutet).
+
 ### 45.8 Gate
 
 Smoke 3/3 mit **und** ohne `PLT_QT=1` (nach allen Messungen). `git status`
 (Umbrella + Submodul) sauber — keine Code-Änderung, alle Hilfsskripte nur unter
 `/tmp`/Scratchpad. `org.racket-lang.prefs.rktd` nach jeder DrRacket-Runde
 zurückgespielt, Hash abschließend identisch zum Sessionbeginn.
+
+## 46. macOS: horizontales Mausrad geklärt (§33) + §44.5-Menüband-Kollaps root-caused (kein Fix diese Session)
+
+**Kontext:** Fortsetzung derselben Sweep-Session, auf Nutzerwunsch mit genau
+diesen zwei Punkten: dem offenen horizontalen-Mausrad-Rest aus §45.7 und dem in
+§44.5 gefundenen Menüband-Befund.
+
+### 46.1 Horizontales Mausrad — per Klick-Drag bestätigt, Quartz-Wheel-Simulation war die Lücke
+
+`examples/scroll-probe.rkt`: die AX-Abfrage `every scroll bar of window` liefert
+diesmal **beide** Scrollbars (vorher in §45.7 nur die vertikale gefunden — reiner
+Abfragefehler, `scroll bar 2` statt `every scroll bar`). Horizontale Scrollbar-
+Geometrie ermittelt (Thumb bei ~x=520–904, y≈581 Punkte), per `cliclick dd:… m:…
+du:…` (mit vorheriger `set frontmost`, s. §45.1) vom Thumb aus nach rechts
+gezogen — **Inhalt scrollt sichtbar horizontal** (Screenshot vorher/nachher:
+Text verschiebt sich von Zeile „Zeile 0 von 100 -- absichtlich..." auf
+„...gescrollt werden muss", Thumb landet nahe am rechten Rand). **Die
+Scroll-Funktionalität selbst ist vollständig symmetrisch funktionsfähig** — nur
+die in §45.7 versuchte Quartz-Wheel-Simulation (`CGEventCreateScrollWheelEvent`
+mit horizontalem Delta bzw. Shift+vertikal) hatte keine Wirkung, plausibel weil
+macOS-Trackpads horizontal kontinuierlich/Pixel-basiert scrollen und Qt diese
+Eingabeform anders verarbeitet als einfache Line-Notches. **Kein Produktbefund,
+reines Simulationsartefakt — §33 damit auf macOS vollständig (vertikal + horizontal) bestätigt.**
+
+### 46.2 §44.5 Menüband-Kollaps — Root-Cause lokalisiert, Fix bewusst nicht versucht (Regel 3)
+
+**Root-Cause, gemessen in drei Schritten:**
+
+1. `mred/private/app.rkt:190` — `current-eventspace-has-menu-root?` prüft nur
+   `(memq (system-type) '(macos macosx))`, **ohne** `PLT_QT`-Ausschluss — anders
+   als die benachbarte `current-eventspace-has-standard-menus?` (Zeile 181-188),
+   die Qt explizit ausschließt (`(not (getenv "PLT_QT"))`, Kommentar verweist auf
+   §22). Das bedeutet: `mrtop.rkt:338-350`s `root-menu-frame`-Mechanismus (ein
+   unsichtbares Hilfsfenster, das unter Cocoa als Ankerpunkt für den
+   „kein Dokumentfenster offen"-Menüzustand dient) wird **auch unter Qt**
+   instanziiert.
+2. **Verifiziert, nicht nur aus dem Quelltext abgeleitet:** `CGWindowListCopyWindowInfo`
+   (Python/Quartz, `kCGWindowListOptionAll` — findet auch unsichtbare Fenster)
+   zeigt bei **zwei unabhängigen frischen** `PLT_QT=1 racket -l drracket`-Starts
+   je ein Fenster mit Namen **„Root"**, `onscreen=None` — exakt der Frame, den
+   `mrtop.rkt:342-346` mit Label `"Root"` erzeugt. Die gemeldete Geometrie
+   (400×328 bzw. ähnlich, nicht die angeforderten `-9000,-9000`) ist plausibel
+   ein Artefakt eines nie realisierten/gemappten `QWidget` (Qt wendet Position
+   erst beim tatsächlichen Anzeigen an) — ändert aber nichts an der Kernaussage:
+   das Fenster existiert.
+3. `wx/qt/frame.rkt:219-221`s `designate-root-frame` — genau die Methode, die
+   `mrtop.rkt:349` auf diesem Root-Frame aufruft — ist ein reiner `(void)`-Stub
+   (Kommentar: „gtk/win32 sind No-ops... Qt braucht keine Sonderbehandlung").
+   **Diese Annahme ist falsch**, wie der Vergleich mit cocoa zeigt: dort setzt
+   `designate-root-frame` (`wx/cocoa/frame.rkt:807-813`) `root-fake-frame`, und
+   der native `windowDidResignMain:`-Delegate (Objective-C-Mixin auf
+   `RacketWindow`/`RacketPanel`, `wx/cocoa/frame.rkt:164-175`) installiert beim
+   Verlust des „Main Window"-Status entweder `root-fake-frame`s eigene Menübar
+   oder eine leere `empty-mb`. **Qt hat kein Äquivalent zu diesem
+   Cocoa-nativen Delegate-Mechanismus** — Qts eigenes natives `NSWindow` (intern,
+   nicht unsere `RacketWindow`-Klasse) trägt den Mixin nicht, und der Shim bietet
+   keinen App-weiten „setze diese Menübar ohne zugehöriges Fenster"-Aufruf
+   (`grep -n menubar qt-shim/src/shim.cpp`: `shim_window_set_menubar` verlangt
+   immer ein konkretes `win`-Handle, `rw->setMenuBar(mb)`).
+
+**Methodischer Fallstrick, offen ausgewiesen:** `(current-eventspace-has-menu-root?)`
+in der Interactions-REPL ausgewertet liefert `#f` — das ist **kein Widerspruch**
+zu Punkt 1/2, sondern ein Artefakt der falschen Eventspace: die REPL läuft im
+User-Eventspace des jeweiligen Tabs, nicht in DrRackets eigenem Haupt-Eventspace,
+in dem `mrtop.rkt`s Modul-Top-Level-Code (der das Root-Frame tatsächlich erzeugt)
+läuft. Der Quartz-Fenster-Fund (Punkt 2) ist der beweiskräftigere Beleg.
+
+**Automatisierungs-Nebenfall dieser Untersuchung:** ein Klick-Versuch in die
+Interactions-REPL traf beim ersten Mal (Fenster war noch keine 6s alt, Menü noch
+nicht voll initialisiert) stattdessen die Definitions-Pane und fügte Testtext in
+den Quelltext ein; `Cmd+Z` über `keystroke … using command down` in einer
+Schleife tippte bei einem Wiederholungsversuch buchstäblich „z"-Zeichen statt zu
+undoen (Modifikator ging in der Wiederholung verloren) — der Puffer wurde **nie
+gespeichert** (`git diff`/`md5` vor und nach identisch verifiziert), das Fenster
+wurde stattdessen per `Cmd+Q` ohne Speichern beendet. Der folgende Neustart löste
+DrRackets Autosave-Recovery-Dialog aus (bekanntes Verhalten, s. §13) — per
+„Delete"/„Delete" (Bestätigung)/„Done" bereinigt, kein Restbefund. **Lehre:**
+vor dem ersten Klick in ein frisches DrRacket-Fenster **immer erst per
+Screenshot verifizieren, wo die Interactions-Pane tatsächlich beginnt** (die
+Trennlinie ist nicht bei jeder Fensterhöhe an der gleichen Stelle, und ganz ohne
+vorherigen `Run` kann die Pane sogar ganz fehlen, s. u.) — nicht aus einer
+früheren Session extrapolieren. Nebenbefund: eine frisch geöffnete
+DrRacket-Datei zeigt **keine** Interactions-Pane, bis einmal `Run` gedrückt
+wurde (vorher füllt die Definitions-Pane das gesamte Fenster) — unabhängig vom
+hier untersuchten Menüband-Befund, nicht weiter verfolgt.
+
+**Fix-Einschätzung (Regel 3 — berührt Shared Code, kein Fix diese Session):**
+
+- **Minimal:** `current-eventspace-has-menu-root?` um denselben `(not (getenv
+  "PLT_QT"))`-Ausschluss wie `current-eventspace-has-standard-menus?` ergänzen.
+  Stoppt die Erzeugung des toten Root-Frames für Qt, behebt aber **nicht** das
+  eigentliche Symptom (Menüband bleibt weiterhin das des zuletzt aktiven
+  Fensters) — räumt nur ein wirkungsloses Artefakt weg.
+- **Vollständig:** neues Qt-Signal (`QApplication::focusWindowChanged` o. Ä.)
+  im Shim verdrahten, das bei „keine Top-Level-Window mehr aktiv" eine
+  App-weite Fallback-`QMenuBar` installiert (neue Shim-Funktion, **ABI-
+  Änderung** — Linux hat bereits einen ausstehenden Rebuild, s. Build-Banner),
+  plus `wx/qt/frame.rkt`s `designate-root-frame` echt implementieren.
+  Nicht abgeschätzter Aufwand, nicht begonnen.
+
+**Betroffene Dateien für eine künftige Session:** `mred/private/app.rkt`
+(Shared Code), `wx/qt/frame.rkt`, `qt-shim/src/shim.cpp`. Kein Fix-Versuch diese
+Session (Root-Cause-Lokalisierung + Dokumentation ist laut Prompt-Triage-Regel 4
+ein vollwertiges Ergebnis, und ein Shared-Code-Fix fällt unter Regel 3 —
+Nutzerentscheidung für eine künftige Session offen).
+
+### 46.3 Gate
+
+Smoke 3/3 mit **und** ohne `PLT_QT=1`. `git status` (Umbrella + Submodul)
+sauber — keine Code-Änderung. `org.racket-lang.prefs.rktd` nach den
+DrRacket-Läufen zurückgespielt, Hash identisch verifiziert.
