@@ -5666,3 +5666,83 @@ wird nie aufgerufen), der geänderte Code-Pfad in `set-menu-bar`/`direct-show`
 degeneriert dort zum alten Verhalten (`(eq? this #f)` für jeden echten Frame
 ist immer `#f`) — keine Verhaltensänderung auf den anderen beiden Plattformen,
 kein Rebuild dort nötig (reiner Racket-Code, keine Shim-ABI-Änderung).
+
+## 48. „Bares-Skript-Nichtbeenden unter Qt" (§47.1-Nebenbefund) — nicht reproduzierbar mit belegter Methodik (macOS, 2026-09-18)
+
+**Auftrag:** Fortsetzung des in §47.1 offen gelassenen Nebenbefunds: „ein bares
+`racket/gui`-Skript (kein DrRacket) beendet sich nativ beim Schließen seines
+letzten Fensters vollständig; unter Qt bleibt derselbe Skript-Prozess am
+Leben." Ziel dieser Session: root-causen und fixen.
+
+### 48.1 Erst der Exit-Gate gelesen, dann gemessen (Advisor-Rat)
+
+Der komplette Weg von "letztes Fenster zu" bis "Prozess beendet sich" führt
+über `executable-yield-handler` (`wx/common/queue.rkt:637-641`): dieser
+blockiert vor dem eigentlichen Prozessende in `(yield main-eventspace)`, bis
+`check-done` (Z. 213-225) den Eventspace als fertig postet — und das gilt
+genau dann, wenn **alle drei** zutreffen: keine gequeueten Events (`count=0`),
+keine offenen Top-Level-Fenster (`(hash-count frames)=0`, exportiert als
+`get-top-level-windows`) und keine anstehenden Timer. `register-frame-shown`
+(von `wx/qt/frame.rkt`s `direct-show` bei **jedem** Show/Hide aufgerufen,
+unverändert seit vor dieser Session) trägt Frames synchron in genau diesen
+Hash ein/aus. Ein eigener Test bestätigte vorab, dass ein simpler, endlos
+laufender Hintergrund-Thread (wie ihn `wx/qt/queue.rkt`s `qt-start-event-pump`
+tatsächlich startet) den Prozess-Exit *nicht* blockiert — Racket beendet sich
+beim Testskript trotz eines nie endenden `(thread (lambda () (loop)))` sofort,
+sobald der Hauptthread fertig ist. Die anfängliche Hypothese "der Pump-Thread
+selbst hält den Prozess am Leben" ist damit empirisch widerlegt, bevor
+irgendetwas instrumentiert wurde.
+
+### 48.2 Messung statt Theorie: der Befund reproduziert nicht
+
+Probe `examples/hello.rkt` (unverändert, das naheliegendste "bare Skript"),
+`PLT_QT=1`, echter Klick auf den nativen Schließen-Button
+(`(first button of window 1 whose subrole is "AXCloseButton")`, mit
+`set frontmost of process "racket" to true` unmittelbar davor, §45.1) —
+**3/3 sauberer Prozess-Exit**, identisch zum nativen Kontrolllauf (ebenfalls
+3/3). Ein separates `exit-probe.rkt` mit einem Watchdog-Thread (druckt
+`get-top-level-windows` und den Eventspace-„done"-Zustand jede Sekunde) zeigte
+dasselbe Bild — **der zunächst vermutete Watchdog-Confound entfällt damit
+ausdrücklich**, da `hello.rkt` ganz ohne einen solchen Thread identisch sauber
+beendet. `Cmd+W` wurde zusätzlich geprüft: auf **beiden** Backends wirkungslos
+(kein Menüband im bare Skript, also kein Accelerator gebunden) — erwartetes,
+identisches Verhalten, keine Divergenz.
+
+### 48.3 Diskriminierender Gegentest: die „Fehlklick"-Hypothese widerlegt sich selbst
+
+Naheliegende Erklärung für den ursprünglichen Befund: ein automatisierter
+Klick traf nicht den Schließen-Knopf, sondern ein anderes Widget (`hello.rkt`
+hat einen `Click me`-Button; `click button 1 of window 1` ohne
+Subrole-Filter — exakt das ungefilterte Muster, das in einem ersten eigenen
+Probe-Lauf versehentlich genau das getan hätte) — und die Automatisierung
+interpretierte das fälschlich als „geschlossen". **Gezielt gegengetestet:**
+derselbe ungefilterte Klick trifft tatsächlich `Click me` (per
+`osascript`-Rückgabewert bestätigt), aber das Fenster bleibt dabei
+**vollständig sichtbar** und der Prozess läuft unverändert weiter — das
+erzeugt nicht das in §47.1 beschriebene Symptombild „Fenster verschwindet,
+Prozess bleibt am Leben", sondern schlicht „nichts passiert". Diese konkrete
+Fehlklick-Mechanik scheidet damit als Erklärung aus.
+
+### 48.4 Verdikt: nicht reproduzierbar, Ursache des Originalbefunds nicht identifiziert
+
+Weder die Pump-Thread-Hypothese noch die naheliegende Fehlklick-Hypothese
+tragen; mit belegter Klick-Methodik (Subrole-Filter, Fokus-Aktivierung
+unmittelbar vor dem Klick) verhält sich `wx/qt` beim Schließen des letzten
+Fensters eines bare-Skripts auf macOS **identisch** zum nativen Backend
+(n=3/3 je Seite). **Klassifiziert wie §21.9/§33.7: der Originalbefund aus
+§47.1 reproduziert nicht mit dieser Methodik; die tatsächliche Ursache der
+damaligen Beobachtung (vermutlich ein Automatisierungsartefakt der
+damaligen Sitzung, Klasse §44.6/§45.1) ist nicht identifiziert, nicht
+erfunden.** Keine Code-Änderung — es gibt (mit dieser Messung) keinen Bug,
+der zu fixen wäre.
+
+**Ausdrücklich unverändert von dieser Session:** die §44.5/§47.3-Reklassifizierung
+des **DrRacket**-„Zombie"-Falls (bewusste `framework:exit-when-no-frames`-
+Entscheidung von DrRacket selbst) — das ist ein separater, weiterhin gültiger
+Befund und wird hier nicht neu aufgerollt.
+
+**Nur auf macOS gemessen.** `wx/qt/queue.rkt` und der Exit-Gate
+(`wx/common/queue.rkt`) sind backend-weit identischer Shared-Code bzw.
+plattform-neutrales `wx/qt`, aber Windows/Linux wurden in dieser Session nicht
+gegengeprüft — keine Verallgemeinerung auf alle drei Plattformen. Keine
+Shim-ABI-Änderung, kein Rebuild nötig. Details: `docs/2026-09-18-4_report-macos.md`.

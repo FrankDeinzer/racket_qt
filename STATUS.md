@@ -5,6 +5,51 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-18 (macOS, 5) — „Bares-Skript-Nichtbeenden unter Qt" (§47.1) nicht reproduzierbar, keine Code-Änderung
+
+**Kontext:** Fortsetzung; Auftrag war der in §47.1 offen gelassene
+Nebenbefund root-causen und fixen: "ein bares `racket/gui`-Skript beendet
+sich nativ beim Schließen seines letzten Fensters vollständig, unter Qt
+nicht."
+
+**Erst der Exit-Gate gelesen (Advisor-Rat), dann gemessen:** der Weg von
+"letztes Fenster zu" bis "Prozess beendet sich" läuft über
+`executable-yield-handler` (`wx/common/queue.rkt:637`), der blockiert, bis
+`check-done` postet (keine gequeueten Events, keine offenen Top-Level-Fenster,
+keine Timer). Ein eigener Mini-Test widerlegte vorab empirisch die
+naheliegendste Hypothese ("der endlos laufende `qt-start-event-pump`-Thread
+selbst hält den Prozess am Leben"): ein einfacher, nie endender
+Hintergrund-Thread blockiert den Racket-Prozess-Exit nachweislich nicht.
+
+**Messung statt Theorie:** `examples/hello.rkt` unter `PLT_QT=1`, echter Klick
+auf den nativen Schließen-Button (`AXCloseButton`-Subrole, Fokus-Aktivierung
+unmittelbar davor, §45.1) — **n=3/3 sauberer Prozess-Exit**, identisch zum
+nativen Kontrolllauf (ebenfalls 3/3). Eine eigene Probe mit Watchdog-Thread
+zeigte dasselbe Bild — der ursprünglich vermutete Watchdog-Confound entfällt
+damit ausdrücklich. `Cmd+W` ist auf beiden Backends gleichermaßen wirkungslos
+(kein Menüband im bare Skript) — erwartete Parität, keine Divergenz.
+
+**Diskriminierender Gegentest zur „Fehlklick"-Hypothese:** ein ungefilterter
+Klick, der tatsächlich das falsche Widget trifft (`Click me` statt
+Schließen-Button), lässt das Fenster nachweislich vollständig sichtbar offen
+— erzeugt also nicht das ursprünglich beschriebene Bild „Fenster weg, Prozess
+lebt". Diese konkrete Fehlklick-Mechanik scheidet damit als Erklärung aus.
+
+**Verdikt:** klassifiziert wie §21.9/§33.7 — der Originalbefund reproduziert
+nicht mit belegter Methodik; die tatsächliche Ursache der damaligen
+Beobachtung ist nicht identifiziert, nicht erfunden. Keine Code-Änderung,
+kein Fix nötig. Der separate, weiterhin gültige DrRacket-„Zombie"-Befund
+(§44.5/§47.3, bewusste `exit-when-no-frames`-Entscheidung von DrRacket
+selbst) bleibt davon unberührt und wird hier nicht neu aufgerollt.
+
+**Nur auf macOS gemessen** — keine Verallgemeinerung auf Windows/Linux. Keine
+Shim-ABI-Änderung, kein Rebuild, kein Submodul-Commit fällig (reine
+Umbrella-Doku-Korrektur in `CLAUDE.md`/`STATUS.md`/`docs/HACKING.md`).
+
+Details: `docs/HACKING.md` §48, `docs/2026-09-18-4_report-macos.md`.
+
+---
+
 ## Session 2026-09-18 (macOS, 4) — Menüband-Kollaps gefixt (§44.5/§46.2), keine Shim-ABI-Änderung
 
 **Kontext:** Fortsetzung; Nutzer entschied sich für den vollständigen Fix des
@@ -24,9 +69,9 @@ Verifiziert auf `#t` gesetzt — Prozess blieb trotzdem am Leben. Das führte zu
 eigentlichen Quelle: **DrRacket selbst** (`drracket/private/main.rkt`, nicht im
 Fork) setzt diese Preference beim Start auf jedem macOS-Backend explizit auf
 `#f` — bewusste DrRacket-Entscheidung, kein Cocoa- oder Qt-spezifisches
-Verhalten. Gilt nachweislich **nicht** für bare `racket/gui`-Skripte (native
-beenden sich beim Fensterschließen vollständig, unter Qt nicht) — kleiner,
-separat vermerkter offener Punkt.
+Verhalten. Der zunächst vermerkte Nebenbefund „gilt nicht für bare
+`racket/gui`-Skripte" ist inzwischen widerlegt — s. Session (5) unten
+(`docs/HACKING.md` §48).
 
 **Die eigentliche Root-Cause:** DrRackets reduziertes File/Help-Menü läuft über
 `(new menu-bar% (parent 'root))` — eine dokumentierte mred-API, die zum

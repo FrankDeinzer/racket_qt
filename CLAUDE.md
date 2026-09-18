@@ -216,9 +216,18 @@ Qt-Bug** — der „Prozess überlebt"-Teil von §29.2 ist damit auf macOS analo
 explizit auf `#f` (`drracket/private/main.rkt`, abhängig von
 `current-eventspace-has-menu-root?`, das auf jedem macOS-Backend wahr ist) —
 das Überleben ist eine bewusste DrRacket-Entscheidung, keine implizite
-Cocoa-Konvention, und gilt nachweislich **nicht** für bare `racket/gui`-Skripte
-(die beenden sich nativ beim Fensterschließen vollständig, unter Qt nicht —
-eigener, kleinerer offener Punkt). **Menüband-Befund gefixt, 2026-09-18 (4)**
+Cocoa-Konvention. **Der zunächst vermerkte Nebenbefund „gilt nicht für bare
+`racket/gui`-Skripte" ist widerlegt** (`docs/HACKING.md` §48, 2026-09-18,
+macOS): mit belegter Klick-Methodik (echter Klick auf den nativen
+Schließen-Button, `AXCloseButton`-Subrole, Fokus-Aktivierung unmittelbar davor,
+§45.1) beendet sich `examples/hello.rkt` unter `PLT_QT=1` **n=3/3** sauber,
+identisch zum nativen Kontrolllauf (ebenfalls 3/3) — die naheliegende
+„Fehlklick"-Erklärung wurde gezielt gegengetestet und scheidet ebenfalls aus
+(ein Klick auf ein falsches Widget lässt das Fenster sichtbar offen, erzeugt
+also nicht das ursprünglich beschriebene „Fenster weg, Prozess lebt"-Bild).
+Die tatsächliche Ursache der ursprünglichen §47.1-Beobachtung bleibt unbekannt,
+reproduziert aber nicht — nur auf macOS gemessen, keine Code-Änderung nötig.
+**Menüband-Befund gefixt, 2026-09-18 (4)**
 (`docs/HACKING.md` §47): Root-Cause war letztlich rein `wx/qt/`-lokal, **keine
 Shared-Code-/Shim-ABI-Änderung nötig** — die ursprüngliche Regel-3-Einschätzung
 war zu pessimistisch, zwei native Gegenproben (§47.1) widerlegten den zunächst
