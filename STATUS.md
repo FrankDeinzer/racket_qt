@@ -5,6 +5,49 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-18 (macOS, 6) — Windows-exklusive Features (cursor/gauge/mouse-state/printer-dc) auf macOS: drei validiert, mouse-state implementiert, neuer Printer-Dialog-Crash gefunden
+
+**Kontext:** Fortsetzung des offenen Punkts aus der Windows-Session
+(§40–§43): `cursor-driver%`/`gauge%`/`printer-dc%`/`get-current-mouse-state`
+waren „nur auf Windows implementiert/getestet". macOS-Shim war laut
+Build-Banner bereits mit allen 26 Exporten neu gebaut.
+
+- **`gauge%` validiert** — echter, wachsender Balken h+v, `get-value`/
+  `get-range` roundtrippen korrekt.
+- **`cursor-driver%` validiert** — `arrow`/`hand`/`bullseye`/custom-plus
+  per `cliclick` + `screencapture -C` (macOS-Äquivalent zu Windows'
+  `GetCursorInfo`+`DrawIcon`) visuell bestätigt.
+- **`printer-dc%` PDF-Rasterpfad validiert** — zweiseitige PDF korrekt
+  gerastert (deckt sich mit §43.7).
+- **`printer-dc%` Dialog-Pfad: neuer, reproduzierbarer Crash gefunden**
+  (`invalid memory reference` beim Prozessende nach Cancel auf
+  `QPrintDialog`/`QPageSetupDialog`, n=3/3 über drei Einstiegspunkte) — auf
+  Windows nie beobachtbar, da der Dialog dort laut §43.7 nie sichtbar
+  wurde. Ausführliche Racket-Ebene-Bisektion (fünf Hypothesen: Pump-Timing
+  vor `destroy`, Parent-Handle+Enable-Kaskade, `queue-event`/`yield`-
+  Indirektion, `printer-dc%`s Bitmap/Cairo-Zustand, `parameterize`+
+  `ps-setup%`-Wrapper) hat jede Hypothese widerlegt, ohne die Ursache zu
+  finden. `lldb`-Versuch scheiterte an `task_for_pid`-Berechtigungen (auch
+  nach `sudo DevToolsSecurity -enable`, vom Nutzer ausgeführt) — nicht
+  weiter verfolgt (Advisor-Rat: ein Versuch, dann dokumentieren). **Root
+  cause offen, eigene künftige Session** (braucht funktionierende native
+  Debugging-Tools). PDF-Pfad ist produktionsreif, Dialog-Pfad nicht.
+- **`get-current-mouse-state` implementiert** — neuer
+  `#elif defined(__APPLE__)`-Zweig in `shim_get_mouse_state`
+  (`CGEventSourceButtonState`/`CGEventSourceFlagsState`), keine neuen
+  Exporte/ABI-Änderung, `qt-shim/CMakeLists.txt` linkt neu
+  `ApplicationServices` auf `APPLE`. Position/Maustaste `left`/alle vier
+  Modifikatoren per `cliclick` verifiziert. Physisches Cmd↔Ctrl vertauscht
+  sich zu `'control`/`'meta` (Qts bekannter macOS-Swap) — deckungsgleich
+  mit `wx/qt/key-map.rkt`s eigener, ebenfalls unverswappter
+  Modifier-Behandlung, deshalb bewusst nicht "korrigiert".
+
+Gate: Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ, nach dem Shim-Rebuild. Nur
+`qt-shim/` (Umbrella) geändert, kein gui-Submodul-Commit nötig. Details:
+`docs/HACKING.md` §49, `docs/2026-09-18-5_report-macos.md`.
+
+---
+
 ## Session 2026-09-18 (macOS, 5) — „Bares-Skript-Nichtbeenden unter Qt" (§47.1) nicht reproduzierbar, keine Code-Änderung
 
 **Kontext:** Fortsetzung; Auftrag war der in §47.1 offen gelassene

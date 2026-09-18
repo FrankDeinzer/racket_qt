@@ -5746,3 +5746,181 @@ Befund und wird hier nicht neu aufgerollt.
 plattform-neutrales `wx/qt`, aber Windows/Linux wurden in dieser Session nicht
 gegengeprüft — keine Verallgemeinerung auf alle drei Plattformen. Keine
 Shim-ABI-Änderung, kein Rebuild nötig. Details: `docs/2026-09-18-4_report-macos.md`.
+
+## 49. macOS: die vier §36-Windows-exklusiven Stubs — drei validiert, einer implementiert, ein neuer Crash-Befund im Drucker-Dialog-Pfad (2026-09-18 (5))
+
+### 49.1 Auftrag
+
+Fortsetzung des in §40–§43 dokumentierten offenen Punkts „Windows-exklusive
+Features (cursor/gauge/mouse-state/printer-dc)" auf macOS. Der macOS-Shim war
+laut Build-Banner bereits mit allen 26 Exporten (inkl. der elf `shim_printer_*`,
+der fünf `shim_gauge_*`, der vier `shim_cursor_*` und `shim_get_mouse_state`)
+neu gebaut — für drei der vier Features ist das reine Validierung, keine
+Racket- oder C++-Änderung nötig.
+
+### 49.2 `gauge%` — validiert
+
+`examples/gauge-probe.rkt` unter Qt: `get-value`/`get-range` roundtrippen
+korrekt bei jedem Tick, zwei Screenshots (unterschiedliche Stände) zeigen
+einen echten, wachsenden Balken horizontal **und** vertikal — deckt sich mit
+der Windows-Verifikation (§41.6). Smoke 3/3 beide Wege.
+
+### 49.3 `cursor-driver%` — validiert
+
+`examples/cursor-probe.rkt` unter Qt, echte Maus (`cliclick`) über vier
+Canvases gefahren, `screencapture -C` (zeichnet den System-Cursor mit ein —
+macOS-Äquivalent zu Windows' `GetCursorInfo`+`DrawIcon`-Trick aus §40.7, ohne
+das wären alle Screenshots leer und fälschlich als „tut nichts" fehlgedeutet
+worden): `arrow`, `hand`, `bullseye` (eigenes ARGB-Doppelkreis-Bitmap) und der
+selbstgebaute Plus-Cursor (`set-image`-Pfad) zeigen alle die korrekte native
+Form. Ein einzelner Screenshot direkt nach einer schnellen Sequenz mehrerer
+`cliclick m:`-Bewegungen zeigte einmalig noch die vorherige Cursor-Form (zu
+kurzer Sleep zwischen Bewegung und Aufnahme) — mit mehr Wartezeit reproduzierte
+sich das nicht erneut; Automatisierungsartefakt, kein Produktbefund.
+
+### 49.4 `printer-dc%` — PDF-Rasterpfad validiert, Dialog-Pfad zeigt neuen Crash
+
+**PDF-Rasterpfad (`PLT_QT_PRINT_TO_PDF`) validiert:** `examples/printer-probe.rkt`
+erzeugt eine zweiseitige PDF (504081 Bytes, reproduzierbar identisch), per
+`convert`/`magick` zu PNG gerastert — beide Seiten korrekt (Ellipse+Linie+Text,
+Rundrechteck+Text), MediaBox 612×792pt (Letter). Deckt sich mit der
+Windows-Verifikation (§43.7).
+
+**Interaktiver Dialog-Pfad zeigt einen echten, reproduzierbaren Crash beim
+Beenden — auf Windows nie beobachtbar, weil dort `QPrintDialog` laut §43.7
+nie sichtbar wurde.** Auf macOS öffnen `QPageSetupDialog` **und** `QPrintDialog`
+korrekt als native Panels (Screenshot-belegt, `examples/printer-dialog-probe.rkt`).
+Nach Cancel auf beiden Dialogen und `(exit 0)`: `invalid memory reference.
+Some debugging context lost` — reproduziert **3/3** (`printer-dialog-probe.rkt`,
+`printer-onlyprint.rkt` mit nur dem Print-Dialog, `printer-nodrawing.rkt` ohne
+jede Zeichenoperation). Der PDF-Pfad (kein Dialog) läuft dagegen beliebig oft
+crashfrei — die Diskriminante ist eindeutig „Dialog wurde gezeigt", nicht
+`printer-dc%`/Cairo/Bitmap-Teardown an sich.
+
+**Eingrenzung per Bisektion (Racket-Ebene), mehrere Hypothesen geprüft und
+verworfen:**
+- *Timing/fehlender Pump vor `shim_printer_destroy`* (naheliegend, da exakt
+  das Muster von Crash B/§39): **widerlegt.** Eine rohe FFI-Nachbildung
+  (`shim_printer_show_print_dialog` direkt, ohne Parent, mit/ohne Verzögerung
+  vor `destroy`) crasht in keiner Variante — auch nicht mit `shim_pump(0)` und
+  sofortigem `destroy`, exakt wie im echten Code.
+- *Parent-Widget + `shim_widget_set_enabled`-Kaskade um den Dialog*: **widerlegt.**
+  Eine Nachbildung mit echtem Parent-Handle (`mred->wx`/`get-qt-handle`) und der
+  Enable/Disable-Kaskade, inklusive `destroy`, crasht ebenfalls nicht.
+- *`queue-event`/`yield`-Indirektion (Callback postet async statt synchron)*:
+  **widerlegt.** Eine 1:1-Nachbildung von `run-printer-dialog` (gleicher
+  `queue-event`/`yield (semaphore-peek-evt ...)`/`(atomically (shim_pump 0))`-
+  Ablauf) crasht ebenfalls nicht.
+- *`printer-dc%`s eigener Zustand (Bitmap/Cairo-Recording)*: **widerlegt** —
+  `printer-nodrawing.rkt` (Konstruktion + `start-doc`/`end-doc`, keine einzige
+  Zeichenoperation) crasht genauso reproduzierbar wie die Variante mit Inhalt.
+- **Tatsächlich lokalisiert:** der Crash tritt bereits bei **`get-page-setup-
+  from-user` alleine** auf (kein `printer-dc%` je konstruiert!) — aber **nicht**
+  beim direkten Aufruf von `wx:show-print-setup` (dem inneren, von
+  `mred/private/wx/qt/printer-dc.rkt` exportierten Racket-Fn) mit identischem
+  Parent-Handle. Der einzige verbleibende Unterschied ist `mred/private/
+  moredialogs.rkt`s `get-page-setup-from-user`-Wrapper: neues `(make-object
+  wx:ps-setup%)`, `(parameterize ([wx:current-ps-setup s]) (wx:show-print-setup
+  ...))`. Eine Hand-Nachbildung exakt dieses Wrapper-Musters (frisches
+  `ps-setup%`, `parameterize`, `show-print-setup` im Rumpf) crasht **ebenfalls
+  nicht** — die Bisektion konvergiert an dieser Stelle nicht weiter, obwohl kein
+  Racket-seitiger Unterschied zur echten Funktion mehr identifizierbar war.
+  **Interpretation (mit Advisor-Rücksprache):** die Racket-Ebene ist nicht die
+  richtige Ebene, um das einzugrenzen — eine Speicherbeschädigung zeigt sich
+  dort, wo als Nächstes alloziert/deallokiert wird, nicht notwendig an ihrem
+  Ursprung; jede Testvariante verschiebt das Allokationslayout genug, um das
+  Symptom verschwinden zu lassen, ohne die Ursache zu berühren.
+- **lldb-Versuch:** `task_for_pid` schlägt fehl (`err = 0x00000005`, „Not
+  allowed to attach to process"), selbst nach `sudo DevToolsSecurity -enable`
+  (Nutzer hat das für diese Maschine ausgeführt) und mit dem
+  Xcode-gebundenen `lldb` statt des `xcode-select`-Shims — laut
+  `log show --predicate 'process == "debugserver"'` scheitert
+  `MachTask::TaskPortForProcessID`/`task_for_pid` schon vor jedem
+  Attach-Versuch. Vermutlich eine zusätzliche, hier nicht behobene
+  Einschränkung (Codesigning-Entitlement `com.apple.security.cs.debugger`
+  fehlt dem verwendeten Racket-Binary/lldb, oder eine weitere,
+  App-spezifische TCC-Freigabe „Entwicklerwerkzeuge" für das Terminal wäre
+  nötig) — **nicht weiter verfolgt** (Advisor-Empfehlung: ein lldb-Versuch,
+  dann dokumentieren statt offen weitersuchen).
+
+**Bewertung:** ein echter, reproduzierbarer (n=3/3) Speicherfehler beim
+Beenden nach einem genutzten `QPrintDialog`/`QPageSetupDialog` auf macOS,
+sauber vom sicheren PDF-Pfad abgegrenzt, aber die exakte Speicherstelle bleibt
+unlokalisiert. Plausibelste, nicht bewiesene Hypothese (per Advisor):
+`QPrintDialog`s natives `NSPrintPanel`/Core-Printing-Objekt hält intern eine
+Referenz auf das `QPrinter`, die durch `shim_printer_destroy`s `delete`
+verletzt wird (analog zu §40.5s bewusst nie freigegebenem `QCursor`) — aber
+ausdrücklich **nicht verifiziert**, nur die nächstliegende Erklärung. **Kein
+Fix in dieser Session** — Root-Cause-Lokalisierung bräuchte native
+Backtrace-Tools, die auf dieser Maschine (noch) nicht funktionieren, oder
+eine zukünftige Session mit funktionierendem lldb/Instruments. Bis dahin:
+`printer-dc%`s PDF-Pfad ist auf macOS produktionsreif, der interaktive
+Dialog-Pfad **nicht** — ein Absturz beim Beenden nach jedem echten
+Druckvorgang mit sichtbarem Dialog ist ein Nutzerfront-Defekt, kein bloßer
+Diagnosebefund. **Nur auf macOS reproduziert/untersucht.**
+
+### 49.5 `get-current-mouse-state` — macOS-Zweig implementiert
+
+Der in §42.6 offen gelassene Teil (Maustasten/Caps Lock, zuvor `#ifdef _WIN32`-
+exklusiv) ist jetzt auch für macOS implementiert: `CGEventSourceButtonState
+(kCGEventSourceStateCombinedSessionState, kCGMouseButtonLeft/Center/Right)`
+für die drei Maustasten, `CGEventSourceFlagsState(...) & kCGEventFlagMask
+AlphaShift` für Caps Lock — dieselbe Klasse globaler HID-Session-Abfrage wie
+Windows' `GetAsyncKeyState`, nur aus `ApplicationServices`/`CoreGraphics`
+statt WinAPI. **Kein neuer Shim-Export, keine ABI-Änderung** — nur der
+bestehende `#ifdef _WIN32`-Block in `shim_get_mouse_state` bekam ein
+`#elif defined(__APPLE__)`-Gegenstück. `qt-shim/CMakeLists.txt` linkt auf
+`APPLE` zusätzlich `ApplicationServices` (`find_library`). Anders als bei
+Windows' `SM_SWAPBUTTON` gibt es auf macOS keine Swap-Abfrage zu spiegeln —
+das Betriebssystem tauscht primäre/sekundäre Taste bereits tiefer im Stack,
+`kCGMouseButtonLeft` bedeutet also schon „welcher Knopf auch immer primär
+ist", exakt wie `wx/cocoa/procs.rkt`s eigenes, ungeprüftes `#x1`/`'left`
+(`mred/private/wx/cocoa/procs.rkt:293-294`, dort ebenfalls kein Swap-Check).
+
+**Verifiziert:** `examples/mouse-state-probe.rkt` unter Qt. Position exakt
+(`cliclick m:500,600` → `pos=(500,600)`). Maustaste `left` korrekt erkannt
+während per `cliclick dd:`/`du:` gehalten (vorher: `mods` blieb bei jeder
+Maustaste leer, wie auf Windows vor §42.4s Fix). `middle`/`right` nicht
+einzeln durchgeklickt — `cliclick` dieser Version unterstützt kein
+Halten der mittleren/rechten Taste (nur `dd:`/`du:` für links, `rc:` für
+Rechtsklick als atomarer Klick, zu kurz für den 300ms-Poll der Probe) — der
+Code-Pfad ist für alle drei Tasten identisch (dieselbe Funktion, nur ein
+anderes `kCGMouseButton*`-Symbol), das für `left` verifizierte Verhalten
+überträgt sich strukturell. Caps Lock nicht live umgeschaltet (hätte den
+System-Zustand verändert, wie schon in §42.6 begründet) — durchgehende
+Absenz von `'caps` in allen Ticks deckt sich mit dem Ist-Zustand (Caps Lock
+aus).
+
+**Alle vier Modifikatoren einzeln per `cliclick kd:`/`ku:` bestätigt** —
+mit einem erwarteten, nicht neu eingeführten Befund: physisches **Cmd**
+meldet sich als `'control`, physisches **Ctrl** als `'meta` (Shift/Alt
+unauffällig). Das ist Qts dokumentierte Standard-Vertauschung von
+`Qt::ControlModifier`/`Qt::MetaModifier` auf macOS (`AA_MacDontSwapCtrlAndMeta`
+ist nirgends gesetzt) — **kein neuer Bug und bewusst nicht "korrigiert"**:
+`wx/qt/key-map.rkt`s eigene Tastatur-Modifier-Behandlung liest exakt dieselben
+rohen Qt-Bits ohne jede macOS-spezifische Rückvertauschung
+(`qt-mods->control?`/`qt-mods->meta?`, Bit 2/Bit 8), `get-current-mouse-state`
+ist damit **konsistent** zum Rest dieses Backends, nicht divergent davon. Ein
+Fix nur für `get-current-mouse-state` hätte eine neue Inkonsistenz erzeugt statt
+eine zu beheben — bleibt bewusst so, betrifft potenziell jede Tastatur-Kurzbefehl-
+Auswertung dieses Backends auf macOS gleichermaßen und ist ein eigenständiges,
+größeres Thema, keine Spezialität von `get-current-mouse-state`.
+
+Regressions-Gate: Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ ohne `PLT_QT`, nach dem
+Rebuild. **Nur auf macOS implementiert/getestet** — Linux braucht für diesen
+Teil ohnehin schon den ausstehenden Shim-Rebuild (Build-Banner), eine eigene
+`CGEventSourceButtonState`-Analogie existiert dort nicht; Linux bräuchte eine
+X11/Wayland-eigene Abfrage (z. B. `XQueryPointer` für Tasten, kein portables
+Caps-Lock-Äquivalent ohne XKB) in einer eigenen künftigen Session.
+
+### 49.6 Zusammenfassung
+
+| Feature | macOS-Status |
+|---|---|
+| `gauge%` | ✅ validiert |
+| `cursor-driver%` | ✅ validiert |
+| `printer-dc%` (PDF-Pfad) | ✅ validiert |
+| `printer-dc%` (Dialog-Pfad) | 🔴 neuer Crash beim Beenden nach Dialog-Nutzung, root cause nicht lokalisiert |
+| `get-current-mouse-state` | ✅ implementiert + validiert (Position, Maustaste `left`, alle vier Modifikatoren) |
+
+Details/Reproduktionsschritte: `docs/2026-09-18-5_report-macos.md`.

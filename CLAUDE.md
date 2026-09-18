@@ -446,7 +446,12 @@ Widget-Klassen dieses Backends), `message.rkt` als nähere Vorlage als `slider.r
 (beide nicht-interaktiv, kein Container/Label-Wrapper nötig). Verifiziert: neue Probe
 `examples/gauge-probe.rkt` (horizontaler + vertikaler Gauge, per Screenshot bei zwei
 Ständen als echter, wachsender Balken bestätigt — vorher zeichnete der Stub gar
-nichts). Smoke 3/3 beide Wege. **Nur auf Windows implementiert/getestet.**
+nichts). Smoke 3/3 beide Wege. **Auf macOS validiert, 2026-09-18 (6)**
+(`docs/HACKING.md` §49.2): `get-value`/`get-range` roundtrippen korrekt,
+zwei Screenshots bei unterschiedlichen Ständen zeigen einen echten,
+wachsenden Balken horizontal **und** vertikal. Fix generalisiert
+(Windows+macOS). **Nur auf Linux noch offen** (Shim-Rebuild ausstehend,
+Build-Banner).
 **`printer-dc%` implementiert, 2026-09-17, Windows (§43)** — letzter der vier seit §36
 bekannten Stubs. Qt6 hat `QPrinter::getDC()` ersatzlos gestrichen und bietet keinen
 öffentlichen Weg von einem `cairo_t*` in einen `QPainter` — anders als win32
@@ -491,7 +496,23 @@ False` und rendert nicht — Spooler-Dienst lief, zwölf Drucker installiert (u.
 Automatisierungsgrenze des nativen `PrintDlgEx`-Fensters in dieser Fernwartungssitzung,
 kein Produktbefund (Prozess blieb durchgehend `Responding=True`, kein Absturz) — nicht
 abschließend bewiesen, da von hier aus nicht weiter diagnostizierbar. Smoke 3/3 beide
-Wege. **Nur auf Windows implementiert/getestet.** Details: `docs/HACKING.md` §43.
+Wege. **Nur auf Windows implementiert/getestet** (Dialog-Pfad auf Windows). **Auf
+macOS geprüft, 2026-09-18 (6), PDF-Rasterpfad validiert, Dialog-Pfad zeigt einen
+neuen, reproduzierbaren Crash** (`docs/HACKING.md` §49.4): PDF-Pfad (`PLT_QT_
+PRINT_TO_PDF`) läuft beliebig oft crashfrei, zweiseitige PDF korrekt gerastert —
+**aber** `QPageSetupDialog`/`QPrintDialog` öffnen auf macOS (anders als auf
+Windows, §43.7) tatsächlich sichtbar, und nach Cancel + Prozessende crasht der
+Prozess reproduzierbar 3/3 (`invalid memory reference`). Fünf Hypothesen
+(Pump-Timing vor `shim_printer_destroy`, Parent-Handle+Enable-Kaskade,
+`queue-event`/`yield`-Indirektion, `printer-dc%`s eigener Bitmap/Cairo-Zustand,
+`moredialogs.rkt`s `parameterize`+`ps-setup%`-Wrapper) per Racket-Ebene-Bisektion
+geprüft und **alle widerlegt** — die Speicherbeschädigung zeigt sich vermutlich
+dort, wo als Nächstes alloziert wird, nicht an ihrem Ursprung. `lldb`-Versuch
+scheiterte an `task_for_pid`-Berechtigungen, auch nach `sudo DevToolsSecurity
+-enable`. **Root cause offen, eigene künftige Session** (braucht funktionierende
+native Debugging-Tools) — PDF-Pfad produktionsreif, interaktiver Dialog-Pfad
+(der einzige, den ein Nutzer über File → Print sieht) **nicht**. Details:
+`docs/HACKING.md` §43, §49.4.
 **`get-current-mouse-state` implementiert, 2026-09-17, Windows (§42)** — Position aus
 `QCursor::pos()`, Modifikatoren aus `QGuiApplication::queryKeyboardModifiers()` (echter
 synchroner Hardware-Query laut Qt-Doku), Maustasten + Caps Lock aus `GetAsyncKeyState`
@@ -509,9 +530,19 @@ Verifiziert: neue Probe `examples/mouse-state-probe.rkt` + gezielte Einzel-Check
 (Position exakt, Shift/Strg über `keybd_event`, alle drei Maustasten über `mouse_event`
 — erst nach dem Fix korrekt, vorher blieb `mods` bei jeder Maustaste leer). Caps Lock
 nicht live getestet (hätte den System-Zustand umgeschaltet), Code-Pfad ist wortwörtlich
-win32s eigener. Smoke 3/3 beide Wege. **Nur auf Windows implementiert/getestet** —
-Positions-/Modifikator-Teil ist bereits Qt-seitig portabel, nur Maustasten/Caps Lock
-brauchen bei macOS/Linux noch eine eigene plattformspezifische Ergänzung im Shim.
+win32s eigener. Smoke 3/3 beide Wege. **Auf macOS implementiert + validiert,
+2026-09-18 (6)** (`docs/HACKING.md` §49.5): neuer `#elif defined(__APPLE__)`-Zweig
+in `shim_get_mouse_state` — `CGEventSourceButtonState`/`CGEventSourceFlagsState`
+(dieselbe Klasse globaler HID-Session-Abfrage wie Windows' `GetAsyncKeyState`,
+kein neuer Shim-Export, keine ABI-Änderung; `qt-shim/CMakeLists.txt` linkt neu
+`ApplicationServices` auf `APPLE`). Position/Maustaste `left`/alle vier Modifikatoren
+per `cliclick` verifiziert (`middle`/`right` nicht einzeln, `cliclick` kann diese
+Tasten nicht halten — Code-Pfad aber identisch). Physisches Cmd↔Ctrl vertauscht sich
+zu `'control`/`'meta` (Qts bekannter macOS-Swap, `AA_MacDontSwapCtrlAndMeta` nirgends
+gesetzt) — deckt sich mit `wx/qt/key-map.rkt`s eigener, ebenfalls unverswappter
+Modifier-Behandlung, deshalb bewusst nicht korrigiert. **Nur auf Linux noch offen**
+— bräuchte eine X11/Wayland-eigene Abfrage (z. B. `XQueryPointer`), kein
+`CGEventSourceButtonState`-Äquivalent dort.
 **`cursor-driver%` implementiert, 2026-09-17, Windows (§40)** — echte Standard-Cursor
 (`Qt::CursorShape`, symbolisch per Namensstring aus Racket ausgewählt statt rohem Enum-
 Wert) plus `set-image`/`'bullseye` über eine ARGB-`QCursor(QPixmap, hotX, hotY)`, ohne
@@ -528,8 +559,12 @@ per echtem `SetCursorPos` und `GetCursorInfo`+`DrawIcon`-Screenshot visuell best
 echtes DrRacket zeigt jetzt einen I-Beam über der Definitions-Pane (vorher durchgehend
 Pfeil) und fällt beim Verlassen automatisch auf den Pfeil zurück — bestätigt, dass Qts
 native `QWidget::setCursor()`-Kaskade win32/gtks manuelle `mouse-in?`/`reset-cursor-in-
-child`-Buchführung überflüssig macht. Smoke 3/3 beide Wege. **Nur auf Windows
-implementiert/getestet** — macOS/Linux brauchen den Shim-Rebuild (s. Build-Banner).
+child`-Buchführung überflüssig macht. Smoke 3/3 beide Wege. **Auf macOS validiert,
+2026-09-18 (6)** (`docs/HACKING.md` §49.3): `arrow`/`hand`/`bullseye` (eigenes
+ARGB-Bitmap) und der selbstgebaute Plus-Cursor (`set-image`-Pfad) per `cliclick` +
+`screencapture -C` (zeichnet den System-Cursor mit ein, sonst wären alle Screenshots
+leer) visuell bestätigt. Fix generalisiert. **Nur auf Linux noch offen** (Shim-Rebuild
+ausstehend, Build-Banner).
 
 Die übereinander gezeichneten Toolbar-Controls (`Untitled`/`Undock`) sind **2026-09-14
 gefixt (§35)** — Nativ-Gate bestand, Ursache war der unter Qt nie beachtete Fensterstil

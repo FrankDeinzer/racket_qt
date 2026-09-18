@@ -13,6 +13,11 @@ add_library(racketqtshim SHARED
 
 target_link_libraries(racketqtshim PRIVATE Qt6::Widgets Qt6::PrintSupport)
 
+if(APPLE)
+    find_library(APPLICATIONSERVICES_FRAMEWORK ApplicationServices REQUIRED)
+    target_link_libraries(racketqtshim PRIVATE ${APPLICATIONSERVICES_FRAMEWORK})
+endif()
+
 set_target_properties(racketqtshim PROPERTIES
     WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
