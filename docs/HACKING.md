@@ -5135,6 +5135,10 @@ durchläuft, sauber grün ist, wird die Enable-Kaskade als **auf macOS funktiona
 auf Windows. Diese Einschränkung ist im Report explizit ausgewiesen, nicht
 verschwiegen.
 
+**Nachgeholt (2026-09-18, Folgesession, §45): interaktive Klick-Bestätigung liegt
+jetzt vor, PASS.** Die Automatisierungsgrenze war ein Fokus-Problem (s. Korrektur
+in §44.6), nicht Qt/AX-spezifisch. Details: §45.1.
+
 ### 44.4 §32 Resize/Reflow — auf macOS validiert (bisher offen)
 
 `examples/live-resize-probe.rkt`, Resize **von außen** über
@@ -5202,6 +5206,19 @@ noch keine zuverlässige Methode etabliert — eigener Diagnosepunkt für eine
 künftige Session, falls dort ein Block genau das braucht (z. B. Mausrad/Scroll-
 Validierung, die auf Linux/Windows bereits gelang).
 
+**Korrektur (2026-09-18, Folgesession, §45): diese Diagnose war unvollständig, nicht
+falsch — die eigentliche Ursache war Fokus/Aktivierung, nicht Qt/AX selbst.** In
+allen hier gescheiterten Fällen lief unmittelbar vor dem Klick ein weiterer
+`osascript`-Aufruf (Status-Check o. Ä.), der `racket` nie explizit aktivierte;
+`frontmost` war nachweislich `iTerm2`, nicht `racket`. Mit einem expliziten
+`tell application "System Events" to set frontmost of process "racket" to true`
+**unmittelbar** vor dem Klick (keine dazwischenliegenden Befehle) registrierten
+sowohl `click at`/AX-`click` als auch `cliclick` echte Klicks auf genau denselben
+Button-Typ zuverlässig. Menüaktionen und Fenstersteuerung brauchten das nie, weil
+sie über die Accessibility-API laufen (funktioniert app-übergreifend unabhängig
+von `frontmost`), während ein echter HID-Klick auf einen Custom-Qt-Button einen
+wirklich aktiven Fensterkontext braucht. Details/Validierung: §45.
+
 ### 44.7 Gate
 
 Smoke 3/3 mit **und** ohne `PLT_QT=1` (vor und nach allen Messungen). `git status`
@@ -5210,3 +5227,164 @@ Validierung), keine neue Datei in `examples/` (alle Scratch-Skripte nur im
 Scratchpad). `org.racket-lang.prefs.rktd` vor der ersten GUI-Interaktion gesichert
 (SHA-256 `be9b38f2…deefb9`) und nach jeder DrRacket-Session-Runde zurückgespielt,
 Hash abschließend verifiziert identisch.
+
+## 45. macOS: Rest des gebündelten Sweeps validiert — Automatisierungsgrenze aus §44 als Fokus-Problem korrigiert
+
+**Kontext:** Fortsetzung derselben Session wie §44, auf Nutzerwunsch mit dem Rest
+des gebündelten Sweeps (§36/§37/§34/§35/§39/§33). Ausgangslage laut §44: rohe
+Klicks auf custom-gezeichnete Qt-Widgets schienen grundsätzlich nicht zu
+funktionieren. Der Nutzer installierte auf Nachfrage `cliclick` (Homebrew) und
+`pyobjc-framework-Quartz` (pip), um echte HID-Klicks bzw. Mausrad-Events zu
+erzeugen.
+
+### 45.1 Root-Cause-Korrektur: nicht Qt/AX, sondern fehlende Fokus-Aktivierung
+
+Erster `cliclick`-Test auf denselben Button aus §44.3 (`enable-cascade-probe.rkt`)
+schlug **erneut** fehl (n1=0) — mit denselben Koordinaten, die die Probe selbst
+über `client->screen` meldet. Auffällig: `frontmost` war zu diesem Zeitpunkt
+`iTerm2`, nicht `racket` (per `tell application "System Events" to name of first
+process whose frontmost is true` verifiziert). **Nach explizitem**
+`tell application "System Events" to set frontmost of process "racket" to true`
+**unmittelbar vor** dem Klick (keine dazwischenliegenden Befehle, die den Fokus
+wieder verschieben könnten) registrierte derselbe `cliclick`-Aufruf den Klick
+sofort. Die Zweitmessung (deaktivierter Button) bestätigte zusätzlich, dass der
+Klick auf einen deaktivierten Button korrekt **nicht** feuert:
+
+```
+[probe] clicks after window 1 (enabled) = 1
+[probe] clicks after window 2 (disabled) = 1
+[probe] VERDICT: enabled=1 disabled-delta=0 -> PASS
+```
+
+**Erklärung, warum Menü-/Fenster-Aktionen davon nie betroffen waren:** `click menu
+item …`, `click button 1 of window …` (Traffic-Lights) und `set size of window …`
+laufen über die Accessibility-API, die app-übergreifend funktioniert, unabhängig
+davon, welcher Prozess `frontmost` ist. Ein echter HID-Mausklick (egal ob über
+`System Events click at` oder `cliclick`) wird dagegen vom Window-Server an das
+Fenster unter dem Cursor ausgeliefert, aber ein custom-gezeichnetes Qt-`QWidget`
+verarbeitet den Klick nur korrekt, wenn sein Fenster tatsächlich aktiv ist — sonst
+wird der Klick (je nach Qt-/Cocoa-Konvention) nur als Aktivierung interpretiert,
+nicht als Widget-Aktion. **Das war in §44.2/§44.3/§44.6 die eigentliche Ursache,
+nicht eine grundsätzliche Qt/AX-Automatisierungsgrenze.** §44 bleibt als Messung
+gültig (die Klicks sind dort tatsächlich nicht angekommen), nur die Erklärung war
+zu pessimistisch — die dort dokumentierte "Lehre" (Menüpfade bevorzugen) bleibt
+trotzdem eine gute Praxis, weil sie ohne Fokus-Fallstrick funktioniert, ist aber
+**nicht mehr die einzige Option**.
+
+**§26 Enable-Kaskade damit jetzt interaktiv PASS** (nicht mehr nur strukturell
+ersatzverifiziert wie in §44.3) — Positivkontrolle zählt, deaktivierter Button
+feuert nicht, exakt wie auf Windows.
+
+### 45.2 §36 Clipboard — vollständig bestätigt (in-process + cross-toolkit beide Richtungen)
+
+`examples/clipboard-probe.rkt` (ohne GUI-Automatisierung nötig, reiner API-Test):
+alle drei Checks (direkter Round-trip, Editor-Copy → plain TEXT, Editor-Paste
+← WXME-Pfad) **PASS** unter Qt, identisch zum nativen Lauf.
+
+Zusätzlich Cross-Toolkit in beiden Richtungen geprüft (Lehre aus dem ersten
+fehlgeschlagenen Versuch: ein Skript mit sofortigem `(exit 0)` ohne
+`pump-gate!`/`wait/pump` gibt der Qt-Eventschleife keine Zeit, den Schreibvorgang
+tatsächlich auf das native `NSPasteboard` zu committen — kein Produktbefund,
+reines Testartefakt, seitdem mit dem etablierten `pump-gate!`-Muster vermieden):
+
+- Qt schreibt (`set-clipboard-string`) → natives `pbpaste` liest denselben Text.
+- Natives `pbcopy` schreibt → Qt liest über `get-clipboard-string` denselben Text.
+
+**Fix generalisiert vollständig auf macOS**, alle drei Plattformen jetzt
+abgedeckt.
+
+### 45.3 §37 Menü-Enable-States — vollständig bestätigt (Mechanismus + reale GUI)
+
+`examples/menu-demand-probe.rkt` (`PLT_QT_DEBUG=1`): `demand-callback` feuert 2/2
+auf echtem `QMenu::aboutToShow`, Checkable-Item-Toggle liest korrekt zurück —
+**PASS**, identisch zum Linux-Befund.
+
+**Reale GUI-Bestätigung in echtem DrRacket** (AX-Abfrage von `enabled` je
+Menüpunkt, kein Klick nötig für die Messung selbst):
+
+- Edit-Menü vor Selektion: `Cut`/`Copy`/`Delete` = `false`. Nach `Select All`
+  (per `click menu item`): alle drei → `true`.
+- `Windows`-Menü (macOS-Äquivalent zu DrRackets „Tabs"-Menü) bei einem Tab:
+  `Previous Tab`/`Next Tab` = `false`. Nach Öffnen eines zweiten Tabs (`File →
+  Open…`): beide → `true`.
+
+**Fix generalisiert vollständig auf macOS.**
+
+### 45.4 §35 Toolbar-Overlap — kein visueller Overlap
+
+`examples/deleted-style-probe.rkt` (`PROBE_HOLD=1`): `dead-panel`/`dead-canvas`
+melden `is-shown?=#f`, `dead-inner`/`b-stray` melden zwar `is-shown?=#t` (wx-Level-
+Flag, kaskadiert nicht automatisch nach unten — das ist bei win32 identisch), aber
+per Screenshot bestätigt: **„STRAY" wird nirgends gerendert**, nur der sichtbare
+„SICHTBAR"-Button ist zu sehen. Die native Qt-Hide-Kaskade eines wirklich
+versteckten Vorfahren greift unabhängig vom wx-Level-Flag der Nachkommen — **kein
+Overlap, Fix bestätigt.**
+
+### 45.5 §39 Crash B (Teardown) — beide Pfade PASS
+
+`examples/crash-b-teardown-probe.rkt`, frameless (genau der historische
+Crash-Kontext): Accept-Pfad (Dateiname eintippen + Enter) liefert den Pfad zurück,
+kein Crash; Cancel-Pfad (Escape) liefert `#f`, kein Crash. Beide Prozesse beendet
+sich sauber (`pgrep` findet danach nichts mehr). **Fix generalisiert auf macOS.**
+
+### 45.6 §34 Colors-Tab-Scroll — vollständig bestätigt (erreichbar UND klickbar)
+
+Mit der §45.1-Korrektur (Fokus-Aktivierung) und echtem Mausrad (Quartz,
+`CGEventCreateScrollWheelEvent`) ließ sich das ursprüngliche Akzeptanzkriterium
+aus `docs/2026-09-14-2_report-linux.md` erstmals auf macOS wörtlich erfüllen:
+
+- `examples/panel-scroll-probe.rkt`: 20 Buttons + Button-Zeile „Revert/Design/
+  Names" außerhalb des sichtbaren Bereichs (`CENTER`-Koordinaten y=1047 bei einem
+  260px hohen Fenster). Cursor auf das Panel positioniert (`CGWarpMouseCursorPosition`),
+  drei Sätze à 15 Wheel-Notches gesendet — die gemeldeten Button-Zentren
+  wanderten schrittweise 1047→865→683→551 und blieben dort stabil (Scroll-Ende
+  erreicht), **551 liegt innerhalb des Fensters** (Fenster y=281..569) — per
+  Screenshot visuell bestätigt (Button-Zeile sichtbar, Scrollbar-Thumb am unteren
+  Ende).
+- Klick auf „Names" (`cliclick` an den gemeldeten Koordinaten, mit vorheriger
+  expliziter Fokus-Aktivierung) protokolliert `[probe] CLICK auf Names (Nr. 1)` —
+  **klickbar bestätigt.**
+- AX-`set value of scroll bar … to 1` hat dagegen **keine** Wirkung (Wert wird
+  laut Abfrage übernommen, aber der Inhalt bewegt sich nicht) — anders als Klicks
+  hilft die Fokus-Korrektur hier nicht; das native `QScrollBar` verarbeitet den
+  AX-„Value changed"-Signalweg auf macOS offenbar nicht wie ein echtes
+  Nutzer-Drag. Kein Blocker, da das echte Mausrad zuverlässig funktioniert.
+
+**Fix generalisiert vollständig auf macOS**, alle drei Plattformen jetzt
+abgedeckt.
+
+### 45.7 §33 Mausrad/Editor-Scrollbars — vertikal vollständig bestätigt, horizontal offen
+
+`examples/scroll-probe.rkt` (`editor-canvas%`, 100 Zeilen, `'(auto-hscroll
+auto-vscroll)`):
+
+- **Vertikales Mausrad**: 10 Notches (Quartz, `kCGScrollEventUnitLine`) bewegen
+  den Inhalt exakt 10 Zeilen (Zeile 0 → Zeile 10) — 1:1-Verhältnis, kein
+  Über-/Unterschwingen.
+- **PageDown**: eine Seite bewegt den Inhalt exakt 16 Zeilen (Zeile 10 → Zeile
+  26) — plausibler Seitenwert für die Fenstergröße.
+- **Volle Reichweite**: vier weitere PageDowns erreichen exakt Zeile 99 (letzte
+  Zeile), Scrollbar-Thumb sichtbar am unteren Ende — Fenster/Editor-Größe stimmen.
+- **Horizontales Mausrad: nicht bestätigt, aber auch nicht als Defekt
+  eingestuft.** Zwei Versuche (reines horizontales Wheel-Delta über
+  `CGEventCreateScrollWheelEvent(…, wheelCount=2, 0, -3)`; Shift+vertikales Wheel
+  als alternative Konvention) bewegten den Inhalt in keinem Fall horizontal, der
+  Screenshot-Vergleich vor/nach ist pixelidentisch. Die horizontale Scrollbar ist
+  sichtbar und (laut Code, `qt-canvas-scroll-mixin`) symmetrisch zur vertikalen
+  implementiert — plausibler ist ein Quartz-Simulationsartefakt (macOS'
+  Trackpad-Horizontalscroll nutzt üblicherweise kontinuierliche
+  Pixel-Events/Momentum-Phasen, keine einfachen Line-Notches wie hier simuliert)
+  als ein echter Produktbefund, aber **nicht bewiesen** — offen für eine künftige
+  Session, die z. B. per Klick-Drag auf den horizontalen Scrollbar-Thumb testet
+  (AX fand dafür in dieser Session keinen zweiten `scroll bar`-Eintrag, nur den
+  vertikalen).
+
+**Vertikal: Fix generalisiert vollständig auf macOS. Horizontal: unentschieden,
+kein Fix-Versuch (Regel 4).**
+
+### 45.8 Gate
+
+Smoke 3/3 mit **und** ohne `PLT_QT=1` (nach allen Messungen). `git status`
+(Umbrella + Submodul) sauber — keine Code-Änderung, alle Hilfsskripte nur unter
+`/tmp`/Scratchpad. `org.racket-lang.prefs.rktd` nach jeder DrRacket-Runde
+zurückgespielt, Hash abschließend identisch zum Sessionbeginn.

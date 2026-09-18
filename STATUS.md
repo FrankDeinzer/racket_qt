@@ -5,6 +5,45 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-18 (macOS, 2) — Rest des gebündelten Sweeps validiert, Automatisierungsgrenze aus §44 als Fokus-Problem korrigiert
+
+**Kontext:** direkte Fortsetzung der vorherigen macOS-Session (kritischer Kern
+bereits erledigt). Nutzerwunsch: mit dem Rest des gebündelten Sweeps (§36/§37/
+§34/§35/§39/§33) weitermachen. Auf Empfehlung installierte der Nutzer `cliclick`
+und `pyobjc-framework-Quartz` für echte Klick-/Mausrad-Simulation.
+
+**Wichtigste Korrektur:** die in der vorherigen Session dokumentierte
+"Automatisierungsgrenze" (rohe Klicks auf custom-Qt-Widgets funktionieren nicht)
+war **kein Qt/AX-Limit, sondern ein Fokus-Problem** — `frontmost` war beim Klick
+nie explizit auf `racket` gesetzt (`iTerm2` blieb frontmost). Mit
+`set frontmost of process "racket" to true` unmittelbar vor dem Klick registrieren
+sowohl `cliclick` als auch `System Events click at`/`AX click` zuverlässig. **§26
+Enable-Kaskade ist damit jetzt interaktiv bestätigt** (PASS, Positivkontrolle
+zählt, disabled-Button feuert nicht) — nicht mehr nur strukturell wie zuvor.
+
+**Ergebnis des Rest-Sweeps:**
+- §36 Clipboard: vollständig bestätigt (in-process + Cross-Toolkit beide
+  Richtungen, `pbcopy`/`pbpaste`).
+- §37 Menü-Enable-States: vollständig bestätigt (Mechanismus-Probe PASS + reale
+  DrRacket-Menüs Edit/Windows korrekt `false→true`).
+- §35 Toolbar-Overlap: kein visueller Overlap (Screenshot-bestätigt).
+- §39 Crash B: beide Pfade (Accept/Cancel) ohne Crash.
+- §34 Colors-Tab-Scroll: **vollständig bestätigt** — echtes Mausrad (Quartz)
+  macht die letzte Button-Zeile erreichbar, Klick darauf registriert (mit
+  korrekter Fokus-Aktivierung).
+- §33 Mausrad: **vertikal vollständig bestätigt** (10 Notches = 10 Zeilen,
+  PageDown = 16 Zeilen, volle Reichweite bis Zeile 99), **horizontal nicht
+  bestätigt** (zwei Simulationsversuche ohne Wirkung, nicht als Defekt
+  eingestuft — offener Punkt).
+
+**Keine Code-Änderung diese Session** (reine Validierung, Gate 3/3 beide Wege
+grün, `git status` sauber). Details: `docs/2026-09-18-2_report-macos.md`,
+`docs/HACKING.md` §45 (inkl. Korrekturen an §44.2/§44.3/§44.6). Verbleibend
+offen: horizontales Mausrad, Windows-exklusive Features (cursor/gauge/
+mouse-state/printer-dc), der §44.5-Menüband-Kollaps-Befund.
+
+---
+
 ## Session 2026-09-18 (macOS) — gebündelter Validierungs-Sweep (kritischer Kern) zu docs/2026-09-13_prompt.md
 
 **Kontext:** Cluster-1-Block (Linux-geführt, `docs/2026-09-13_prompt.md`) war auf
