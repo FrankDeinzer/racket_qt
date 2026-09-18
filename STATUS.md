@@ -5,6 +5,57 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-18 (macOS, 4) — Menüband-Kollaps gefixt (§44.5/§46.2), keine Shim-ABI-Änderung
+
+**Kontext:** Fortsetzung; Nutzer entschied sich für den vollständigen Fix des
+§44.5-Befunds (Qt-Menüband kollabiert nach Schließen des letzten Fensters
+nicht). Zwei native Gegenproben auf Advisor-Rat **vor** der ersten Codezeile
+widerlegten den ursprünglichen Plan ("neues Qt-Aktivierungssignal + leere
+Fallback-Menübar"): natives File/Help-Menü ist echt befüllt (nicht Cocoas
+leere `empty-mb`), und `shim_menubar_create` erzeugt bereits eine parentlose
+`QMenuBar` — keine neue Shim-ABI nötig.
+
+**Zwischenzeitliche Sackgasse, aber wertvoll:** Hypothese "gepostetes `(exit)`
+läuft nie" (analog §39 Crash B) per temporärer Instrumentierung (Backup+Hash,
+vollständig zurückgespielt) geprüft — `on-close-action` erkennt die richtige
+Bedingung, aber `framework:exit-when-no-frames` blockiert außen. Diese
+Preference stand auf dieser Maschine bereits vor Sessionbeginn auf `#f`.
+Verifiziert auf `#t` gesetzt — Prozess blieb trotzdem am Leben. Das führte zur
+eigentlichen Quelle: **DrRacket selbst** (`drracket/private/main.rkt`, nicht im
+Fork) setzt diese Preference beim Start auf jedem macOS-Backend explizit auf
+`#f` — bewusste DrRacket-Entscheidung, kein Cocoa- oder Qt-spezifisches
+Verhalten. Gilt nachweislich **nicht** für bare `racket/gui`-Skripte (native
+beenden sich beim Fensterschließen vollständig, unter Qt nicht) — kleiner,
+separat vermerkter offener Punkt.
+
+**Die eigentliche Root-Cause:** DrRackets reduziertes File/Help-Menü läuft über
+`(new menu-bar% (parent 'root))` — eine dokumentierte mred-API, die zum
+selben unsichtbaren "Root"-Frame auflöst und `set-menu-bar` darauf aufruft,
+genau wie jeder normale Frame. `wx/qt/frame.rkt`s `set-menu-bar` hängte diese
+Bar aber immer per `shim_window_set_menubar` an ihr eigenes (beim Root-Frame:
+nie gezeigtes) `QMainWindow` — dort reparented, konnte sie nie system-sichtbar
+werden.
+
+**Fix (nur `wx/qt/frame.rkt`, Regel 2 statt Regel 3 — keine Shared-Code-/
+Shim-Änderung):** `designate-root-frame` merkt sich den Root-Frame;
+`set-menu-bar` lässt seine QMenuBar parentless und schaltet sie per
+vorhandenem `shim_widget_set_visible` sichtbar; `direct-show` zählt reale
+gezeigte Frames und zeigt die Root-Bar nur, wenn keiner mehr offen ist —
+bewusst ohne Fokus-/Aktivierungssignal (Cmd+Tab-Regression sonst drohend,
+zweimal gegengeprüft: kein Effekt in beiden Zuständen).
+
+**Verifiziert:** Menüband kollabiert nach Schließen des letzten Fensters
+korrekt auf `racket, File, Help` (Inhalt deckt sich mit nativ, plus einem
+DrRacket-eigenen zusätzlichen `Quit`-Eintrag für Qt), `File → New` aus der
+reduzierten Leiste stellt das volle Menüband sofort wieder her (zweimal
+wiederholt), `test-dock-size`-Akzeptanztest weiterhin crashfrei, Smoke 3/3
+beide Wege. **Nur auf macOS relevant** — kein Rebuild für Linux/Windows nötig.
+
+Details: `docs/HACKING.md` §47. Submodul-Commit steht noch aus (Nutzer-
+Entscheidung zu Push/Sync ausstehend, Regel 7).
+
+---
+
 ## Session 2026-09-18 (macOS, 3) — horizontales Mausrad geklärt, §44.5-Menüband-Kollaps root-caused (kein Fix)
 
 **Kontext:** Fortsetzung, Nutzerwunsch: die zwei aus der letzten Runde

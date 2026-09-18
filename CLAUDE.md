@@ -211,22 +211,40 @@ identische Klick-Methodik) zeigt exakt dasselbe Verhalten.** Das ist
 Standard-macOS-App-Konvention (Cocoa-Apps beenden sich nicht automatisch beim
 Schließen des letzten Fensters, sofern nicht explizit implementiert), **kein
 Qt-Bug** — der „Prozess überlebt"-Teil von §29.2 ist damit auf macOS analog zu §38
-(Linux) reklassifiziert. **Dabei aber ein neuer, isolierter Befund gefunden:** das
-native Menüband kollabiert nach dem Schließen korrekt auf `racket, File, Help`,
-die Qt-Variante bleibt beim vollen Achtmenü-Band, obwohl keine Fenster mehr offen
-sind. **Root-Cause lokalisiert, 2026-09-18 (3)** (`docs/HACKING.md` §46.2):
-`mred/private/app.rkt`s `current-eventspace-has-menu-root?` schließt Qt (anders
-als die benachbarte `current-eventspace-has-standard-menus?`, §22) nicht aus —
-`mrtop.rkt` erzeugt deshalb auch unter Qt ein unsichtbares „Root"-Hilfsfenster
-(per `CGWindowListCopyWindowInfo` in zwei unabhängigen frischen Starts
-verifiziert), aber `wx/qt/frame.rkt`s `designate-root-frame` ist ein No-op-Stub,
-und Qt hat ohnehin kein Äquivalent zu cocoas nativem
-`windowDidResignMain:`-Delegate-Mechanismus (der die Menüband-Umschaltung
-überhaupt erst auslöst) — der Shim bietet zudem keine App-weite „Menübar ohne
-zugehöriges Fenster setzen"-Funktion. **Fix berührt Shared Code
-(`mred/private/app.rkt`) + potenziell eine neue Shim-ABI** — kein Fix-Versuch
-diese Session (Regel 3), Nutzerentscheidung für eine künftige Session offen.
-Details: `docs/HACKING.md` §46.2, `docs/2026-09-18_report-macos.md`.
+(Linux) reklassifiziert, mit einer Präzisierung (§47.1): DrRacket selbst setzt
+`framework:exit-when-no-frames` beim Start auf jedem macOS-Backend (nativ wie Qt)
+explizit auf `#f` (`drracket/private/main.rkt`, abhängig von
+`current-eventspace-has-menu-root?`, das auf jedem macOS-Backend wahr ist) —
+das Überleben ist eine bewusste DrRacket-Entscheidung, keine implizite
+Cocoa-Konvention, und gilt nachweislich **nicht** für bare `racket/gui`-Skripte
+(die beenden sich nativ beim Fensterschließen vollständig, unter Qt nicht —
+eigener, kleinerer offener Punkt). **Menüband-Befund gefixt, 2026-09-18 (4)**
+(`docs/HACKING.md` §47): Root-Cause war letztlich rein `wx/qt/`-lokal, **keine
+Shared-Code-/Shim-ABI-Änderung nötig** — die ursprüngliche Regel-3-Einschätzung
+war zu pessimistisch, zwei native Gegenproben (§47.1) widerlegten den zunächst
+geplanten Ansatz, bevor Code entstand. `wx/qt/frame.rkt`s `set-menu-bar` hängte
+jede QMenuBar bedingungslos per `shim_window_set_menubar` an ihr eigenes
+`QMainWindow` — für den nie gezeigten „Root"-Hilfsframe (denselben, den
+DrRacket über `(new menu-bar% (parent 'root))` mit seinem eigenen File/Help-
+Menü belegt, `mrmenu.rkt`) bedeutete das: die Bar wurde in ein unsichtbares
+Fenster reparented und konnte nie system-sichtbar werden. **Fix:**
+`designate-root-frame` merkt sich den Root-Frame; `set-menu-bar` lässt dessen
+QMenuBar parentless (wie `shim_menubar_create` sie ohnehin erzeugt) und schaltet
+sie per bereits vorhandenem `shim_widget_set_visible` sichtbar; `direct-show`
+zählt reale gezeigte Frames (Dialoge eingeschlossen) und zeigt die Root-Bar nur,
+wenn keiner mehr offen ist. Bewusst **kein** Fokus-/Aktivierungssignal
+verwendet (Cmd+Tab hätte sonst fälschlich mitgezählt) — Regressionswache dafür
+zweimal bestätigt: App-Wechsel und zurück ändert das Menüband in keinem der
+beiden Zustände. Verifiziert: Menüband kollabiert nach Schließen des letzten
+Fensters korrekt auf `racket, File, Help` (Inhalt deckt sich mit nativ, plus
+einem Qt-spezifischen zusätzlichen `Quit`-Eintrag, den DrRacket selbst
+hinzufügt, weil `current-eventspace-has-standard-menus?` unter Qt `#f` ist),
+`File → New` aus der reduzierten Leiste stellt das volle Menüband sofort
+wieder her, zweimal wiederholt. `test-dock-size`-Akzeptanztest erneut
+crashfrei, Smoke 3/3 beide Wege. **Nur auf macOS relevant** (Root-Frame wird
+auf Linux/Windows nie designiert, Code-Pfad degeneriert dort zum alten
+Verhalten) — kein Rebuild auf den anderen Plattformen nötig. Details:
+`docs/HACKING.md` §46.2/§47, `docs/2026-09-18_report-macos.md`.
 Details zum Linux-Befund: `docs/HACKING.md` §38. **Als Lehre für künftige Sessions:
 `xdotool windowclose` nicht mehr als Ersatz für „Klick auf den nativen
 Schließen-Button" verwenden** — wie bei jeder anderen Widget-Interaktion

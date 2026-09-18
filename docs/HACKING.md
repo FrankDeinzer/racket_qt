@@ -5504,3 +5504,165 @@ Nutzerentscheidung für eine künftige Session offen).
 Smoke 3/3 mit **und** ohne `PLT_QT=1`. `git status` (Umbrella + Submodul)
 sauber — keine Code-Änderung. `org.racket-lang.prefs.rktd` nach den
 DrRacket-Läufen zurückgespielt, Hash identisch verifiziert.
+
+## 47. macOS-Menüband-Kollaps (§44.5/§46.2) gefixt — `wx/qt/frame.rkt`, keine Shim-ABI-Änderung
+
+**Kontext:** direkte Fortsetzung von §46.2. Der Nutzer entschied sich für den
+vollständigen Fix, nachdem der ursprüngliche Plan („neues Qt-Aktivierungssignal
++ leere Fallback-Menübar") durch zwei native Gegenproben widerlegt wurde (§47.1)
+und ein zwischenzeitlicher Ablenkungspfad (§47.2, `exit:exit`) sich als
+Sackgasse erwies, die aber am Ende die eigentliche Ursache freilegte (§47.3).
+
+### 47.1 Zwei native Gegenproben widerlegen den ursprünglichen Plan
+
+Auf Advisor-Rat vor der ersten Codezeile zwei billige native Checks gefahren:
+
+- **Check A:** natives DrRacket, letztes Fenster per echtem Klick auf den
+  Schließen-Button geschlossen → Menüband wird `racket, File, Help`, **File und
+  Help sind echt befüllt** (New/Open…/Open Require Path…/Open Recent/Reopen
+  Closed Tab/Search in Files bzw. Racket Documentation/Related Web Sites/…).
+  **Das ist nicht `wx/cocoa/frame.rkt`s `empty-mb`** (ein bares `(new
+  menu-bar%)` ohne Kinder) — der ursprüngliche Plan hätte am eigenen Maßstab
+  „wie nativ" scheitern müssen, da er genau diese leere Leiste installiert
+  hätte.
+- **Check B:** `qt-shim/src/shim.cpp`s `shim_menubar_create` erzeugt bereits
+  `new QMenuBar(nullptr)` — parentless, genau das von Qt dokumentierte Muster
+  für eine App-weite Menübar ohne zugehöriges Fenster. `shim_widget_set_visible`
+  ist bereits generisch auf `QWidget*`. **Keine neue Shim-ABI nötig** — Linux'
+  Rebuild-Schuld wächst nicht.
+
+**Zusätzlicher, unabhängiger Fund aus Check A:** ein bares `racket/gui`-Skript
+(kein DrRacket) beendet sich nativ beim Schließen seines letzten Fensters
+vollständig; unter Qt bleibt derselbe Skript-Prozess am Leben. Das widerspricht
+der bisherigen §44.5-Reklassifizierung „Prozess überlebt ist Standard-macOS-
+Verhalten" — **die gilt nachweislich nur für DrRacket, nicht für bare Skripte.**
+Nicht weiter verfolgt (außerhalb des Scopes dieser Session), aber als eigener,
+präzisierender Nebenbefund festgehalten, damit eine künftige Session die
+Reklassifizierung nicht breiter liest, als sie belegt ist.
+
+### 47.2 Sackgasse: `framework:exit-when-no-frames` — lokale Preference, kein Qt-Pump-Bug
+
+Hypothese (durch die `-exit`/`queue-callback`-Code-Lesung nahegelegt): der in
+§29.2 dokumentierte „Zombie" könnte daran liegen, dass `framework/private/
+exit.rkt`s `-exit` das eigentliche `(exit)` nur per `queue-callback` postet
+(exakt das §39-Crash-B-Muster) und dieser Callback unter Qt nie läuft.
+**Temporär instrumentiert** (`exit.rkt`/`group.rkt`, `eprintf` vor/nach
+`queue-callback` bzw. in `on-close-action`; Backup+SHA-256 vor jeder Änderung,
+danach Original zurückgespielt und Hash identisch verifiziert — keine Spur im
+`git status` des Submoduls). **Ergebnis: `on-close-action` erkennt `frames=0`
+und `std-menus?=#f` korrekt (genau die Bedingung, die zu `exit:exit` führen
+sollte), aber die äußere Bedingung `exit-when-no-frames=#f` blockiert den
+Aufruf komplett — `exit:exit` wird nie erreicht.** `framework:exit-when-no-
+frames` stand auf dieser Maschine in den persistierten Preferences bereits vor
+Sessionbeginn auf `#f` (im allerersten Backup dieser Session schon so
+vorhanden). **Verifiziert, nicht nur vermutet:** Preference temporär auf `#t`
+gesetzt (Backup+Hash wie gewohnt) — Prozess blieb trotzdem am Leben, die
+Preference alleine erklärte den Zombie also nicht (mehr dazu in §47.3).
+Instrumentierung vollständig zurückgespielt, Hash identisch verifiziert.
+
+### 47.3 Die eigentliche Root-Cause: DrRacket baut seine eigene reduzierte Menübar, Qt hängt sie nie sichtbar ein
+
+Der Preference-Test in §47.2 führte zur eigentlichen Quelle:
+`drracket-core-lib/drracket/private/main.rkt` (installiertes Racket-9.3-Paket,
+nicht im Fork) setzt `framework:exit-when-no-frames` beim Start **selbst**,
+abhängig von `(current-eventspace-has-menu-root?)`:
+
+```racket
+(cond
+  [(current-eventspace-has-menu-root?)
+   (drracket:frame:create-root-menubar)
+   (preferences:set 'framework:exit-when-no-frames #f)]
+  [else
+   (preferences:set 'framework:exit-when-no-frames #t)])
+```
+
+`current-eventspace-has-menu-root?` ist auf **jedem** macOS-Backend wahr,
+cocoa eingeschlossen — DrRacket überschreibt die Preference deshalb auf allen
+drei macOS-Läufen (nativ wie Qt) bei jedem Start auf `#f` (mein §47.2-Test
+setzte die Datei vor dem Start, DrRacket überschrieb sie beim Laden sofort
+wieder). **DrRacket will auf macOS bewusst nie beenden, wenn das letzte
+Fenster schließt** — unabhängig vom Backend. Der „Zombie" (§29.2) ist damit
+für DrRacket **kein Bug auf keiner der beiden Plattformen**, sondern
+Absicht — meine ursprüngliche Reklassifizierung war im Kern richtig, nur die
+Begründung („Standard-macOS-Konvention") unvollständig: es ist eine explizite
+DrRacket-Entscheidung, keine implizite Cocoa-Konvention.
+
+`(drracket:frame:create-root-menubar)` (`drracket/private/frame.rkt:687`) baut
+genau das beobachtete File/Help-Menü und ruft `(new menu-bar% (parent
+'root))` — eine **dokumentierte, backend-neutrale mred-API**
+(`mrmenu.rkt:417-459`): `'root` als `parent` löst intern zum selben
+unsichtbaren "Root"-Frame auf, den `mrtop.rkt:338-350` pro Eventspace anlegt,
+und ruft am Ende `(send root-frame set-menu-bar mb)` — **exakt dieselbe
+`set-menu-bar`-Methode, die jeder normale Frame auch hat.**
+
+**Der eigentliche Bug:** `wx/cocoa/frame.rkt`s `set-menu-bar`
+(Zeile 755-762) installiert die QMenuBar/NSMenu nur dann sofort
+*system-sichtbar*, wenn dieses Frame `isMainWindow` ist oder (Root-Fall) kein
+anderes App-Fenster vorne ist — ansonsten bleibt sie dem Frame nur
+*zugeordnet*, bis `windowDidResignMain:` (Zeile 164-175, Objective-C-Delegate
+auf `RacketWindow`/`RacketPanel`) sie beim Verlust des Main-Status aktiv
+umschaltet. **`wx/qt/frame.rkt`s `set-menu-bar` kannte dieses Umschalten nicht
+— sie hängte die Bar bedingungslos per `shim_window_set_menubar` an das
+jeweilige `QMainWindow`.** Für den nie gezeigten Root-Frame bedeutete das: die
+Bar wurde in ein unsichtbares Fenster hinein reparented und konnte nie zur
+system-sichtbaren werden — sobald das echte Dokumentfenster schloss, hatte Qt
+nichts, worauf es zurückfallen konnte, und beließ einfach die zuletzt aktive
+(volle) Leiste.
+
+### 47.4 Fix — nur `wx/qt/frame.rkt`, keine Shim-ABI-Änderung (Regel 2, kein Regel-3-Fall)
+
+Drei Bausteine, alle bereits vorhanden, nur neu verdrahtet:
+
+1. **`designate-root-frame`** (vorher `(void)`-Stub) merkt sich `this` in einer
+   Modul-Variable `root-frame` — Pendant zu cocoas `root-fake-frame`.
+2. **`set-menu-bar`**: für den Root-Frame wird die QMenuBar **nicht** per
+   `shim_window_set_menubar` an ein Fenster gehängt (das würde sie in das nie
+   gezeigte `QMainWindow` reparenten) — sie bleibt parentless (wie
+   `shim_menubar_create` sie ohnehin erzeugt) und wird direkt per
+   `shim_widget_set_visible` sichtbar/unsichtbar geschaltet.
+3. **`direct-show`**: pflegt einen Modul-weiten `shown-real-frames`-Hash (jeder
+   reale Frame trägt sich beim Zeigen/Verstecken ein/aus — Dialoge zählen
+   ebenfalls mit, da `dialog%` `frame%` erweitert und `super direct-show`
+   aufruft, s. u.) und ruft nach jeder Änderung `update-root-menubar-
+   visibility!` — zeigt die Root-Bar exakt dann, wenn der Hash leer ist.
+
+**Bewusst kein Cmd+Tab-/Fokus-Signal verwendet** (die vom Advisor benannte
+Gefahr: `QApplication::focusWindowChanged` feuert auch beim App-Wechsel, nicht
+nur beim „letztes Fenster zu", und hätte eine sichtbare Regression erzeugt) —
+die Zählung hängt ausschließlich an echtem Frame-Show/Hide, komplett
+unabhängig von Anwendungsfokus.
+
+**Verifiziert:**
+
+- Volles Menüband bei offenem Dokumentfenster (`Apple, racket, File, Edit,
+  View, Language, Racket, Insert, Scripts, Help`).
+- Nach Schließen des letzten Fensters (echter Klick auf den nativen
+  Schließen-Button): **`Apple, racket, File, Help`** — Inhalt geprüft, deckt
+  sich mit nativ (`New, Open…, Open Require Path…, Open Recent, Reopen Closed
+  Tab, Search in Files…`) plus einem zusätzlichen `Quit`-Eintrag (erwartungs-
+  gemäß, da `current-eventspace-has-standard-menus?` unter Qt `#f` ist und
+  `create-root-menubar` diesen Eintrag genau dafür selbst hinzufügt,
+  `drracket/private/frame.rkt`, `unless (current-eventspace-has-standard-
+  menus?) ...`).
+- **Rückweg:** `File → New` aus der reduzierten Leiste öffnet ein neues
+  Dokumentfenster und das volle Menüband kehrt sofort zurück — zweimal
+  wiederholt (zwei unabhängige Schließen-Öffnen-Zyklen), beide Male korrekt.
+- **Advisor-geforderte Regressionswache:** Cmd+Tab weg von DrRacket und zurück
+  ändert das Menüband in **keinem** der beiden Zustände (mit/ohne offenes
+  Dokumentfenster) — bestätigt zweimal, je einmal pro Zustand.
+- `test-dock-size`-Akzeptanztest (1→2-Tab-Sequenz) erneut gefahren: **kein
+  Crash**, keine Regression durch die Änderung.
+- Smoke 3/3 mit **und** ohne `PLT_QT=1` (mehrfach wiederholt).
+
+**Bewusst nicht abgedeckt:** mehrere gleichzeitig offene Top-Level-Frames
+(DrRacket nutzt intern meist Tabs statt mehrerer Fenster, dieser Fall kam in
+der Session nicht vor) und der Fall „nur ein Dialog offen, kein Dokumentfenster"
+(zählt laut Code als „real frame shown", da `dialog%` `frame%`s `direct-show`
+mit aufruft — plausibel richtig, aber nicht gezielt getestet).
+
+**Nur auf macOS relevant/getestet** — `root-frame` bleibt auf Linux/Windows
+`#f` (`current-eventspace-has-menu-root?` ist dort `#f`, `designate-root-frame`
+wird nie aufgerufen), der geänderte Code-Pfad in `set-menu-bar`/`direct-show`
+degeneriert dort zum alten Verhalten (`(eq? this #f)` für jeden echten Frame
+ist immer `#f`) — keine Verhaltensänderung auf den anderen beiden Plattformen,
+kein Rebuild dort nötig (reiner Racket-Code, keine Shim-ABI-Änderung).
