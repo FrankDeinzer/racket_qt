@@ -6169,3 +6169,142 @@ bestätigt).
 (`qt-backend`) committet + gepusht, danach Umbrella-Zeiger nachgezogen (Regel
 8: Submodul-Commit war bereits auf `origin/qt-backend`, bevor der
 Umbrella-Pointer-Commit entstand).
+
+## 52. Linux — vollständiger Testdurchlauf nach dem macOS-Block (7 Commits), zwei Fixes: `get-current-mouse-state`-X11-Zweig + Stdout-Rauschen (2026-09-19)
+
+### 52.1 Ausgangslage
+
+Der lokale gui-Submodul-Checkout auf der Linux-Maschine hing 7 Commits hinter
+`origin/qt-backend` zurück — der komplette macOS-Block vom 2026-09-17/18
+(`cursor-driver%` §40, `gauge%` §41, `get-current-mouse-state` §42,
+`printer-dc%` §43, die drei macOS-Teardown-/Menüband-Fixes §47/§50/§51) war
+auf Linux noch nie ausgeführt worden, obwohl er `frame.rkt`, `menu.rkt`,
+`platform.rkt`, `queue.rkt`, `utils.rkt`, `window.rkt` verändert hat — alles
+Dateien, die auf allen drei Plattformen laufen. Auf Nutzerbestätigung
+(Regel 7) per Fast-Forward auf `91ee4869` synchronisiert, `qt-shim` neu
+gebaut (das CLAUDE.md-Build-Banner war seit §37 überfällig: elf fehlende
+Exporte über vier Fix-Sessions hinweg), alle 27 erwarteten Exporte per
+`nm -D` verifiziert.
+
+### 52.2 Vollständiger Testdurchlauf — Suite A (Regressionsschutz) + Suite B (Erstlauf)
+
+Methodik nach Advisor-Empfehlung in zwei Suiten getrennt: **Suite A** prüft,
+ob die 7 gepullten Commits auf Linux etwas kaputtgemacht haben (Regressions-
+schutz gegen den bekannten grünen Stand bei `cbc506c5`), **Suite B** prüft
+die vier macOS-Feature-Nachträge zum ersten Mal überhaupt auf Linux.
+
+**Suite A — 14 Proben + Akzeptanztest, alle PASS, keine Regression:**
+`clipboard-probe`, `menu-demand-probe`, `is-shown-probe`,
+`resize-reflow-probe`, `live-resize-probe`, `minsize-resize-probe`,
+`scroll-probe`, `panel-scroll-probe`, `canvas-panel-probe`,
+`deleted-style-probe` (Qt + nativ), `crash-b-teardown-probe` (Accept- und
+Cancel-Pfad), `enable-cascade-probe`. Insbesondere die vom Advisor als
+Hochrisiko markierten Stellen — `menu.rkt`s §51.1-Platzhalter-`QAction` für
+leere Top-Level-Menüs (dort als "nur macOS relevant" eingeführt) und
+`frame.rkt`s `designate-root-frame`/verändertes `direct-show` aus §47 (CLAUDE.md
+Regel 5: scharf, ein Fehler dort beendet das Programm sofort) — zeigten
+keine Auffälligkeit. **Akzeptanztest `test-dock-size`** (n=3, 1→2-Tab-
+Sequenz in echtem DrRacket, Methode aus `docs/2026-09-13_report-linux.md`):
+**0/3 Crash**, der historisch 10/10 crashende §23/§28/§30-Befund bleibt
+gefixt.
+
+**Suite B — vier Proben, drei voll PASS, eine mit gefundener Lücke:**
+
+- `gauge-probe`: **PASS**, echter wachsender `QProgressBar`-Balken
+  horizontal + vertikal, `get-value`/`get-range` roundtrippen exakt.
+- `cursor-probe`: **funktional PASS** (alle 12 `set-cursor`-Aufrufe inkl.
+  Custom-Bitmap-Cursor ohne Exception), Cursor-**Form** selbst auf dieser
+  Maschine mangels Werkzeug nicht fotografierbar (kein `screencapture
+  -C`-Äquivalent; `spectacle` kann den Cursor nicht mit einfangen, `scrot`/
+  `import` nicht installiert) — Werkzeuglücke, kein Produktbefund.
+- `printer-probe`/`printer-dialog-probe`: **PASS**, PDF-Rasterpfad (zwei
+  Seiten, per `pdftoppm` sichtgeprüft) und interaktiver Dialog-Pfad inkl.
+  des auf macOS kritischen Teardown-Falls (Print-Support-Plugin lazy
+  geladen, `shim_app_quit`-Plumber-Flush aus Commit `5a6da709` hält auch
+  hier — vorher auf Linux nie getestet). Drucker-Auswahl im `QPrintDialog`
+  degeneriert auf nur "Print to File (PDF)", weil diese Maschine keine
+  registrierten CUPS-Destinations hat (`lpstat -p` → "No destinations
+  added", Daemon läuft aber) — Umgebungslücke, kein Bug, im Report als
+  "nicht abschließend testbar" ausgewiesen.
+- `mouse-state-probe`: **Position + Tastatur-Modifier PASS**
+  (`QGuiApplication::queryKeyboardModifiers()`, plattformneutral), aber
+  **Maustasten/Caps-Lock bestätigt fehlend** — s. 52.3.
+
+Vollständiger Report: `docs/2026-09-19_report-linux.md`.
+
+### 52.3 Fix 1 — `get-current-mouse-state`: fehlender Linux-Zweig für Maustasten/Caps-Lock
+
+`qt-shim/src/shim.cpp`s `shim_get_mouse_state` hatte einen `#ifdef _WIN32`-
+Zweig (`GetAsyncKeyState`) und einen `#elif defined(__APPLE__)`-Zweig
+(`CGEventSourceButtonState`/`CGEventSourceFlagsState`, §49.5), aber keinen
+`#elif defined(__linux__)`-Zweig — auf Linux blieben die Bits für
+Maustasten und Caps-Lock strukturell immer 0, empirisch mit
+`mouse-state-probe.rkt` bestätigt (`mousedown 1` erschien in keinem Tick).
+
+**Fix:** eine eigene, von Qts QPA-Verbindung unabhängige X11-Verbindung
+(`XOpenDisplay(nullptr)`, lazy geöffnet, für die Prozesslaufzeit gehalten —
+dasselbe Muster wie `xdotool`), `XQueryPointer` auf den Root-Window liefert
+in einem einzigen Aufruf sowohl die Maustasten-Bits (`Button1Mask`/
+`Button2Mask`/`Button3Mask`) als auch das `LockMask`-Bit, das X11
+standardmäßig dem Caps-Lock-Modifier zuordnet — kein separater
+`XkbGetIndicatorState`-Aufruf nötig. Ein neuer Shim-internes `#include
+<X11/Xlib.h>`, keine neuen Exporte (**keine ABI-Änderung**, `shim_get_
+mouse_state` existiert bereits seit §42).
+
+**Stolperstein:** `X11/X.h` (via `Xlib.h` transitiv included) `#define`t
+`CursorShape` auf `0` (XFontCursor-Konstante) — kollidierte mit
+`Qt::CursorShape` in `shim_cursor_create_standard` (§40), Build brach mit
+`error: expected unqualified-id before numeric constant` ab. Vor dem Fixen
+per Grep geprüft, dass `CursorShape` das **einzige** Kollisionswort im
+gesamten File ist (die üblichen X11/Toolkit-Kollisionskandidaten `Bool`,
+`True`, `False`, `None`, `Status`, `KeyPress`, `FocusIn`, `Success` etc.
+kommen sonst nirgends vor) — ein gezieltes `#undef CursorShape` direkt nach
+dem Include reicht, kein Rename/Wrapper nötig.
+
+**CMake:** `find_package(X11 REQUIRED)` + `target_link_libraries(...
+X11::X11)` unter `if(UNIX AND NOT APPLE)` in `qt-shim/CMakeLists.txt`
+(analog zum bestehenden `if(APPLE)`-Block für `ApplicationServices`).
+
+**Verifiziert:** `nm -D` bestätigt `shim_get_mouse_state` weiterhin
+exportiert, `ldd` zeigt `libX11.so.6` verlinkt. `cursor-probe.rkt` läuft
+weiterhin ohne Exception (Kontrolle gegen den `CursorShape`-Fund).
+`mouse-state-probe.rkt` mit echtem `xdotool mousedown 1`/`mouseup 1`:
+`mods=(left)` erscheint jetzt im erwarteten Tick (vorher durchgehend
+`mods=()`). Caps-Lock-Zweig teilt sich denselben `XQueryPointer`-Aufruf und
+dieselbe Maske wie die Maustasten — durch Code-Inspektion mitverifiziert,
+nicht separat durch physisches Umschalten von Caps Lock getestet (hätte den
+Tastatur-Zustand der laufenden Session verändert). Smoke 3/3 beide Wege
+nach dem Rebuild weiterhin grün. **Nur auf Linux relevant** (Windows/macOS
+unverändert).
+
+### 52.4 Fix 2 — Stdout-Rauschen beim Laden des Qt-Backends
+
+`wx/qt/platform.rkt:296-297` rief `(qt-init!)`/`(qt-start-event-pump)` als
+nackte Top-Level-Ausdrücke auf. `qt-init!`s letzter Ausdruck ist seit
+Commit `5a6da709` (§50, macOS-Teardown-Fix) `(plumber-add-flush! ...)`, das
+einen `plumber-flush-handle` zurückgibt; `qt-start-event-pump`s `(thread
+...)` gibt einen Thread zurück. Beide Rückgabewerte wurden bei jedem Laden
+des Qt-Backends auf stdout gedruckt (`#<plumber-flush-handle>`,
+`#<thread:...queue.rkt:40:5>`) — sichtbar in `raco test`-Output und in
+echtem DrRacket, nicht nur ein Testartefakt. Reproduziert während des
+52.2-Testdurchlaufs in praktisch jedem Probe-Log.
+
+**Fix:** beide Aufrufe mit `(void ...)` umschlossen — rein kosmetisch,
+keine Verhaltensänderung. **Keine Shim-ABI-Änderung, keine Racket-API-
+Änderung.** Verifiziert: Smoke 3/3 mit `PLT_QT=1` zeigt danach keine
+`#<...>`-Zeilen mehr (vorher in jedem der drei Läufe je zweimal), 3/3 ohne
+`PLT_QT` unverändert. Vermutlich auf allen drei Plattformen vorhanden
+(reiner Racket-Code in `wx/qt/`, keine Shim-Abhängigkeit) — nur auf Linux
+gefixt, Validierung auf Windows/macOS steht noch aus (gebündelter
+Cross-Platform-Durchlauf, wie im Cross-Platform-Modell aus
+`docs/2026-09-13_prompt.md` vorgesehen).
+
+### 52.5 Zwei-Repo-Commit
+
+Zwei getrennte Änderungsorte: `wx/qt/platform.rkt` (Fix 2) liegt im
+gui-Submodul (`qt-backend`) — eigener Commit dort. `qt-shim/CMakeLists.txt`
++ `qt-shim/src/shim.cpp` (Fix 1) liegen direkt im Umbrella-Repo, nicht im
+Submodul — eigener Umbrella-Commit, unabhängig vom Submodul-Pointer-Commit.
+Reihenfolge nach Regel 8: Submodul-Commit zuerst lokal erstellt, dann
+gepusht (nach `AskUserQuestion`, Regel 7), erst danach der
+Umbrella-Pointer-Commit.

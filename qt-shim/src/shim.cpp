@@ -58,6 +58,14 @@
 #include <ApplicationServices/ApplicationServices.h>
 #endif
 
+#ifdef __linux__
+#include <X11/Xlib.h>
+// X11/X.h #defines CursorShape to 0 (an XFontCursor constant), which clobbers
+// Qt::CursorShape used later in this file (shim_cursor_create_standard).
+// It's the only Qt/Xlib macro collision in this translation unit (checked).
+#undef CursorShape
+#endif
+
 extern "C" {
 
 const char* shim_version(void)
@@ -682,6 +690,18 @@ void shim_widget_unset_cursor(void* widget)
 // there is no reason to reproduce that gap here.
 // `out_flags` bit layout is a private contract with wx/qt/platform.rkt's
 // get-current-mouse-state, not a mirror of any Qt enum's bit values.
+#ifdef __linux__
+// Separate, lazily-opened connection from Qt's own QPA display -- we only
+// ever issue read-only global pointer/keyboard queries here, independent of
+// any window. Kept open for the process lifetime (same pattern as e.g.
+// xdotool), not tied to shim_app_quit's QApplication teardown.
+static Display* shim_x11_display()
+{
+    static Display* dpy = XOpenDisplay(nullptr);
+    return dpy;
+}
+#endif
+
 void shim_get_mouse_state(int* out_x, int* out_y, int* out_flags)
 {
     QPoint p = QCursor::pos();
@@ -711,6 +731,22 @@ void shim_get_mouse_state(int* out_x, int* out_y, int* out_flags)
         flags |= 0x04;
     CGEventFlags kb = CGEventSourceFlagsState(kCGEventSourceStateCombinedSessionState);
     if (kb & kCGEventFlagMaskAlphaShift) flags |= 0x80;
+#elif defined(__linux__)
+    if (Display* dpy = shim_x11_display()) {
+        Window root = DefaultRootWindow(dpy);
+        Window ret_root, ret_child;
+        int root_x, root_y, win_x, win_y;
+        unsigned int mask;
+        if (XQueryPointer(dpy, root, &ret_root, &ret_child, &root_x, &root_y,
+                           &win_x, &win_y, &mask)) {
+            if (mask & Button1Mask) flags |= 0x01;
+            if (mask & Button2Mask) flags |= 0x02;
+            if (mask & Button3Mask) flags |= 0x04;
+            // X11 assigns the Lock modifier to Caps Lock by default; the
+            // same bit XQueryPointer already returns, no separate Xkb call.
+            if (mask & LockMask)    flags |= 0x80;
+        }
+    }
 #endif
 
     *out_flags = flags;

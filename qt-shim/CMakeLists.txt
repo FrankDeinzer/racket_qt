@@ -18,6 +18,11 @@ if(APPLE)
     target_link_libraries(racketqtshim PRIVATE ${APPLICATIONSERVICES_FRAMEWORK})
 endif()
 
+if(UNIX AND NOT APPLE)
+    find_package(X11 REQUIRED)
+    target_link_libraries(racketqtshim PRIVATE X11::X11)
+endif()
+
 set_target_properties(racketqtshim PROPERTIES
     WINDOWS_EXPORT_ALL_SYMBOLS ON
 )

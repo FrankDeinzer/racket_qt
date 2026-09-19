@@ -46,31 +46,15 @@ Qt Widgets backend ("wx/qt/") für `racket/gui`. Additiver Spike: aktiviert via 
 
 ## Build
 
-> **⚠ Offener Shim-Rebuild für Linux (Stand 2026-09-18, Windows + macOS erledigt).**
-> Acht Fixes haben je neue Exporte eingeführt: `shim_window_set_resize_cb`
-> (`resizeEvent`-Fix, §32), `shim_canvas_set_wheel_cb` (Scroll-Block, §33),
-> `shim_clipboard_set_text`/`shim_clipboard_get_text`/`shim_clipboard_has_text`
-> (Zwischenablage, §36), `shim_menu_set_about_to_show_cb` (Menü-Enable-States, §37),
-> `shim_cursor_create_standard`/`shim_cursor_create_from_argb`/`shim_widget_set_cursor`/
-> `shim_widget_unset_cursor` (`cursor-driver%`, §40), `shim_gauge_create`/
-> `shim_gauge_set_range`/`shim_gauge_get_range`/`shim_gauge_set_value`/
-> `shim_gauge_get_value` (`gauge%`, §41), `shim_get_mouse_state`
-> (`get-current-mouse-state`, §42) und die zehn `shim_printer_*`-Exporte plus
-> `shim_printer_set_output_pdf` (`printer-dc%`, §43 — braucht zusätzlich die
-> Qt-Komponente `PrintSupport`, s. `qt-shim/CMakeLists.txt`). Windows hat `qt-shim`
-> zuletzt am 2026-09-17 neu gebaut (alle sechsundzwanzig Exporte per `dumpbin`
-> verifiziert). **macOS war bei Sessionbeginn 2026-09-18 bereits neu gebaut**
-> (alle sechsundzwanzig Exporte per `nm -gU` verifiziert, s. §44) — wer den Build
-> genau angestoßen hat, ist nicht dokumentiert, aber der Stand ist geprüft aktuell.
-> Linux war bis §37 aktuell, hat aber weder die vier §40-Cursor- noch die fünf
-> §41-Gauge- noch den einen §42-Mouse-State- noch die elf §43-Printer-Exporte —
-> braucht also weiterhin einen Rebuild. Auf Linux muss `qt-shim` nach dem nächsten
-> Pull noch **einmalig neu gebaut** werden — **ein** Rebuild deckt alle ausstehenden
-> Exporte ab. Ohne Rebuild schlägt schon das Laden des Forks fehl, laut und sofort:
-> `ffi-obj: could not find export … undefined symbol: shim_cursor_create_standard`
-> (oder `shim_gauge_create`/`shim_get_mouse_state`/`shim_printer_create`).
-> Diesen Hinweis entfernen, sobald Linux gebaut hat. Gleiche Klasse wie der
-> §27-Rebuild.
+> **Shim-Rebuild-Historie abgeschlossen (Stand 2026-09-19, alle drei Plattformen).**
+> Acht Fixes zwischen §32 und §43 hatten je neue Exporte eingeführt
+> (`resizeEvent`, Scroll-Block, Zwischenablage, Menü-Enable-States,
+> `cursor-driver%`, `gauge%`, `get-current-mouse-state`, `printer-dc%`).
+> Windows (2026-09-17) und macOS (2026-09-18) waren zuerst dran; **Linux hat am
+> 2026-09-19 nachgezogen** (alle 27 Exporte per `nm -D` verifiziert, §52.1) —
+> damit sind alle drei Maschinen auf demselben Shim-ABI-Stand. Bei künftigen
+> neuen Shim-Exporten hier wieder einen Banner dieser Art einfügen, bis alle drei
+> Maschinen nachgebaut haben (gleiche Klasse wie §27/§52.1).
 
 **Windows:**
 ```powershell
@@ -468,8 +452,10 @@ nichts). Smoke 3/3 beide Wege. **Auf macOS validiert, 2026-09-18 (6)**
 (`docs/HACKING.md` §49.2): `get-value`/`get-range` roundtrippen korrekt,
 zwei Screenshots bei unterschiedlichen Ständen zeigen einen echten,
 wachsenden Balken horizontal **und** vertikal. Fix generalisiert
-(Windows+macOS). **Nur auf Linux noch offen** (Shim-Rebuild ausstehend,
-Build-Banner).
+(Windows+macOS). **Auf Linux validiert, 2026-09-19** (`docs/HACKING.md`
+§52.2): `get-value`/`get-range` roundtrippen exakt, zwei Screenshots
+(per `md5sum` als unterschiedlich bestätigt) zeigen einen wachsenden Balken
+horizontal und vertikal. Fix auf allen drei Plattformen bestätigt.
 **`printer-dc%` implementiert, 2026-09-17, Windows (§43)** — letzter der vier seit §36
 bekannten Stubs. Qt6 hat `QPrinter::getDC()` ersatzlos gestrichen und bietet keinen
 öffentlichen Weg von einem `cairo_t*` in einen `QPainter` — anders als win32
@@ -547,8 +533,17 @@ interaktiver Dialog-Pfad sind auf macOS jetzt produktionsreif. **Nur auf
 macOS reproduziert/gefixt/verifiziert** — derselbe tote Code-Pfad
 (`shim_app_quit` ohne Aufrufer) besteht identisch auf Windows/Linux, dort aber
 nicht nachgeprüft (auf Windows blieb `QPrintDialog` laut §43.7 unsichtbar,
-das Plugin also vermutlich nie voll initialisiert). Details:
-`docs/HACKING.md` §43, §49.4, §50.
+das Plugin also vermutlich nie voll initialisiert). **Auf Linux validiert,
+2026-09-19** (`docs/HACKING.md` §52.2): PDF-Rasterpfad (`PLT_QT_PRINT_TO_PDF`,
+zwei Seiten, per `pdftoppm` sichtgeprüft) **und** der interaktive Dialog-Pfad
+laufen crashfrei — einschließlich des auf macOS kritischen Teardown-Falls
+(Print-Support-Plugin lazy geladen, `shim_app_quit`-Plumber-Flush greift auch
+hier, vorher auf Linux nie getestet). Drucker-Auswahl im `QPrintDialog`
+degeneriert auf dieser Maschine zu nur "Print to File (PDF)", weil keine
+CUPS-Destinations registriert sind (`lpstat -p` → „No destinations added",
+Daemon läuft) — Umgebungslücke, kein Bug. Damit auf allen drei Plattformen
+mindestens einmal ausgeführt, PDF-Pfad überall grün. Details:
+`docs/HACKING.md` §43, §49.4, §50, §52.2.
 **`get-current-mouse-state` implementiert, 2026-09-17, Windows (§42)** — Position aus
 `QCursor::pos()`, Modifikatoren aus `QGuiApplication::queryKeyboardModifiers()` (echter
 synchroner Hardware-Query laut Qt-Doku), Maustasten + Caps Lock aus `GetAsyncKeyState`
@@ -576,9 +571,20 @@ per `cliclick` verifiziert (`middle`/`right` nicht einzeln, `cliclick` kann dies
 Tasten nicht halten — Code-Pfad aber identisch). Physisches Cmd↔Ctrl vertauscht sich
 zu `'control`/`'meta` (Qts bekannter macOS-Swap, `AA_MacDontSwapCtrlAndMeta` nirgends
 gesetzt) — deckt sich mit `wx/qt/key-map.rkt`s eigener, ebenfalls unverswappter
-Modifier-Behandlung, deshalb bewusst nicht korrigiert. **Nur auf Linux noch offen**
-— bräuchte eine X11/Wayland-eigene Abfrage (z. B. `XQueryPointer`), kein
-`CGEventSourceButtonState`-Äquivalent dort.
+Modifier-Behandlung, deshalb bewusst nicht korrigiert. **Auf Linux implementiert +
+validiert, 2026-09-19** (`docs/HACKING.md` §52.3): neuer `#elif defined(__linux__)`-
+Zweig — eine eigene, lazy geöffnete `XOpenDisplay`-Verbindung, `XQueryPointer` auf
+dem Root-Window liefert Maustasten- **und** Caps-Lock-Bit (`LockMask`) in einem
+Aufruf, kein separater `XkbGetIndicatorState`-Aufruf nötig. Stolperstein: `X11/X.h`
+definiert `CursorShape` als Makro, kollidierte mit `Qt::CursorShape` — gezieltes
+`#undef CursorShape` nach dem Include (einziges Kollisionswort im File, per Grep
+geprüft). `find_package(X11 REQUIRED)` + `X11::X11`-Linkage neu in
+`qt-shim/CMakeLists.txt` unter `if(UNIX AND NOT APPLE)`. Per echtem `xdotool
+mousedown`/`mouseup` verifiziert (`mods=(left)` jetzt korrekt, vorher immer leer);
+Caps-Lock-Zweig teilt sich denselben Aufruf, durch Code-Inspektion mitverifiziert,
+nicht physisch umgeschaltet. Keine neue Shim-ABI (Export existiert bereits seit
+§42), nur Linux-interner Code. Damit ist `get-current-mouse-state` auf allen drei
+Plattformen vollständig.
 **`cursor-driver%` implementiert, 2026-09-17, Windows (§40)** — echte Standard-Cursor
 (`Qt::CursorShape`, symbolisch per Namensstring aus Racket ausgewählt statt rohem Enum-
 Wert) plus `set-image`/`'bullseye` über eine ARGB-`QCursor(QPixmap, hotX, hotY)`, ohne
@@ -599,8 +605,13 @@ child`-Buchführung überflüssig macht. Smoke 3/3 beide Wege. **Auf macOS valid
 2026-09-18 (6)** (`docs/HACKING.md` §49.3): `arrow`/`hand`/`bullseye` (eigenes
 ARGB-Bitmap) und der selbstgebaute Plus-Cursor (`set-image`-Pfad) per `cliclick` +
 `screencapture -C` (zeichnet den System-Cursor mit ein, sonst wären alle Screenshots
-leer) visuell bestätigt. Fix generalisiert. **Nur auf Linux noch offen** (Shim-Rebuild
-ausstehend, Build-Banner).
+leer) visuell bestätigt. Fix generalisiert. **Auf Linux validiert, 2026-09-19**
+(`docs/HACKING.md` §52.2): alle 12 `set-cursor`-Aufrufe (11 Standard-Symbole +
+`set-image`-Pfad) laufen ohne Exception, alle Canvases rendern korrekt. Die
+System-Cursor-Form selbst konnte mangels Werkzeug (kein `screencapture
+-C`-Äquivalent; `spectacle` fängt den Cursor nicht mit ein, `scrot`/`import`
+nicht installiert) nicht fotografisch verifiziert werden — Werkzeuglücke dieser
+Maschine, kein Produktbefund. Funktional auf allen drei Plattformen bestätigt.
 
 Die übereinander gezeichneten Toolbar-Controls (`Untitled`/`Undock`) sind **2026-09-14
 gefixt (§35)** — Nativ-Gate bestand, Ursache war der unter Qt nie beachtete Fensterstil

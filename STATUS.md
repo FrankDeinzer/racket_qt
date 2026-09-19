@@ -5,6 +5,43 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-19 (Linux) — vollständiger Testdurchlauf nach dem macOS-Block, zwei Fixes
+
+**Kontext:** Nutzerauftrag "vollständiger Testdurchlauf auf Linux, danach
+sehen ob wir etwas fixen können". Linux hatte den kompletten macOS-Block
+vom 2026-09-17/18 (7 Commits: `cursor-driver%`, `gauge%`,
+`get-current-mouse-state`, `printer-dc%`, Teardown-/Menüband-Fixes) noch
+nie ausgeführt — Submodul war lokal 7 Commits hinter `origin/qt-backend`.
+
+- **Sync + Rebuild:** gui-Submodul auf Nutzerbestätigung per Fast-Forward
+  auf `91ee4869` synchronisiert, `qt-shim` neu gebaut (Build-Banner war seit
+  §37 überfällig), alle 27 Exporte verifiziert.
+- **Vollständiger Testdurchlauf:** Suite A (Regressionsschutz, 14 Proben +
+  `test-dock-size`-Akzeptanztest) **komplett PASS, keine Regression**.
+  Suite B (Erstlauf der vier macOS-Feature-Nachträge auf Linux): `gauge%`,
+  `cursor-driver%` (funktional), `printer-dc%` (PDF + Dialog, inkl.
+  Teardown-Fall) **PASS**; `get-current-mouse-state` nur teilweise (Position/
+  Modifier PASS, Maustasten/Caps-Lock fehlend). Details:
+  `docs/2026-09-19_report-linux.md`.
+- **Fix 1: `get-current-mouse-state`-Linux-Zweig.** `shim_get_mouse_state`
+  hatte `_WIN32`/`__APPLE__`-Zweige, aber keinen für Linux — Maustasten/
+  Caps-Lock blieben strukturell immer 0. Neuer `#elif defined(__linux__)`-
+  Zweig über eine eigene, lazy geöffnete X11-Verbindung (`XQueryPointer`
+  auf dem Root-Window liefert Maustasten- **und** Caps-Lock-Bit in einem
+  Aufruf). Stolperstein unterwegs: `X11/X.h` definiert `CursorShape` als
+  Makro (`0`), kollidierte mit `Qt::CursorShape` — gezieltes `#undef
+  CursorShape` nach dem Include, einziges Kollisionswort im File (geprüft).
+  Verifiziert per `mouse-state-probe.rkt` mit echtem `xdotool mousedown`
+  (`mods=(left)` jetzt korrekt). Keine Shim-ABI-Änderung, nur auf Linux
+  relevant.
+- **Fix 2: Stdout-Rauschen beim Laden.** `wx/qt/platform.rkt` rief
+  `qt-init!`/`qt-start-event-pump` ungevoidet auf, ihre Rückgabewerte
+  (`#<plumber-flush-handle>`, `#<thread:...>`) landeten bei jedem Start auf
+  stdout. `(void ...)`-Fix, rein kosmetisch. Vermutlich alle drei
+  Plattformen betroffen (reiner Racket-Code), nur auf Linux gefixt —
+  Windows/macOS-Validierung steht noch aus.
+- Details: `docs/HACKING.md` §52, `docs/2026-09-19_report-linux.md`.
+
 ## Session 2026-09-18 (macOS, 7) — „8 statt 9 Menüs" root-caused + gefixt, Tools-Listbox-Klick als Automatisierungsartefakt entlarvt
 
 **Kontext:** Fortsetzung, zwei offene Backlog-Punkte aus §29/§29.2
