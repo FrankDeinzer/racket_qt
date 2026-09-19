@@ -6381,3 +6381,315 @@ Reine Validierungssession, wie im Cross-Platform-Modell aus
 ist damit für alle bis 2026-09-19 bekannten Befunde abgearbeitet, mit zwei
 offenen Ausnahmen: §43.7 (`printer-dialog-probe`) und die Zombie-Root-
 Cause-Isolierung (§53.1).
+
+## §54 — Windows: `QPrintDialog` (§43.7) — RDP-Hypothese widerlegt, echte Root Cause identifiziert (2026-09-19, 3)
+
+Direkt im Anschluss an §53, jetzt an der physischen Konsole (`query session`
+bestätigt `>console` aktiv, keine RDP-Sitzung — genau der in §53.2
+vorgeschlagene Test). `examples/printer-dialog-probe.rkt` erneut per
+`Start-Process` gestartet, Fensterbaum per `EnumWindows`/`GetWindowThreadProcessId`
+(P/Invoke aus PowerShell) beobachtet statt per UIAutomation-Enumeration wie
+zuvor.
+
+**Page-Setup-Dialog:** identisch zu §43.7 — Fenster „Seite einrichten"
+erscheint sofort sichtbar, `IsWindowVisible=True`, plausible Koordinaten.
+Per `PostMessage(WM_CLOSE)` geschlossen, `get-page-setup-from-user` liefert
+korrekt `#f`.
+
+**Print-Dialog:** **identisches Symptom wie unter RDP** — ein Fenster mit
+Titel „Print" entsteht im Racket-Prozess (`hwnd`, Klasse
+`Qt6110dQWindowIcon`), bleibt aber `IsWindowVisible=False`, mit einer
+degenerierten Rect (`(711,410)-(844,478)`, exakt dieselbe Position/Größe wie
+zuvor ein unsichtbares Platzhalter-Fenster). **Damit ist die RDP-Automatisierungsgrenze
+als Erklärung widerlegt** — das Problem ist auf der nativen Konsole
+reproduzierbar, 1/1.
+
+**Root Cause gefunden:** systemweite Fenster-/Prozess-Suche (`EnumWindows`
+ohne PID-Filter + `Get-Process`) zeigt einen separaten Prozess
+`PrintDialog.exe` (`C:\Windows\SystemApps\Windows.PrintDialog_cw5n1h2txyewy\
+PrintDialog.exe`, AppX-Paket `Windows.PrintDialog_6.2.3.0_neutral_neutral_
+cw5n1h2txyewy`, Status `Ok`), gestartet als COM-Server
+(`-ServerName:Micr...`, `SessionId=1` — korrekte Sitzung). Das ist der
+moderne, ab Windows 10 ausgelagerte Print-Dialog-Host, den `PrintDlgExW`
+auf aktuellen Windows-Builds (hier 10.0.26100, Windows 11) statt des
+klassischen In-Process-Common-Dialogs aktiviert. Dieser Prozess läuft
+sichtbar (`Responding=True`, reale CPU-Zeit ~0,5s, 93 MB Working Set — er
+tut nachweislich etwas), erzeugt aber laut `EnumWindows`-Filter auf seine
+eigene PID **kein einziges sichtbares Top-Level-Fenster** (nur unsichtbare
+IME-Hilfsfenster), `MainWindowHandle=0`. Application-/System-Eventlog im
+Zeitfenster des Aufrufs: keine einzige Fehler-/Warn-Meldung zu
+`PrintDialog`/`cw5n1h2txyewy` — der Fehlschlag ist auf OS-Ebene komplett
+lautlos, kein Diagnosehinweis.
+
+**Kontrollprobe (Advisor-Review vor Abschluss verlangte das explizit, s. u.):
+Notepad statt Qt/Racket als Aufrufer.** `notepad.exe` gestartet, `Strg+P`
+gesendet (per `SendKeys`, `AppActivate` schlug fehl, da Notepad — inzwischen
+selbst ein paketiertes Windows-11-App — seinen Start-Stub-Prozess sofort
+beendet; die Tastenkombination traf stattdessen das bereits offene,
+bestehende Notepad-Fenster des Nutzers, s. Zwischenfall unten). Ergebnis:
+derselbe `PrintDialog.exe`-Host startet (`SessionId=1`, `Responding=True`),
+erzeugt aber ebenfalls **kein sichtbares Top-Level-Fenster** — exakt
+dasselbe Symptom wie beim Qt-/Racket-Aufruf. Prozess sauber per
+`Stop-Process -Force` beendet.
+
+**Einordnung (jetzt durch Kontrollprobe gestützt, nicht nur plausibel):**
+Maschinen-/Policy-Defekt im modernen `Windows.PrintDialog`-AppX-Host selbst
+— reproduzierbar unabhängig vom Aufrufer (Qt/Racket **und** natives
+Notepad betroffen). Kein Qt-Bug, kein RDP-Artefakt, kein racket-qt-Shim-Bug,
+kein Treiber-/Spooler-Problem (Spooler lief, Drucker vorhanden — bestätigt
+bereits in §43.7/§53.2). Der racket-qt-seitige Code-Pfad
+(`shim_printer_show_print_dialog`) ist nicht die Fehlerursache. Root-Cause-
+Tiefe endet hier an der racket-qt-Projektgrenze — weitere Diagnose (warum
+scheitert `Windows.PrintDialog_cw5n1h2txyewy` auf dieser Maschine
+grundsätzlich lautlos) ist ein Windows-Umgebungsproblem dieser einen
+Maschine, kein racket-qt-Befund mehr.
+
+**Nebenbefund, Methodik-Korrektur:** die beiden zuvor beobachteten
+unsichtbaren Platzhalter-Fenster (§43.7s „Page Setup" bei
+`(711,410)-(844,478)` und dieser Session „Print" bei identischer Rect)
+haben dieselbe degenerierte 133×68-Größe — das ist vermutlich ein
+Qt-internes Owner-/Proxy-Fenster, keine echte Dialog-Frame-Geometrie. Die
+Existenz dieses HWNDs allein ist **kein** Beleg für eine korrekte
+Qt→AppX-Übergabe; das eigentliche Signal ist ausschließlich, ob
+`PrintDialog.exe` selbst ein sichtbares Fenster erzeugt (tut es auf dieser
+Maschine nie, auch nicht für Notepad).
+
+**Zwischenfall bei der Kontrollprobe:** `SendKeys` traf nicht das frisch
+gestartete Notepad (dessen Start-Stub bereits beendet war, bevor
+`AppActivate` griff), sondern ein bereits offenes, unbeteiligtes
+Notepad-Fenster des Nutzers (Titel referenziert eine Datei zu „Learning
+Material Embeddings from Sparse Multi-Experiment Data Using
+Autoencoders"). Folge war nur `Strg+P` (Dialog öffnen, kein
+Dokumentinhalt geändert) — Fenster nach dem Test unverändert vorgefunden
+(Titel, Prozess-Responding). Kein Datenverlust, aber ein
+Automatisierungs-Seiteneffekt auf ein Fenster außerhalb des Testziels;
+künftige `SendKeys`-Proben sollten `AppActivate`-Fehler als harten Abbruch
+behandeln statt stillschweigend weiterzusenden (gleiche Fehlerklasse wie
+§53.3s Geometrie-Caching-Lehre: Vorbedingung vor der Eingabe verifizieren,
+nicht annehmen).
+
+**Aufräumen:** alle drei Prozesse (`Racket`, hängend im
+`yield`-auf-Semaphore-Wait auf den nie signalisierenden Dialog; beide
+`PrintDialog.exe`-Hosts) sauber per `Stop-Process -Force` beendet, keine
+Restartefakte. Kein `docs/2026-09-19_report-win*.md`-Gegenstück angelegt —
+diese Session ging von einer Chat-Frage aus, nicht von einer
+`*_prompt.md`-Datei (Ausnahme von der sonst geltenden Prompt/Report-
+Paarung, s. Memory).
+
+### 54.1 Nachtrag: systemisch für alle paketierten Apps, nicht print-spezifisch
+
+Auf Nutzerfrage („Bezug zu Windows 11?") weiter diagnostiziert. Zweite
+Kontrollprobe: `calc.exe` (auf dieser Windows-11-Version selbst ein
+paketiertes `Microsoft.WindowsCalculator`-App) gestartet — **identisches
+Symptom**: Prozess `CalculatorApp` läuft (`Responding=True`), aber
+`MainWindowHandle=0`, kein Fenster. Damit ist bewiesen: der Defekt betrifft
+**jede** paketierte/UWP-gehostete App auf dieser Maschine, nicht nur den
+`Windows.PrintDialog`-Host — reine Bestätigung des in §54 schon vermuteten
+Maschinendefekts, jetzt mit einem zweiten, thematisch komplett unabhängigen
+Datenpunkt.
+
+**Maschinenprofil (dokumentiert für künftige Diagnose):** Windows 11
+24H2/Enterprise, Build 10.0.26100 (Registry-`ProductName` zeigt irreführend
+noch „Windows 10 Enterprise" — bekannter kosmetischer Alt-Wert nach
+Feature-Update, nicht der tatsächliche Versionsstand). Virtualization-Based
+Security **aktiv mit allen vier Sicherheitsdiensten** (`Get-CimInstance
+Win32_DeviceGuard`: `VirtualizationBasedSecurityStatus=2`,
+`SecurityServicesRunning={1,2,3,4}` → Credential Guard, Memory Integrity/
+HVCI, System Guard, LSA-Schutz). GPU: AMD Radeon 780M (iGPU), Treiber
+Dezember 2025. Kein Crash/Fault-Eintrag in Application-/System-Eventlog um
+den Fehlschlagszeitpunkt (nur ein harmloser `Kernel-General`-Eintrag zum
+Calculator-Settings-Cache) — `dwm.exe` und `ApplicationFrameHost.exe`
+laufen unauffällig weiter. Der Fehlschlag liegt also unterhalb der Ebene,
+die Windows normalerweise loggt (kein Prozess-Crash) — das passt eher zu
+einem stillen Fehlschlag der Composition-/Rendering-Pipeline (Windows.UI.
+Composition/DirectComposition-Swapchain für die isolierte
+AppContainer-Oberfläche) als zu einem Aktivierungs- oder
+Berechtigungsfehler.
+
+**Hypothese (nicht bewiesen, nur Korrelation):** VBS/HVCI ist bekannt dafür,
+mit bestimmten GPU-Treiber-Versionen bei der Isolated-User-Mode-Grafikpfad
+für paketierte/XAML-basierte Oberflächen zu kollidieren — Symptom in
+öffentlichen Berichten ist exakt „App-Prozess läuft, Fenster bleibt
+unsichtbar, kein Crash". Nicht verifiziert in dieser Session (würde
+HVCI/VBS deaktivieren oder GPU-Treiber tauschen erfordern — beides
+invasive Eingriffe außerhalb des racket-qt-Scopes und ohne Rückfrage nicht
+vertretbar, Regel „Aktionen mit Sorgfalt ausführen"). **Bezug zu Windows
+11 aus der Nutzerfrage:** zweifach — (1) der `Windows.PrintDialog`-AppX-Host
+existiert überhaupt erst, weil Windows 11 den klassischen In-Process-
+`PrintDlgEx`-Commondialog durch einen ausgelagerten, paketierten Prozess
+ersetzt hat (unter Windows 10 klassisch gerendert, damit von diesem
+Defekt gar nicht betroffen gewesen); (2) VBS/HVCI ist auf Windows-11-
+Enterprise-Geräten deutlich häufiger standardmäßig/per Richtlinie aktiv als
+unter Windows 10 — die Kombination aus beidem lässt den Defekt gerade auf
+Windows 11 sichtbar werden. Die genaue Fehlerquelle (Treiber, VBS-Interaktion,
+oder ein drittes bislang nicht betrachtetes Sicherheitsprodukt) bleibt
+offen; **kein racket-qt-Handlungsbedarf**, da reproduzierbar
+app-übergreifend und außerhalb des Shim-Codes.
+
+### 54.2 Korrektur: Einordnung aus §54/§54.1 zurückgezogen — Tool-Automatisierung als Confounder
+
+Nutzer startete Calculator **manuell** über das Startmenü direkt im Anschluss
+an §54.1: Fenster öffnet sich normal, Taschenrechner funktioniert. Das
+widerspricht §54.1s Calculator-Kontrollprobe direkt. Unterschied
+identifiziert: **jeder** Testprozess in §54/§54.1 — die Racket-Probe, das
+Notepad, beide Calculator-Läufe — wurde per `Start-Process` aus dem
+Claude-Code-PowerShell-Tool heraus gestartet, nicht normal vom Nutzer.
+Erneuter Calculator-Test aus demselben Tool, 3×, davon 1× mit
+`dangerouslyDisableSandbox: true`: **immer** `MainWindowHandle=0`. Die
+Fensterstation ist dabei nachweislich unauffällig (`GetProcessWindowStation`
+→ `WinSta0`, `GetThreadDesktop` → `Default`, also die normale interaktive
+Desktop-Session, keine isolierte/alternative Station) — das Sandbox-Flag
+des Tools selbst ist also nicht die (alleinige) Ursache; naheliegendste
+verbleibende Erklärung ist eine Windows-App-Execution-Alias-/Paket-
+Aktivierungseigenheit, die an den konkreten Elternprozess-/Handle-Kontext
+des Tool-Starts gebunden ist (nicht weiter verfolgt, s. u.).
+
+**Konsequenz:** §54s Kern-Beobachtung bleibt gültig — die RDP-Hypothese
+ist widerlegt, das Symptom ist auf der physischen Konsole reproduzierbar.
+**§54/§54.1s Einordnung „Maschinendefekt, kein racket-qt-Befund" wird
+zurückgezogen.** Es gibt in dieser gesamten Untersuchung **keine einzige
+Beobachtung** von `QPrintDialog` (oder Calculator) aus einem normal — nicht
+per Tool-Automatisierung — gestarteten Prozess. Die eigentliche Frage („zeigt
+sich der Print-Dialog bei einem normal von DrRacket/Racket aus gestarteten
+Programm?") ist damit **weiterhin ungeklärt**, nicht negativ beantwortet.
+CLAUDE.md korrigiert: Eintrag zurück nach „Offene Befunde", nicht mehr unter
+„Reklassifiziert".
+
+**Nächster Schritt:** Nutzer führt `examples/printer-dialog-probe.rkt` in
+einem eigenen, nicht von Claude Code gestarteten Terminal aus — nur dieses
+Ergebnis ist belastbar.
+
+**Methodik-Lehre, gleiche Klasse wie §51.2/§53.3:** GUI-Proben, bei denen der
+Zielprozess (oder ein von ihm abhängiger paketierter Windows-Prozess) über
+`Start-Process`/`CreateProcess` aus der Tool-Automatisierung heraus
+gestartet wird, können auf dieser Maschine für paketierte/AppX-gehostete
+Fenster einen falsch-negativen „Fenster erscheint nicht" liefern. Nicht
+weiter root-caused in dieser Session (Advisor-Empfehlung: der genaue
+Mechanismus — App-Execution-Alias, Handle-Vererbung, Aktivierungs-Broker —
+ändert nichts am racket-qt-Vorgehen und ist außerhalb des Projekt-Scopes).
+Frühere Windows-Befunde, die auf einem *nicht erscheinenden* Fenster eines
+per Tool gestarteten Prozesses beruhen, sind nach demselben Muster
+potenziell fragwürdig — in dieser Session nicht rückwirkend geprüft.
+
+### 54.3 Auflösung: manueller Start durch Nutzer bestätigt den ursprünglichen Befund
+
+§54.2s offene Frage beantwortet. Statt weiterer Umgehungsversuche durch
+Claude (Task Scheduler, `explorer.exe shell:AppsFolder\...`,
+Integritätsstufen-Check — alle drei ergebnislos, s. u.) schlug der Nutzer
+das sauberste Verfahren vor: eine `.bat`-Datei, von Claude mit den exakten
+Aufrufparametern geschrieben, aber **vom Nutzer selbst per Doppelklick
+gestartet** (Abstammung `explorer.exe → cmd.exe → racket.exe`, keinerlei
+Bezug zur Tool-Automatisierung). Claude beobachtete währenddessen nur
+passiv (`EnumWindows`/`Get-Process`, keine eigenen Start-Aktionen).
+
+**Ergebnis, vom Nutzer direkt am Bildschirm bestätigt:** Seite-einrichten-
+Dialog erscheint normal, nach dessen Schließen **erscheint kein
+Druck-Dialog** — exakt dasselbe Symptom wie in §54/§54.1/§54.2, jetzt aber
+bei komplett normalem, menschlichem Start reproduziert. Passive Messung
+bestätigt: `PrintDialog.exe`-Host (SessionId=1, `Responding=True`) startet,
+`MainWindowHandle=0`, keine Fehlermeldung im Log.
+
+**Damit ist §54s ursprüngliche Einordnung wiederhergestellt und jetzt auf
+solider Evidenzbasis:** `QPrintDialog` ist ein echter, reproduzierbarer
+Windows-Maschinendefekt auf diesem Rechner — unabhängig vom Startweg
+(Tool-Automatisierung **und** manueller Doppelklick liefern dasselbe
+Ergebnis). Kein racket-qt-/Qt-/Shim-Bug (unverändert aus §54). §54.2s
+Vorsicht war trotzdem berechtigt: sie deckte zwischenzeitlich den davon
+**verschiedenen** Calculator-Befund auf (s. u.), der eben *nicht*
+bestätigt werden konnte.
+
+**Wichtige Abgrenzung zu Calculator — zwei verschiedene Phänomene, nicht
+eines:**
+- `QPrintDialog`: scheitert **immer**, ob per Tool-Automatisierung oder
+  manuell gestartet — echter Maschinendefekt (§54.3, dieser Abschnitt).
+- `CalculatorApp`: scheitert **nur** bei Start durch Claudes Tool
+  (`Start-Process`, Task Scheduler, `shell:AppsFolder`-Aktivierung — alle
+  drei ergebnislos getestet), öffnet aber normal bei manuellem Start durch
+  den Nutzer über das Startmenü. Das bleibt ein **ungeklärtes,
+  automatisierungsspezifisches Artefakt** dieser Maschine, dessen
+  Mechanismus nicht isoliert wurde (Advisor-Empfehlung: außerhalb des
+  racket-qt-Scopes, nicht weiterverfolgt).
+
+**Konsequenz für §54.2s Methodik-Lehre:** die dortige pauschale Warnung
+("GUI-Proben über Tool-Automatisierung können falsch-negative
+Fenster-Befunde liefern") gilt **nachweislich nur für paketierte
+Windows-Apps, die ohnehin nicht Teil des racket-qt-Codes sind**
+(Calculator als Beispiel) — **nicht** für Qt-eigene Fenster oder für
+externe Prozesse, die Qt selbst über offizielle Windows-APIs aktiviert
+(wie hier `QPrintDialog`/`PrintDialog.exe`, per §54.3 bestätigt echt).
+Frühere racket-qt-GUI-Befunde, die auf Qt-gerenderten Fenstern beruhen
+(die überwiegende Mehrheit der Checkpoint-Historie), sind von dieser
+Unsicherheit **nicht** betroffen.
+
+CLAUDE.md korrigiert: Eintrag zurück unter „Reklassifiziert (kein
+Produktbefund)" mit dieser bestätigten Einordnung; Aufräumen der beiden
+hängenden Prozesse (`racket.exe`, `PrintDialog.exe`) per `Stop-Process
+-Force`, keine Restartefakte. Test-Artefakte (`printer-dialog-probe-manual.bat`
+auf dem Desktop, Log unter `%TEMP%\printer-dialog-probe-manual.log`) blieben
+auf Nutzerwunsch bestehen für mögliche Wiederholungstests.
+
+### 54.4 Vollständiger Widerruf: §43.7 bis §54.3 waren ein Messfehler, kein Befund
+
+Direkt im Anschluss an §54.3 bat der Nutzer um einen weiteren manuellen
+Testlauf über dieselbe `.bat`-Datei — diesmal **live vom Nutzer selbst
+beobachtet**, nicht nur nachträglich per Log/Snapshot durch Claude
+ausgewertet. Beobachteter Ablauf, wörtlich vom Nutzer bestätigt: Terminal
+öffnet, `printer-dialog-probe`-Fenster öffnet, „Seite einrichten" öffnet,
+OK geklickt, **Print-Dialog „Racket-Drucken" öffnet sich und ist voll
+bedienbar.** Kein Fehlschlag, keine Verzögerung, die dem Nutzer aufgefallen
+wäre.
+
+**Root Cause der gesamten Fehlserie (§43.7, §53.2, §54, §54.1, §54.3):**
+jede einzelne "unsichtbar/kein Fenster"-Messung in dieser gesamten
+Untersuchung — auf allen drei Plattform-Sessions über zwei Tage — beruhte
+auf einem **Snapshot** (`Get-Process`/`MainWindowHandle` oder
+`EnumWindows`/`IsWindowVisible`, jeweils nach 1,5–2,5 s Wartezeit, danach
+in mehreren Fällen sofortiges `Stop-Process -Force`). Ein solcher Snapshot
+kann drei grundverschiedene Zustände nicht unterscheiden:
+
+1. Fenster ist nie erschienen (echter Fehler),
+2. Fenster ist **noch nicht** erschienen (paketierte/AppX-Apps wie
+   `Windows.PrintDialog` haben einen variablen, teils mehrere Sekunden
+   dauernden Kaltstart — COM-Aktivierung + XAML/WinUI-Initialisierung),
+3. Fenster **wurde bereits gezeigt, benutzt und geschlossen** — der
+   COM-Server-Prozess bleibt nach dem Schließen seines Fensters für eine
+   Kulanzzeit („Idle-Timeout") am Leben, bevor er sich selbst beendet; in
+   diesem Zustand ist `MainWindowHandle=0`/kein Top-Level-Fenster
+   **korrekt und erwartet**, kein Bug.
+
+Der Lauf, dessen Log `end-doc returned` + `done` zeigte (Auslöser für die
+Nutzer-Nachricht „druckdialog gibt auf"), fällt exakt in Fall 3: Racket
+hatte die komplette Dialog-Interaktion bereits abgeschlossen, bevor Claude
+nachträglich per PowerShell nachsah — der dabei gefundene und per
+`Stop-Process -Force` beendete `PrintDialog.exe`-Prozess war ein
+gesunder, bereits fertiger COM-Server in seiner Ausklingphase, keine
+hängende/fehlgeschlagene Instanz.
+
+**Widerrufen:** die komplette Kette von §43.7 bis §54.3, inklusive der in
+§54.3 als "durch Nutzer bestätigt" bezeichneten Einordnung — jener
+"bestätigende" Lauf war in Wahrheit derselbe Messfehler (Fall 2 oder 3),
+nicht eine zweite unabhängige Bestätigung. **Es gibt keinen Hinweis mehr
+auf einen echten Defekt.** `QPrintDialog` funktioniert. Die einzige
+Teilaussage, die Bestand hat: die ursprüngliche RDP-Automatisierungsgrenze-
+Hypothese aus §43.7 war so oder so nie die richtige Erklärung — sie ist
+jetzt aber gegenstandslos, weil es kein Symptom mehr gibt, das erklärt
+werden müsste.
+
+**Vorgeschlagene, aber nicht mehr nötige Nachmessung** (Advisor-Empfehlung,
+für den Fall dass in einer künftigen Session doch wieder Zweifel
+aufkommen): kontinuierliches Polling statt Snapshot — alle 500 ms für bis
+zu 60 s alle Fenster jeder `PrintDialog`-PID mit Titel und
+`IsWindowVisible` loggen, dabei **nichts** per `Stop-Process` beenden. Ein
+Snapshot-Check mit anschließendem Force-Kill ist für paketierte
+Windows-Apps als Testmethode ungeeignet.
+
+**Methodik-Lehre (überschreibt §54.2s Lehre, gleiche Familie wie
+§51.2/§53.3):** ein einmaliger `Get-Process`/`EnumWindows`-Snapshot mit
+kurzer Wartezeit ist für paketierte/COM-aktivierte Windows-Prozesse
+**keine belastbare Testmethode** — weder für noch gegen einen Befund. Nur
+(a) kontinuierliches Polling über einen großzügigen Zeitraum ohne
+vorzeitigen Prozess-Kill, oder (b) direkte menschliche Live-Beobachtung
+während des Laufs, zählt. Ein per Snapshot **nach** Ablauf ausgewertetes
+Log (wie in §54.3 fälschlich als Bestätigung gewertet) ist **keine**
+Live-Beobachtung und beweist nichts über das, was während der Ausführung
+sichtbar war.
