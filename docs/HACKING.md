@@ -6308,3 +6308,76 @@ Submodul — eigener Umbrella-Commit, unabhängig vom Submodul-Pointer-Commit.
 Reihenfolge nach Regel 8: Submodul-Commit zuerst lokal erstellt, dann
 gepusht (nach `AskUserQuestion`, Regel 7), erst danach der
 Umbrella-Pointer-Commit.
+
+## §53 — Windows: gebündelter Cross-Platform-Durchlauf, Zombie-Befund verschwunden (2026-09-19, 2)
+
+Fortsetzung von §52 — Sync (`git merge --ff-only` auf `278ef9c1`) + Shim-
+Rebuild (nötig wegen §52.3s `shim.cpp`/`CMakeLists.txt`-Änderung, semantisch
+No-op für MSVC), dann volle Suite analog `docs/2026-09-19_report-linux.md`.
+Details: `docs/2026-09-19_report-win.md`.
+
+### 53.1 Zombie-Prozess-Nachmessung — Symptom verschwunden, Root Cause nicht isoliert
+
+Methodik identisch zu `docs/2026-09-17-7_report-win.md` (`SC_CLOSE` per
+`WM_SYSCOMMAND`, 30s Poll, `GetForegroundWindow`-Verifikation). Auf dem
+neuen HEAD: 4/4 Qt-Läufe + 1 nativer Kontrolllauf beenden sich alle sauber
+(vorher 4/4 Zombie). Zwei der vier neu gepullten Commits liegen im
+verdächtigten Codepfad (`wx/qt/frame.rkt`s `on-close`/`direct-show`-Kette):
+`f3e0dec0` (macOS-Menüband-Collapse-Fix) und `5a6da709` (`QApplication`-
+destroy-vor-`exit`). Welcher der beiden ursächlich ist, wurde **nicht**
+isoliert (kein Bisect, außerhalb des Validierungs-Scopes dieser Session) —
+CLAUDE.md dokumentiert das Symptom entsprechend als "nicht mehr
+reproduzierbar, Root Cause offen", nicht als "gefixt".
+
+### 53.2 Suite A/B — komplett PASS, §35 erstmals auf Windows validiert
+
+Alle 13 Regressionsproben + `test-dock-size`-Akzeptanztest (n=3, 0/3 Crash)
+PASS. Hervorzuheben: `deleted-style-probe.rkt` (§35, Toolbar-Overlap) lief
+zum ersten Mal auf Windows — Screenshot bestätigt kein sichtbares "STRAY",
+identisch zu Qt und nativ (einzige harmlose Divergenz: `dead-canvas
+is-shown?=#t` nativ vs. `#f` unter Qt, dieselbe bereits auf Linux
+dokumentierte wx-Level-Eigenheit). Suite B (bereits implementierte Windows-
+Features) bestätigt ohne Abweichung: `gauge%` roundtrippt exakt über 61
+Ticks, `mouse-state-probe` zeigt jetzt alle vier Achsen PASS (Position,
+Modifier, Maustaste — vollständiger `_WIN32`-Zweig, anders als Linux vor
+§52.3), `printer-probe` liefert dieselbe 612×792pt-PDF wie zuvor.
+
+`printer-dialog-probe.rkt` (§43.7) bleibt **offen**: 2/2 Versuche, kein
+Sekundärfenster erscheint innerhalb von 15s (UIAutomation-Enumeration über
+`ProcessIdProperty` liefert nichts). Neuer Datenpunkt: diese Maschine hat
+18 registrierte Drucker (`Get-Printer`) — die für Linux/CUPS gültige
+Erklärung "kein Zieldrucker" trifft auf Windows nicht zu, was die bisherige
+Einordnung als reine Automatisierungsgrenze schwächt. Kein Root-Cause-
+Versuch in dieser Session.
+
+### 53.3 Automatisierungslektion — Fenstergeometrie unmittelbar vor jedem Klick neu vermessen
+
+DrRacket vergrößert sein Hauptfenster kurz nach dem Start von einer kleinen
+Platzhaltergeometrie (`GetWindowRect` unmittelbar nach `MainWindowHandle`-
+Erkennung) auf die in `racket-prefs.rktd` gespeicherte Größe. Ein erster
+Skriptversuch für `test-dock-size` maß das Fenster-Rect nur einmal beim
+Start und cachte es für alle folgenden Klicks — der "File"-Klick landete
+daneben, die nachfolgende `SendKeys`-Texteingabe (ein Dateipfad) landete
+dadurch direkt im fokussierten Definitions-Editor statt in einem
+Datei-Dialog und wurde beim darauffolgenden (ebenfalls fehlgeleiteten)
+Schließen-Versuch auf die reale Datei `examples/htdp-tests-probe.rkt`
+durchgespeichert (Backslashes wurden dabei von DrRackets BSL-Editor zu `λ`
+transformiert — bekanntes Keybinding, kein Bug). Sofort per `git diff`
+bemerkt, `git checkout --` zurückgesetzt, `git status` sauber verifiziert —
+kein Datenverlust, da die Originaldatei danach bitgleich zum Repo-Stand
+war. **Lehre:** Fenstergeometrie bei einem Fenster, das sich selbst kurz
+nach dem Start noch bewegen/vergrößern kann, nicht einmalig cachen, sondern
+unmittelbar vor jeder Eingabe neu vermessen (in dieser Session per
+Stabilitäts-Polling: 3 identische `GetWindowRect`-Messungen in Folge, bevor
+geklickt wird). Für die verbleibenden zwei `test-dock-size`-Trials
+zusätzlich auf Kopien der Probe-Dateien in einem Scratch-Verzeichnis
+außerhalb des Repos umgestellt, um das Risiko für den Rest der Session
+auszuschließen.
+
+### 53.4 Kein Code-Fix
+
+Reine Validierungssession, wie im Cross-Platform-Modell aus
+`docs/2026-09-13_prompt.md` vorgesehen. Die "später zu validieren"-Liste
+ist damit für alle bis 2026-09-19 bekannten Befunde abgearbeitet, mit zwei
+offenen Ausnahmen: §43.7 (`printer-dialog-probe`) und die Zombie-Root-
+Cause-Isolierung (§53.1).

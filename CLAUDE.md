@@ -196,7 +196,7 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 | Scroll Fall 2 (`'(auto-vscroll)`-Panels: Kind-Widgets bewegen sich) | ✅ 2026-09-14, Linux (§34) — eigenes Content-Widget, keine ABI-Änderung. Validiert Windows/macOS 2026-09-17/18(2) (§45.6), inkl. Mausrad |
 | Zwischenablage (Copy/Paste, `clipboard-driver%`) | ✅ 2026-09-16, Linux (§36) — war No-op-Stub mit falschem Methodenvertrag; Text-only, ABI-Änderung. Validiert Windows (Cross-Process OLE) + macOS (Cross-Toolkit) 2026-09-17/18(2) (§45.2). Bild-Zwischenablage bewusst außen vor |
 | Menü-Enable/Check-States vor dem Öffnen nicht nachgeführt | ✅ 2026-09-16, Linux (§37) — `QMenu::aboutToShow` war nirgends verdrahtet, ABI-Änderung. Validiert Windows/macOS 2026-09-17/18(2) (§45.3) |
-| Toolbar-Überlappung (`'deleted`-Stil wurde ignoriert) | ✅ 2026-09-14, Linux (§35), keine ABI-Änderung. Validiert macOS 2026-09-18(2) (§45.4) |
+| Toolbar-Überlappung (`'deleted`-Stil wurde ignoriert) | ✅ 2026-09-14, Linux (§35), keine ABI-Änderung. Validiert macOS 2026-09-18(2) (§45.4), Windows 2026-09-19(2) (§53) — alle 3 Plattformen abgeschlossen |
 
 ### Weitere Widget-/Feature-Implementierungen
 
@@ -211,6 +211,7 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 - macOS: Preferences-Menüpunkt löste falschen Callback aus — ✅ 2026-07-14 (§22), `setMenuRole(NoRole)` + `current-eventspace-has-standard-menus?`-Gate
 - macOS: „8 statt 9 Menüs" (leeres `Windows`-Menü unsichtbar) — ✅ 2026-09-18(7) (§51.1), Platzhalter-`QAction`, keine ABI-Änderung
 - macOS: Menüband kollabiert nicht korrekt beim Schließen des letzten Fensters — ✅ 2026-09-18(4) (§46.2/§47), reines `wx/qt`-lokal, keine ABI-Änderung
+- Linux: stdout-Rauschen beim Laden (`qt-init!`/`qt-start-event-pump` ungevoidet) — ✅ 2026-09-19 (§52.4), rein kosmetisch, keine ABI-Änderung. Validiert Windows 2026-09-19(2) (§53)
 
 ### Reklassifiziert (kein Produktbefund)
 
@@ -218,12 +219,12 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 - „Zombie-Prozess" beim Schließen des letzten Fensters (Linux §38, macOS §44.5/§47.1) — `xdotool windowclose` liefert Close-Event nie aus (Linux, backend-unabhängig, auch nativ reproduzierbar); auf macOS Standard-Cocoa-Konvention (`framework:exit-when-no-frames` bewusst `#f`), kein Qt-Bug. Bare-Skript-Variante (§47.1-Nebenbefund) auf macOS mit belegter Klick-Methodik **nicht reproduzierbar** (§48)
 - Windows Toolbar-Save-Icon-Timing — 2026-09-11 systematisch gegen echtes DrRacket getestet, nicht reproduziert (§24.4)
 - Linux Crash A („arity mismatch") — nach macOS-Menü-Dispatch-Fixes (§19) in 4 Versuchen nicht mehr reproduziert, plausibel behoben (nicht absolut bewiesen, Original war n=1-intermittierend)
+- **Windows Zombie-Prozess beim Schließen des letzten Fensters** — war 4/4 Qt-spezifisch reproduziert (§ „Session 2026-09-17 (Windows, 10)", `docs/2026-09-17-7_report-win.md`). Auf dem 2026-09-19 gepullten HEAD (`278ef9c1`) **4/4 + 1 nativer Kontrolllauf sauber**, Symptom nicht mehr reproduzierbar (`docs/2026-09-19_report-win.md`, §53). Root Cause **nicht isoliert** (kein Bisect) — wahrscheinlich einer von `f3e0dec0`/`5a6da709` (beide ursprünglich für macOS gefixt), welcher genau ist offen. Bewusst nicht als "gefixt" markiert, da kein zugeordneter Fix-Commit; falls das Symptom in einer künftigen Session wieder auftritt, ist das kein Widerspruch zu diesem Eintrag.
 
 ### Offene Befunde (künftige Session nötig)
 
-- **Windows Zombie-Prozess beim Schließen des letzten Fensters** — anders als Linux/macOS **Qt-spezifisch reproduziert** (4/4, auch Einzelprozess), nativer Kontrollversuch beendet sauber. Root Cause nicht lokalisiert; nächster Schritt: `wx/qt/frame.rkt`s `on-close`/`direct-show`-Kette gegen `register-frame-shown` prüfen. Kein HACKING.md-§ — nur `STATUS.md` „Session 2026-09-17 (Windows, 10)" + `docs/2026-09-17-7_report-win.md`
+- Windows `printer-dc%`: `QPrintDialog`/`QPageSetupDialog` blieb über zwei unabhängige Sessions (2026-09-17 RDP, 2026-09-19 RDP mit UIAutomation-Fensterenumeration) unsichtbar (§43.7). **Neuer Datenpunkt 2026-09-19:** diese Maschine hat 18 registrierte Drucker (`Get-Printer`) — die für Linux/CUPS naheliegende "kein Zieldrucker"-Erklärung trifft nicht zu, Einordnung als reine Automatisierungsgrenze ist damit schwächer begründet als zuvor angenommen. Root-Cause-Versuch (z. B. Fensterbaum während des Aufrufs mit einem echten Inspector prüfen) steht aus.
 - §33.7 — einmaliger, seither in 17 Wiederholungen nicht reproduzierter Tab-2-Zeilennummern-Defekt (Linux, `editor-canvas%`), Rate ≤1-in-18, `PLT_QT_SCROLL_DEBUG=1` für künftige Diagnose vorbereitet
-- Windows `printer-dc%`: `QPrintDialog` blieb in dieser RDP-Automatisierungssitzung unsichtbar — plausibel Automatisierungsgrenze, nicht abschließend geklärt (§43.7)
 - Linux: Resize/Minimieren unter KWin nicht validiert
 
 ## Dokumentation

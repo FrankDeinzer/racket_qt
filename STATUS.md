@@ -5,6 +5,48 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-19 (2, Windows) — gebündelter Cross-Platform-Durchlauf: Zombie-Befund verschwunden, §35 erstmals validiert
+
+**Kontext:** Fortsetzung des Nutzerauftrags "Windows-Nachtests" — die "später zu
+validieren"-Liste aus `docs/2026-09-13_prompt.md` sowie die 4 neu gepullten
+Commits vom heutigen Linux-Block (`a6f72aa`) und dem macOS-Block
+(2026-09-17/18) waren auf Windows noch nie gelaufen.
+
+- **Sync + Rebuild:** gui-Submodul per `git merge --ff-only` von `fe1f2049`
+  auf `278ef9c1` (Umbrella-Pointer erwartete diesen SHA bereits), `qt-shim`
+  neu gebaut (nötig wegen `a6f72aa`s `shim.cpp`/`CMakeLists.txt`-Änderung,
+  semantisch No-op für MSVC, jetzt verifiziert).
+- **Windows-Zombie-Prozess (offener Befund seit 2026-09-17): Symptom
+  verschwunden.** 4/4 Qt-Läufe + 1 nativer Kontrolllauf auf dem neuen HEAD
+  beendeten sich alle sauber (vorher 4/4 Zombie). Wahrscheinlich einer der
+  beiden mitgezogenen Commits (`f3e0dec0` Menüband-Collapse, `5a6da709`
+  `QApplication`-destroy-vor-exit, beide ursprünglich für macOS gefixt) —
+  welcher, wurde nicht isoliert (kein Bisect, außerhalb des
+  Validierungs-Scopes). CLAUDE.md-Befund entsprechend aktualisiert, aber
+  bewusst nicht als "gefixt" geschlossen (kein zugeordneter Fix-Commit).
+- **Suite A (Regressionsschutz, 13 Proben + `test-dock-size`-Akzeptanztest)
+  komplett PASS.** Darunter **§35 (Toolbar-Overlap) erstmals auf Windows
+  validiert** (`deleted-style-probe.rkt`, Screenshot bestätigt: kein
+  "STRAY" sichtbar, identisch zu Qt und nativ).
+- **Suite B (bereits implementierte Windows-Features, Regressionsprüfung
+  nach dem Rebuild): gauge%/cursor-driver%/mouse-state/printer-dc% PASS.**
+  `printer-dialog-probe.rkt` (§43.7) bleibt **offen** — 2/2 Versuche, Dialog
+  erscheint nicht; neuer Datenpunkt: 18 Drucker sind auf dieser Maschine
+  registriert, das schwächt die bisherige "kein Zieldrucker"-Erklärung.
+- **Automatisierungslektion (kein Produktbefund):** ein verworfener
+  Skriptversuch für `test-dock-size` traf wegen gecachter (nicht neu
+  vermessener) Fenstergeometrie die Definitions-Editor-Fläche statt eines
+  Datei-Dialogs und speicherte versehentlich Text in
+  `examples/htdp-tests-probe.rkt` durch — sofort per `git checkout --`
+  erkannt und zurückgesetzt, kein Datenverlust. Für die verbleibenden
+  Akzeptanztest-Durchläufe auf Scratch-Kopien umgestellt, Geometrie jetzt
+  unmittelbar vor jedem Klick neu vermessen statt einmalig gecacht.
+- **Kein Code-Fix in dieser Session** — reine Validierung wie geplant. Die
+  "später zu validieren"-Liste aus `docs/2026-09-13_prompt.md` ist damit für
+  alle bis 2026-09-19 bekannten Befunde abgearbeitet, mit zwei offenen
+  Ausnahmen (§43.7, Zombie-Root-Cause-Isolierung).
+- Details: `docs/HACKING.md` §53, `docs/2026-09-19_report-win.md`.
+
 ## Session 2026-09-19 (Linux) — vollständiger Testdurchlauf nach dem macOS-Block, zwei Fixes
 
 **Kontext:** Nutzerauftrag "vollständiger Testdurchlauf auf Linux, danach
