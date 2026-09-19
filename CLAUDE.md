@@ -13,6 +13,29 @@ Qt Widgets backend ("wx/qt/") für `racket/gui`. Additiver Spike: aktiviert via 
 7. **Drei-Maschinen-Sync ist immer Teil der Aufgabe:** Es gehört zu jeder Session dazu, sicherzustellen, dass Umbrella (`main`) und gui-Submodul (`qt-backend`) über alle drei Entwicklungsmaschinen (Windows/macOS/Linux) hinweg synchron sind — nicht nur lokal committen und den Sync als offenen Punkt stehen lassen. **Vor jedem Sync-Schritt (Pull/Push/Rebase auf einer Maschine) den Nutzer fragen, ob das jetzt gemacht werden soll** — nicht automatisch durchziehen und nicht als TODO für später notieren.
 8. **Submodul-Commit-Reihenfolge:** Der Umbrella-Zeiger auf `third_party/gui` darf **nur** auf einen SHA zeigen, der bereits auf `origin/qt-backend` existiert. Reihenfolge zwingend: (1) Submodul-Branch syncen, **bevor** ein neuer Submodul-Commit entsteht, (2) im Submodul committen, (3) Submodul **pushen**, (4) erst dann den Umbrella-Pointer-Commit erstellen+pushen. Sobald ein Submodul-Commit von irgendeinem Umbrella-Commit referenziert wurde (auch nur lokal, noch ungepusht), darf er **nie mehr umgeschrieben werden** (kein `rebase`/`commit --amend`), ohne den alten SHA vorher als Tag zu pushen — sonst friert der Umbrella dauerhaft einen nicht mehr fetchbaren Commit ein (`fatal: remote error: upload-pack: not our ref …` bei jedem künftigen `git pull --recurse-submodules`). Incident + Fix: `docs/HACKING.md §17`.
 
+## Subagent-Modellwahl
+
+Bei Agent-Aufrufen (Tool `Agent`, `subagent_type` ≠ `fork`) bewusst das schwächste
+Modell wählen, das für die Aufgabe ausreicht — nicht pauschal, sondern nach Art der
+Aufgabe:
+
+- **Haiku genügt** für rein mechanische, deterministische Schritte: ein Build-/Test-
+  Kommando ausführen und dessen Exit-Code/Output stumpf auf Pass/Fail prüfen
+  (`raco test`, `cmake --build`, Smoke-Test-Skripte mit klarer Erfolgsmeldung),
+  Datei-Existenz-/Grep-Checks, stures Ausführen einer exakt vorgegebenen Befehlsfolge.
+- **Sonnet (Default) oder stärker** für alles, was Interpretation oder Urteilsvermögen
+  braucht: GUI-Automatisierung (`xdotool`/AppleScript/UI Automation), Screenshots
+  visuell auswerten, entscheiden ob ein Befund ein echter Bug oder ein
+  Automatisierungsartefakt ist, Root-Cause-Suche, Diffs/Code reviewen, Reports
+  schreiben. Dieses Projekt hat wiederholt gezeigt, dass genau diese Unterscheidung
+  (Artefakt vs. echter Bug) nicht trivial ist — mehrere §-Einträge im Status unten
+  wurden erst nach Nachmessen korrekt eingeordnet (z. B. Tools-Listbox-Klick,
+  `docs/HACKING.md §51.2`). Im Zweifel hierher tendieren.
+- Modellwahl über den `model`-Parameter des `Agent`-Tools setzen (`haiku`, `sonnet`,
+  `opus`). Bei Unsicherheit, ob eine Testaufgabe rein mechanisch ist: lieber Sonnet
+  nehmen. Forks (`subagent_type: "fork"`) laufen immer mit dem Modell der aufrufenden
+  Session — dort ist `model` kein Hebel.
+
 ## Umgebung
 
 ### Windows (primäre Entwicklungsmaschine)
@@ -137,11 +160,12 @@ vorherigen `gui-lib`/`draw-lib`-Installation + `pkgs.rktd` liegt unter
 
 ## Aktueller Checkpoint-Status
 
-Diese Tabelle nennt nur den aktuellen Stand. Volle Session-Historie (Vorgehen, Messungen,
-Verifikation): `STATUS.md` (chronologisches Log, ein Eintrag pro Session) und
-`docs/JJJJ-MM-TT_report*.md` (ein Report pro Session/Plattform). Technische
-Tiefenanalysen/Root-Causes: `docs/HACKING.md`, nummerierte §-Abschnitte (im Text unten
-referenziert).
+Diese Tabelle nennt nur den aktuellen Stand, keine Herleitung. Volle Session-Historie
+(Vorgehen, Messungen, Verifikation): `STATUS.md` (chronologisches Log, ein Eintrag pro
+Session) und `docs/JJJJ-MM-TT_report*.md`. Root-Cause-Tiefenanalysen: `docs/HACKING.md`,
+nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details).
+
+### Meilensteine A–E
 
 | Checkpoint | Status |
 |---|---|
@@ -151,477 +175,56 @@ referenziert).
 | D – Eingabe-Rückgrat + Editor-Smoke | ✅ 2026-06-25 |
 | macOS Smoke | ✅ 2026-06-25 |
 | Linux Smoke | ✅ 2026-06-29 |
-| E-0 – Widget-Stubs + gui-lib-Angleich 1.78→1.80 + echtes DrRacket | ✅ 2026-06-30/2026-07-02 |
-| Linux – gui-lib/draw-lib als Installation-scope-Link (kein `-S` mehr nötig, wie Windows) | ✅ 2026-07-14 — löste das Facette-2-Errortrace-Problem strukturell (§23.1), Gate-Test (nativ ohne `PLT_QT`) bestanden |
+| E-0 – Widget-Stubs + gui-lib-Angleich 1.78→1.80 + echtes DrRacket | ✅ 2026-06-30/07-02 |
+| Linux – gui-lib/draw-lib Installation-scope-Link (kein `-S` mehr nötig) | ✅ 2026-07-14 (§23.1) |
 | E-0 – Menüs (Titel-/addAction-/mapToGlobal-Fix) | ✅ 2026-07-08, alle 3 Plattformen (§14/§15) |
 | E-0 – Redraw-Bug (retained-bitmap-Fix) | ✅ 2026-07-10, alle 3 Plattformen (§16) |
 | E – list-box%/check-box% echt | ✅ 2026-07-10, Windows (§18) |
 | E – Panel-Sizing-Fix + Modalitäts-Fix | ✅ 2026-07-10, alle 3 Plattformen (§18.2/§18.3) |
-| E – `file-selector` (get-file/put-file, Qt-eigener Dialog) | ✅ 2026-07-12, alle 3 Plattformen; Qt-eigen×nativ-Matrix (3×2) komplett 2026-07-13 (§19) |
+| E – `file-selector` (get-file/put-file) | ✅ 2026-07-12/13, alle 3 Plattformen, Qt×nativ-Matrix komplett (§19) |
 | E – `choice%`/`radio-box%`/`slider%` echt | ✅ 2026-07-13, alle 3 Plattformen (§20) |
-| E – `tab-panel%`/`canvas-panel%`/`group-panel%` echt (Widget-Breite abgeschlossen) | ✅ 2026-07-14, alle 3 Plattformen (§21; macOS via `tab-panel%` real + isolierter Proben für `canvas-panel%`/`group-panel%`, §21.8) |
-| E – Preferences Ende-zu-Ende | 🟡 Windows: alle 9 Kategorien durchgesehen (Font/Colors/Browser bereits vorher, Editing/Warnings/General/Profiling/Tools/Background Expansion 2026-09-12, §25) — **keine der sechs neu geprüften Kategorien zeigt einen funktionalen Defekt**. Von den 4 ursprünglichen §21.6-Einzelbefunden sind 2 gefixt (Font-Size-Slider-Zahl — generalisiert auf alle `slider%`, §24.2; Colors-Tab-Rahmen, §24.3); die übrigen 2 (Editor-Canvas-Scrollbars, §24.5, und Colors-Tab rechte Spalte, §25.2) galten als **dieselbe Root-Cause**; **beide sind 2026-09-14 gefixt** — der Editor-Canvas-Teil als Fall 1 (§33), der Colors-Tab-Teil (Fall 2, `'(auto-vscroll)`-Panels mit echten Kind-Widgets) als §34; damit ist der Cluster geschlossen. **Vormessung 2026-09-14 nach §31/§32 (`examples/scroll-probe.rkt`):** die Rendering-Hälfte des Linux-Symptoms ist verschwunden (Inhalt rendert sauber, Reflow beim Vergrößern funktioniert) — der frühere Stride-Verdacht ist damit erledigt; Linux und macOS zeigen jetzt **dasselbe** Symptom (korrektes Rendering, Scrollen wirkungslos, kein Scrollbar). Was blieb, war eine schlichte Lücke: `wx/qt/canvas.rkt:300-307` führte alle Scroll-Methoden als ausdrückliche Stubs („no scrollbars in the spike") — **2026-09-14 geschlossen (§33)**, s. eigene Tabellenzeile. Resize/Reflow-Bug (§21.7) **gefixt 2026-09-14 (§32)**. **Der Dialog-Befund „öffnet initial mit unerreichbarer OK/Undo/Revert-Button-Zeile" (§25.1) ist gefixt (2026-09-14, Linux, §31) — und gehörte nie zu §21.7:** kein Resize beteiligt, sondern `get-client-size` lieferte unter Qt das Außenmaß statt des Clients und unterschlug die Menüleistenhöhe, wodurch `wxtop.rkt:302`s Chrome-Reserve immer 0 war (Frame-Mindesthöhe zu klein **und** Panel 22 px zu hoch gesetzt). Fix rein Racket-seitig in `wx/qt/frame.rkt` über das bereits existierende `shim_widget_get_size_hint` — **keine Shim-ABI-Änderung**. Dialog 1060×641 → 1060×663, Button-Zeile sichtbar und klickbar beim ersten Öffnen, Akzeptanztest n=3 3/3, `test-dock-size`-Regressionswache 2/2 crashfrei. Nur auf Linux gefixt/getestet (Cross-Platform-Modell, gebündelte Validierung). **Linux: alle 9 Kategorien durchgesehen** (2026-09-13, §28) — Font/Colors/Editing/Warnings/General/Profiling/Tools/Background Expansion **keine funktionalen Defekte**, deckt sich 1:1 mit Windows; Browser-Tab nicht erneut geprüft (unverändert seit 2026-07-13/14). **macOS: alle 9 Kategorien durchgesehen** (2026-09-13, §29) — Font/Colors/Editing/Warnings/General/Profiling/Tools/Background Expansion **keine eindeutigen funktionalen Defekte** (Tools-Listbox-Klick war zunächst automatisierungsbedingt nicht abschließend verifizierbar, s. §29 — **2026-09-18 (7) aufgelöst: kein Produktbefund, reines AppleScript/AX-Automatisierungsartefakt, echter Klick + Akzeptanztest bestätigen korrektes Verhalten, §51.2**), deckt sich mit Windows/Linux; Menüzugang weiterhin über §22-Fix (Preferences im Edit-Menü). Positive Divergenz: Preferences-Button-Zeile ist auf macOS bereits initial erreichbar (anders als Windows/Linux, §25.1-Cluster) |
-| Windows Racket 9.2 → 9.3 Migration | ✅ 2026-09-11 (`docs/HACKING.md` §24.1) — kein gui-lib/draw-lib-Versionsangleich nötig, `raco pkg update --link` (Nutzer-elevated), Gate-Test (nativ ohne `PLT_QT`) grün |
-| Linux Racket 9.2 → 9.3 Migration + Fix-Validierung | ✅ 2026-09-13 (`docs/HACKING.md` §28) — 9.3 war bereits vorinstalliert, aber noch nicht verlinkt; Link ohne `sudo` (`~/racket` user-owned), Shim-Rebuild zwingend (§27-ABI), Gate-Test grün. §24.2/§24.3/§27 auf Linux funktional bestätigt, keine Divergenz zu Windows. Baseline (§23.1: Linux 4/6 bzw. 4/5 statt 6/6 bzw. 5/5) unverändert bestätigt, keine 9.3-Regression |
-| macOS Racket-9.3-Fix-Validierung + Preferences-Sweep | ✅ 2026-09-13 (`docs/HACKING.md` §29) — kein Versionswechsel nötig (bereits seit 2026-08-19 auf 9.3, §23.2), nur Submodul-Fast-Forward (5 Commits) + Shim-Rebuild (zwingend, wie Linux) + Fork-Recompile (`raco make`, macOS-spezifischer expliziter Schritt, kein Link). §24.2/§24.3/§27 funktional bestätigt, keine Divergenz. Preferences-Sweep (6 Kategorien) keine funktionalen Defekte (Tools-Listbox-Klick automatisierungsbedingt unklar) |
-| macOS – gui-lib/draw-lib als Installation-scope-Link (kein `-S` mehr nötig, wie Windows/Linux) | ✅ 2026-09-13 (§29.1) — Versionscheck grün (installierte 1.80/1.24 identisch zum Fork), kein `sudo` nötig (`/Applications/Racket v9.3/share/pkgs/` user-owned), Backup unter `~/racket-link-backup-2026-09-13/`, Gate-Test (nativ **und** Qt DrRacket ohne/mit `PLT_QT`, beide ohne `-S`) bestanden |
-| htdp-Lackmustest (`2htdp/image`, big-bang, `test-engine`) | ✅ **DrRacket-auf-Qt trägt htdp** — auf allen drei Plattformen validiert (Windows/Linux 2026-07-14, macOS 2026-09-10, §23/§23.1/§23.2). `test-engine`-Dock-Crash (`test-dock-size`) reproduziert bei 1→2-Tab-Sequenz **10/10 unter Qt, 0/10 nativ** (Windows 4/4+3/3, Linux 3/3+3/3, macOS 3/3+3/3) — **kein htdp-lib-Bug, sondern echte `wx/qt`-Lücke**, auf allen drei Plattformen bestätigt/generalisiert. **Root-Cause präzise lokalisiert (2026-09-12, §23.3, Stretch-Messung):** `wx/qt/panel.rkt:58` überschreibt `is-shown?` hartcodiert auf `#t` (win32 erbt stattdessen die Basisimplementierung — per Grep bestätigt ein echtes, dynamisches `shown?`-Feld, `wx/win32/window.rkt:284/287/327`, gestützt durch §23s Laufzeitmessung: nativ 0/10 Crashes, `remove`-Pfad nie durchlaufen) — dasselbe Muster in praktisch jeder `wx/qt`-Widget-Klasse außer `canvas%`/`frame%`. **Vertieft 2026-09-12 (§26):** die eigentliche Root-Cause liegt in `wx/qt/window.rkt`s `is-shown-to-root?`/`is-enabled-to-root?`, die (anders als bei win32/cocoa/gtk) nicht rekursiv die Elternkette prüfen — Shared Code (`wxwindow.rkt`, `wxpanel.rkt`, `helper.rkt`, `wxme/editor-canvas.rkt`) hängt direkt davon ab; ungeprüfte Hypothese einer Verbindung zu §24.5s Editor-Weißmal-Regression. **Fix-Versuch durchgeführt (§26.1):** Rekursion in `wx/qt/window.rkt` + terminierende Overrides in `wx/qt/frame.rkt` (is-shown-to-root? mirrored win32; is-enabled-to-root? bewusst NICHT mirrored — win32s unbedingtes `#t` verlässt sich auf echtes `EnableWindow`, das Qt-seitige `enable` cascadet nicht nativ, per Advisor-Review vor Commit gefunden und auf `is-window-enabled?` korrigiert) — Gate grün (3/3+3/3, deckt die geänderte Dispatch-Semantik selbst nicht ab), aber `test-dock-size` reproduziert weiterhin 2/2 identisch, da `panel%`s `is-shown?` (§23.3) weiterhin hartcodiert `#t` bleibt (bewusst nicht angefasst). Änderung behalten (regressionsfreie Korrektheitsverbesserung, Parität mit den anderen Backends), Crash selbst bleibt offen — bräuchte zusätzlich eine echte `panel%`-`is-shown?`-Implementierung, eigene künftige Session. **„Lokal und klein" bestätigt, nicht das riskantere Pump-Modell** (`wx/qt/queue.rkt`s 50ms-Poll war die zweite, jetzt nachrangige Hypothese) — **Fix selbst bleibt offen, eigene künftige Session**, aber deutlich risikoärmer eingeschätzt als zuvor. `2htdp/universe` big-bang: Kern-Wette „Racket treibt, Pump blockiert nie" auf allen drei Plattformen bestätigt. Auf Linux zunächst nur über `racket` direkt möglich (DrRacket-Pfad durch ein `-S`/errortrace-Package-Problem blockiert, kein Qt-Bezug) — nach dem Linux-DrRacket-Link läuft big-bang auch über echtes DrRacket unter Qt sauber; auf macOS trat dieses Problem trotz weiterhin genutztem `-S`-Rezept gar nicht erst auf. `2htdp/image`: Windows + macOS einwandfrei (alle 5 Bilder sofort korrekt); Linux Interactions-REPL rendert reproduzierbar (3/3) nur die ersten 4 Top-Level-Bildwerte einer `Run`-Sitzung, danach dauerhaft nichts mehr — Pump-Hypothese widerlegt (Poll läuft unbedingt alle 50ms, erklärt keine Mehrminuten-Hänger), kein Scroll-/Compute-/Deadlock-Problem, vermutlich `framework`-Interactions-Insert-Pfad oder Qt-Canvas-Kapazitätsgrenze (§23.1), auf macOS nicht reproduziert — **erledigt 2026-09-14 durch §32: kein eigener Befund mehr.** Nachgemessen in `docs/2026-09-14-2_report-linux.md` (Phase 0, „Fall 4"): bei 600×500 sind 4 von 6 Bildern sichtbar, das Fenster **ohne erneutes Run** auf 1000×900 vergrößert zeigt **alle 6** — ein reiner Viewport-Effekt, den der Reflow-Fix auflöst; weder Insert-Pfad noch Kapazitätsgrenze. macOS lief auf Racket **v9.3** statt v9.2 (Homebrew-Auto-Update 2026-08-19, s. Umgebungstabelle + §23.2) — Fork neu kompiliert, Ergebnis unverändert. **`test-dock-size`-Crash gefixt (2026-09-13, Linux, §30):** systematisches Vertrags-Audit fand dasselbe hartcodierte `is-shown? #t` in neun weiteren Klassen (`list-box%`/`tab-panel%`/`slider%`/`radio-box%`/`group-panel%`/`button%`/`choice%`/`check-box%`/`message%`) — alle zehn Overrides entfernt, nachdem gemessen wurde, dass `wx/qt/window.rkt`s reales `shown?`-Feld bereits korrekt gepflegt wird (Basis zuerst verifiziert, nicht blind gelöscht). Akzeptanztest 1→2-Tab-Sequenz **n=3, 0/3 Crash** (vorher 10/10 auf allen drei Plattformen), Regressions-Gate grün. Gefixt auf Linux (bewusst, neues Cross-Platform-Modell: Divergenzmessung nur bei bekannten Plattformunterschieden, hier reine Racket-Logik ohne solche — Validierung auf Windows/macOS gebündelt vorgemerkt, s. `docs/2026-09-13_report-linux.md`). **Auf Windows validiert, 2026-09-17** (`docs/2026-09-17_report-win.md`): identische 1→2-Tab-Sequenz per echter Maus-Automatisierung (Toolbar-Run-Klick, File→Open-Dialog), **n=3, 0/3 Crash** — Fix generalisiert, historisch war das 10/10 auf Windows. **Auf macOS validiert, 2026-09-18** (`docs/2026-09-18_report-macos.md`, §44.2): identische Sequenz per Menü-Automatisierung (`osascript`/System Events — rohe Koordinatenklicks auf den Toolbar-Run-Button lieferten hier keinen funktionalen Klick, der Klick über das Menü-Äquivalent `Racket → Run` war der funktionierende Ersatz, s. §44.6), **n=3, 0/3 Crash** — Fix generalisiert, alle drei Plattformen jetzt abgedeckt. Im selben Block: `enable` cascadet jetzt nativ via `shim_widget_set_enabled` (§26 Fund 2, `parent-enable` bleibt bewusst ungenutzter No-op, s. §30) — **per echtem Klick verifiziert 2026-09-14, n=3 3/3 PASS** (Positivkontrolle zählt, deaktivierter Button feuert nicht; die frühere „clicks = 0"-Messung war ein Instrumentenartefakt, §21.10). **Auf macOS interaktiv bestätigt, 2026-09-18 (2)** (`docs/2026-09-18-2_report-macos.md`, §45.1): die zunächst als Qt/AX-Limit gedeutete Automatisierungsgrenze aus §44.3 war tatsächlich ein Fokus-Problem (`frontmost` stand beim Klick nie explizit auf `racket`) — mit `set frontmost of process "racket" to true` unmittelbar vor dem Klick (per `cliclick`) registrierte die Positivkontrolle korrekt, der deaktivierte Button feuerte weiterhin nicht, **PASS**, wie auf Windows. |
-| `frame%`-Zustand (Maximize/Iconize/Fullscreen) | ✅ 2026-09-12, Windows (§27) — `wx/qt/frame.rkt` überschrieb `maximize`/`is-maximized?`/`iconized?`/`fullscreen`/`fullscreened?` vorher gar nicht (§26 Fund 3), erbte hartcodierte `#f`/No-op-Basis. Sechs neue Shim-Funktionen (`qt-shim/src/shim.cpp`, Umbrella). **Erster Entwurf (Convenience-Methoden `showMaximized`/`showMinimized`/`showFullScreen`/`showNormal`) per Advisor-Review vor Commit verworfen und empirisch als fehlerhaft bestätigt:** hätte ein noch nicht gezeigtes Fenster bei `maximize #t` sofort sichtbar gemacht (`IsWindowVisible=True` trotz `is-shown?=#f`) und `iconize #f` hätte einen zuvor gesetzten Maximize-Zustand mitgelöscht. **Korrigiert** auf direkte `Qt::WindowStates`-Bit-Manipulation via `setWindowState()` — beide Bugs danach nicht mehr reproduzierbar, identisch zur nativen Oracle-Messung. Gate 3/3+3/3 grün (vor und nach der Korrektur). **Erste Änderung dieser Sitzung mit hartem Shim-ABI-Bedarf** — macOS/Linux müssen `qt-shim` nach Pull neu bauen, sonst bricht der Fork beim Laden (`get-ffi-obj`-Fehler). `set-size`/`resize` während `maximize`d zusätzlich geprüft (dritter Advisor-Regressionstest) — keine Divergenz zu win32 gefunden, kein Guard nötig. Nicht getestet: Zustands-Kombinationen, Fenster-Chrome (nur programmatische API). |
-| Zwischenablage (Copy/Paste, `clipboard-driver%`) | ✅ 2026-09-16, Linux (§36) — `clipboard-driver%` war ein reiner No-op-Stub, dazu mit falschem Methodenvertrag (`get-data`/`set-data`/`clear-data`/`same-client?` — nie von `wx/common/clipboard.rkt` aufgerufen, das stattdessen `get-client`/`set-client`/`get-data`/`get-text-data`/`get-bitmap-data`/`set-bitmap-data` erwartet, 1:1 wie bei gtk/cocoa). Neu implementiert: Text-only, eager statt Ownership-Callback (`QClipboard` ist synchron, schreibt/liest sofort über drei neue Shim-Exporte `shim_clipboard_{set,get,has}_text`, **ABI-Änderung**), WXME-Rich-Paste-Cache nur gültig solange die native Zwischenablage seit dem letzten `set-client` unverändert ist (kein Stale-Paste bei externem Kopiervorgang dazwischen). Verifiziert: `examples/clipboard-probe.rkt` 3/3 (direkter Round-trip, echtes Editor-Copy, echtes Editor-Paste) unter Qt und nativ; Cross-Prozess/Cross-Toolkit (Qt-Schreiber → nativer gtk-Leser); echter laufender DrRacket-Prozess über die Interactions-REPL (`the-clipboard`-Round-trip). GUI-Bedienung (Edit-Menü → Copy) blieb zum Zeitpunkt dieses Fixes unverifiziert — Copy/Cut dort durchgehend ausgegraut trotz aktiver Selektion, deckte sich mit §34.7s damals offenem Befund zu nicht nachgeführten Menü-Enable-States; **dieser Folgebefund ist seit §37 (s. eigene Tabellenzeile) gefixt**, die GUI-Bedienung damit inzwischen ebenfalls bestätigt. Bild-Zwischenablage (`get-bitmap-data`/`set-bitmap-data`) bewusst außen vor, bleiben No-op-Stubs. **Auf Windows validiert, 2026-09-17 (2)** (`docs/2026-09-17-2_report-win.md`): in-process 3/3 sowie **beide Cross-Process-Richtungen** 1/1 (`racket`↔PowerShell `Get-Clipboard`/`Set-Clipboard`, natives OLE-Clipboard) — Fix generalisiert. **Auf macOS validiert, 2026-09-18 (2)** (`docs/2026-09-18-2_report-macos.md`, §45.2): in-process 3/3 sowie **beide Cross-Toolkit-Richtungen** (Qt→`pbpaste`, `pbcopy`→Qt) bestätigt — Fix generalisiert auf allen drei Plattformen. |
-| Menü-Enable/Check-States werden vor dem Öffnen nicht nachgeführt (§34.7-Folgebefund) | ✅ 2026-09-16, Linux (§37) — win32 hookt `WM_INITMENU`, gtk die `GtkMenuItem`-„select"-Signale, beide rufen einmalig `on-menu-click` → `on-demand` (kaskadiert rekursiv durch die ganze Menü-Bar-Baumstruktur, `mrmenu.rkt`) kurz bevor irgendein Menü sichtbar wird. `wx/qt/frame.rkt` definierte `on-menu-click`/`on-menu-command` korrekt als `override*`-Ziele (CLAUDE.md Regel 3), aber **nichts rief `on-menu-click` je auf** — Qt-Äquivalent `QMenu::aboutToShow` war nirgends verdrahtet. Root-Cause verifiziert durch Quelltextvergleich win32/gtk/qt, nicht geraten. **Fix:** neue `RacketMenu : public QMenu`-Subklasse trägt ein `about_to_show_cb`-Funktionszeiger-Paar (gleiches Cast-Muster wie `RacketWindow`/`QWidget*`, an vielen Stellen in `shim.cpp` bereits etabliert), neuer Export `shim_menu_set_about_to_show_cb` (**ABI-Änderung**), in `wx/qt/menu.rkt` pro `menu%`-Instanz registriert — findet über das bestehende `find-top-frame` den Frame und postet `on-menu-click` async in dessen Eventspace (Regel 2: der C-Callback ruft nie synchron nach Racket zurück). Ein einziger Trigger pro Menü-Bar-Baum reicht, weil `menu-bar%`/`menu%`s `on-demand` in `mrmenu.rkt` bereits rekursiv durch alle Submenüs läuft — kein Sonderfall für verschachtelte Menüs nötig. **Verifiziert:** neue Probe `examples/menu-demand-probe.rkt` (`demand-callback` feuert 2/2 bei echtem `QMenu::popup()`, ein `checkable-menu-item%` togglet und der native Zustand liest über `shim_action_is_checked` korrekt zurück); Smoke 3/3 beide Wege, mehrfach wiederholt. **Akzeptanztest in echtem DrRacket:** Edit-Menü Copy/Cut greyed-out bei fehlender Selektion, aktiviert sofort nach Select All (screenshot-belegt); Tabs-Menü „Previous/Next Tab" bleibt bei einem Tab greyed-out, aktiviert sich sofort nach dem Öffnen eines zweiten Tabs (File → New Tab) — beide ursprünglich in §34.7 bzw. dem Zwischenablage-Nachtrag dokumentierten Symptome direkt behoben. **Auf Windows validiert, 2026-09-17 (2)** (`docs/2026-09-17-2_report-win.md`): Enable-States per UI Automation (`IsEnabled`) statt visueller Interpretation gelesen — Edit-Menü Copy/Cut `False`→`True` nach Select All, Tabs-Menü Previous/Next Tab `False`→`True` nach zweitem Tab, je per echtem Mausklick ausgelöst. Fix generalisiert. **Auf macOS validiert, 2026-09-18 (2)** (`docs/2026-09-18-2_report-macos.md`, §45.3): Mechanismus-Probe PASS (`demand-callback` 2/2) plus reale AX-Abfrage in echtem DrRacket — Edit-Menü `Cut`/`Copy`/`Delete` `false→true` nach Select All, `Windows`-Menü (macOS-Äquivalent zu „Tabs") `Previous`/`Next Tab` `false→true` nach zweitem Tab — Fix generalisiert auf allen drei Plattformen. Details: `docs/HACKING.md` §37. |
-| Toolbar-Überlappung (`Untitled`/`Undock`) — `'deleted`-Stil wird beachtet | ✅ 2026-09-14, Linux (§35) — **keine Shim-ABI-Änderung**, `shim_widget_set_visible` existierte bereits. **Nativ-Gate zuerst** (die Pflichtmessung, die §35 vorgeschrieben hatte): DrRacket ohne `PLT_QT` zeigt keine Überlappung und kennt den Text `Undock` gar nicht → Befund ist Qt-spezifisch. **Root-Cause:** `wx/qt` kannte den Fensterstil `'deleted` überhaupt nicht (`grep -rn deleted wx/qt/*.rkt` leer), während win32 (`window.rkt:291`) und gtk (`window.rkt:582/714`) ihn je ausdrücklich behandeln. DrRackets Test-Report-Dock entsteht bei jedem Frame-Aufbau mit genau diesem Stil (`htdp-lib/test-engine/test-tool.rkt:100`), seine Knöpfe `Hide`/`Undock` aber ohne; unter Qt trägt ein QWidget, dessen Parent bei der Erzeugung noch nicht sichtbar ist, kein Hide-Flag, und `QWidget::show()` auf dem Frame kaskadiert nach unten. Die Racket-Seite war beweisbar unbeteiligt — die neue Probe `examples/deleted-style-probe.rkt` meldet unter Qt und nativ **identische** `is-shown?`-Zustände, nur das gezeichnete Bild unterschied sich. `Undock` ist ein gewöhnliches `button%` → **§35-Hypothese 2 (`switchable-button%`) erledigt**; Hypothese 1 (Windows-Streifenrechteck, §24.5) bleibt offen, von Linux aus nicht entscheidbar. **Fix:** `no-show?`-Init in `wx/qt/window.rkt` + Hide-on-Create, durchgereicht von elf Platform-Klassen als `(memq 'deleted style)`. Dass der Glue-Layer fast alles mit `'deleted` erzeugt und sofort per `show-control` wieder anzeigt, trägt win32 seit jeher — und `really-show` landet auf `show`, nicht auf dem `(void)`-Stub `direct-show`; beides vor der ersten Zeile Code verifiziert. Akzeptanz: Toolbarzeile in echtem DrRacket **n=3 3/3** sauber (Belegbilder `docs/2026-09-14-4_toolbar-overlap-{before,after}-linux.png`). Gate: Smoke 3/3 beide Wege, `live-resize-probe`/`minsize-resize-probe` unverändert, Fall 1 + Fall 2 unverändert, §31-Akzeptanztest 1060×663 mit funktionierendem OK, `test-dock-size` 3× crashfrei; dazu die für diesen Fix entscheidenden Wachen: nachträgliches `add-child` auf das `'(deleted)`-Panel macht es sichtbar **und** korrekt platziert, und ein Scroll-`canvas%` darin kommt samt Inhalt und **beiden Scrollbars** zurück (dessen Content-Widget/Scrollbars entstehen erst nach dem Hide-on-Create, §33/§34). `frame%`/`dialog%` bleiben bewusst außen vor — nachgesehen, nicht angenommen: win32 konstruiert den Frame selbst mit `'deleted` (`wx/win32/frame.rkt:257`), Top-Level-`show` ist immer explizit. **Gemessen statt angenommen:** der Test-Report-Dock taugt in dieser htdp-lib-Version nicht als Wache — Andocken hängt allein an der Preference `test-engine:test-window:docked?`, und mit `docked? = #t` erscheint der Dock **auch nativ nicht** (Preference gesichert und bitgleich zurückgespielt). **Auf macOS validiert, 2026-09-18 (2)** (`docs/2026-09-18-2_report-macos.md`, §45.4): `deleted-style-probe.rkt` per Screenshot bestätigt — „STRAY" wird nirgends gerendert, kein visueller Overlap, Fix generalisiert auf allen drei Plattformen. |
-| Scroll — Fall 2 (`'(auto-vscroll)`-Panels): Kind-Widgets bewegen sich | ✅ 2026-09-14, Linux (§34) — **keine Shim-ABI-Änderung**, `shim_panel_create`/`shim_widget_set_geometry` existierten bereits. **Vormessung widerlegt §25.2s vermutete Root-Cause:** `do-set-scrollbars` feuert auf dem Panel sehr wohl (`len=0/349 page=0/260 pos=-1/-1`, also aus `reset-auto-scroll`) — der Pfad war vollständig da; es fehlten die Scrollbars (§33s bewusstes `(not (is-panel?))`-Gate) und ein verschiebbares Widget. Implementiert: eigenes Content-QWidget in `qt-canvas-scroll-mixin`, von `get-content-hwnd` an die Panel-Kinder ausgegeben, in `reset-dc-for-autoscroll` um den Scroll-Offset verschoben (Qt-Äquivalent zu win32s `content-hwnd`). Drei begründete Abweichungen von win32: Erzeugung **vor** den Scrollbars (Qt stapelt zuletzt Erzeugtes oben, das Content-Widget würde sie sonst verdecken; kein `raise`-Primitiv im Shim); nur für Panels, die wirklich einen Scrollbar bekommen (grenzt die Handle-Identitätsänderung auf `vscroll`/`auto-vscroll` ein, `hide-*`-Panels wie `canvas:color%` unverändert — nachgemessen); Größe aus `get-client-size`, gegen das `wxpanel.rkt`s `panel-redraw` seine Kinder platziert. Zweiter, getrennter Schritt: Mausrad über dem Panel (`qt-wheel-scroll`-Vorrecht-Hook, ein Zehntel Page pro Raste — Qts eigene, gemessene 3 px/Raste sind gegen 349 px Range unbrauchbar). **Akzeptanzkriterium wörtlich erfüllt:** in echtem DrRacket (Preferences → Colors → Color Schemes) sind die drei Buttons sichtbar **und** klickbar (getrennt geprüft, Klick öffnet den „color names:"-Dialog); isolierte Probe 3/3. Gate: Smoke 3/3 beide Wege, Fall 1 unverändert, `live-resize-probe`/`minsize-resize-probe` unverändert, `test-dock-size` 3× crashfrei (Zwei-Tab-Bedingung je Lauf einzeln belegt), §31-Akzeptanztest 1060×663 mit funktionierendem OK. **Auf Windows validiert, 2026-09-17 (2)** (`docs/2026-09-17-2_report-win.md`): Colors → Color Schemes, alle drei Buttons nach Scrollen sichtbar (UIA meldete hier fälschlich `IsOffscreen=False` — Screenshot-Vergleich als Korrektiv nötig) **und** klickbar (echter Klick öffnete den „Style & Color Names"-Folgedialog). Preferences-Button-Zeile (§31) initial erreichbar bei 1076×773. Fix generalisiert. **Auf macOS validiert, 2026-09-18 (2)** (`docs/2026-09-18-2_report-macos.md`, §45.6): echtes Mausrad (Quartz-`CGEventCreateScrollWheelEvent`) macht die Button-Zeile schrittweise erreichbar (Screenshot-bestätigt), Klick auf „Names" mit korrekter Fokus-Aktivierung protokolliert den Callback — **beide Teile des Akzeptanzkriteriums erfüllt**, Fix generalisiert auf allen drei Plattformen. AX-`set value of scroll bar` hatte dabei keine Wirkung (kein Blocker, da das Mausrad funktioniert). **Zwei vorbestehende Automatisierungsfallen dabei erstmals belegt (§34.7, eigener offener Nebenbefund):** `ctrl+o`/`ctrl+t` erreichen DrRacket per `xdotool` nicht (`F5` schon, nur Menüklick zuverlässig), und das Tabs-Menü zeigt „Previous/Next Tab" auch bei zwei offenen Tabs ausgegraut — beides führt sonst zu einer Wache, die eine andere Sequenz misst als behauptet. Klickkoordinaten aus `client->screen` der Probe, nicht aus dem Screenshot (§21.10) — die erste Runde geschätzter Koordinaten traf daneben und wäre als „nicht klickbar" fehldeutbar gewesen (Linux-spezifischer Automatisierungsbefund, s. o. Auf Windows/macOS validiert). |
-| Scroll — Fall 1 (`editor-canvas%`/`canvas%`): echte Scrollbars | ✅ 2026-09-14, Linux (§33) — **Root-Cause von §24.5 war kein Scrollbar-Bug, sondern ein fehlender Aufruf:** `wx/qt/canvas.rkt`s `set-size` rief nie `on-size` auf (win32 `canvas.rkt:306-309`, gtk `canvas.rkt:450-454` tun es), und dessen Override in `editor-canvas%` (`wxme/editor-canvas.rkt:313`) ist der **einzige** Auslöser der Scrollbar-Buchführung — daher §24.5s „`do-set-scrollbars` feuert einmal bei 30×30 und nie wieder". **Isoliert nachgewiesen, bevor eine Zeile Scrollbar-Code entstand.** Implementiert: eigene Mixin-Schicht `qt-canvas-scroll-mixin` (erzwungen durch die gegenüber win32/gtk invertierte Klassenkette, §1), echte QScrollBar-Kinder über die seit `7d1231e0` bereitliegenden Primitiven, volle wx-Scroll-API mit win32/gtk-identischem Gating, `get-client-size` zieht die Scrollbar-Dicke ab. **Mausrad** brauchte den einzigen neuen Export (`shim_canvas_set_wheel_cb`, **ABI-Änderung**). Akzeptanzkriterium wörtlich erfüllt: beide Scrollbars sichtbar, Mausrad 0→10, PageDown 10→40, Zeile 99 per Thumb, horizontal analog; in echtem DrRacket haben Definitions- und Interactions-Pane jetzt Scrollbars. Gate: Smoke 3/3 beide Wege, `live-resize-probe`/`minsize-resize-probe` unverändert, `test-dock-size` 3× crashfrei, §31-Akzeptanztest 3/3 bei unverändertem 1060×663. **Mausrad auf Windows validiert, 2026-09-17 (2)** (`docs/2026-09-17-2_report-win.md`): Richtung korrekt (Notch scrollt vorwärts, Windows-Konvention), Schrittweite sinnvoll (~15 px/Notch, kein degenerierter Wert) — Fix generalisiert. **Auf macOS validiert, 2026-09-18 (2)** (`docs/2026-09-18-2_report-macos.md`, §45.7): **vertikal vollständig bestätigt** — 10 Wheel-Notches bewegen den Inhalt exakt 10 Zeilen, PageDown exakt 16 Zeilen, volle Reichweite bis Zeile 99 (letzte Zeile, Thumb am Ende). **Horizontal nachgeholt und bestätigt, 2026-09-18 (3)** (`docs/HACKING.md` §46.1): Klick-Drag auf den horizontalen Scrollbar-Thumb (statt Wheel-Simulation) bewegt den Inhalt sichtbar horizontal — die Scroll-Funktionalität ist vollständig symmetrisch funktionsfähig, nur die zuvor versuchte Quartz-Wheel-Simulation hatte für die horizontale Achse keine Wirkung (Simulationsartefakt, kein Produktbefund). **§33 damit auf macOS vollständig (vertikal + horizontal) abgeschlossen.** **Fall 2 (`'(auto-vscroll)`-Panels, §25.2) in dieser Sitzung bewusst ausgeklammert** (Nutzerentscheidung: dessen Inhalt sind echte Kind-Widgets, die ein Zeichen-Offset nicht bewegt) — **inzwischen gefixt, s. eigene Tabellenzeile (§34)**. Ein **einmaliger, in drei Wiederholungen nicht reproduzierbarer** Tab-2-Befund (falsche Zeilennummern) ist offen dokumentiert (§33.7); zwei Hypothesen dazu wurden gemessen und **beide widerlegt**, der dafür versuchsweise eingebaute `on-size`-Dedup deshalb **wieder entfernt** — dabei fiel aber ein echter Defekt auf und wurde behoben (`show-scrollbars` invalidierte die Backing-Bitmap ohne Repaint-Anforderung). **Nachgemessen 2026-09-16 (Linux, §33.7-Nachtrag):** 14 weitere gültige Wiederholungen derselben Sequenz mit `PLT_QT_SCROLL_DEBUG=1`, **0/14 zeigten das Symptom** (3 zusätzliche Automatisierungsfehlschläge davor zählen nicht mit, s. `docs/HACKING.md` §33.7-Nachtrag) — Rate zusätzlich auf ≤1-in-18 eingegrenzt, weiterhin offen, kein Fix-Versuch diese Session (dieser Tab-2-Nebenbefund nur auf Linux untersucht; der Fall-1-Fix selbst ist s. o. auf Windows/macOS validiert). |
+| E – `tab-panel%`/`canvas-panel%`/`group-panel%` echt | ✅ 2026-07-14, alle 3 Plattformen (§21) |
+| E – Preferences Ende-zu-Ende | 🟡 alle 9 Kategorien × 3 Plattformen durchgesehen, keine funktionalen Defekte mehr; die 4 ursprünglichen §21.6-Befunde alle gefixt (§24.2 Slider-Zahl, §24.3 Colors-Rahmen, §33 Editor-Scrollbars, §34 Colors-Scroll); macOS Preferences initial bereits erreichbar, Windows/Linux via §31-Fix; Browser-Tab seit 2026-07 nicht erneut geprüft |
+| Windows Racket 9.2→9.3 | ✅ 2026-09-11 (§24.1) |
+| Linux Racket 9.2→9.3 + Fix-Validierung | ✅ 2026-09-13 (§28) |
+| macOS Racket-9.3-Validierung + Preferences-Sweep | ✅ 2026-09-13 (§29) |
+| macOS – gui-lib/draw-lib Installation-scope-Link | ✅ 2026-09-13 (§29.1) |
+| htdp-Lackmustest (`2htdp/image`, big-bang, `test-engine`) | ✅ trägt htdp auf allen 3 Plattformen (§23/§23.1/§23.2). `test-dock-size`-Crash war echte `wx/qt`-Lücke (hartcodiertes `is-shown? #t`), **gefixt** §30 (Linux) + validiert Windows/macOS 2026-09-17/18; `enable`-Kaskade (§26) mitvalidiert. `2htdp/image`-4-von-6-Bug war reiner Viewport-Effekt, erledigt durch §32-Resize-Fix |
+| `frame%`-Zustand (Maximize/Iconize/Fullscreen) | ✅ 2026-09-12, Windows (§27), Shim-ABI-Änderung — macOS/Linux Rebuild nötig. Nicht getestet: Zustands-Kombinationen, Fenster-Chrome |
+| Resize/Reflow-Bug (Kind-Controls folgen bei Fenster-Resize nicht) | ✅ 2026-09-14, Linux, 4. Anlauf (§21.7→§32) — Root-Cause: gtks `remember-size`-Dedup fehlte, ABI-Änderung. Validiert Windows 2026-09-17, macOS 2026-09-18 (§44.4) |
+| Editor-Canvas-Scrollbars (Scroll Fall 1: `canvas%`/`editor-canvas%`) | ✅ 2026-09-14, Linux (§33) — fehlender `on-size`-Aufruf war Root-Cause, nicht Scrollbar-Code; ABI-Änderung (Mausrad). Validiert Windows 2026-09-17(4) inkl. Streifenrechteck-Altbefund (§24.5/§35-Hyp.1) geschlossen, macOS 2026-09-18(2) vertikal+horizontal (§45.7/§46.1) |
+| Scroll Fall 2 (`'(auto-vscroll)`-Panels: Kind-Widgets bewegen sich) | ✅ 2026-09-14, Linux (§34) — eigenes Content-Widget, keine ABI-Änderung. Validiert Windows/macOS 2026-09-17/18(2) (§45.6), inkl. Mausrad |
+| Zwischenablage (Copy/Paste, `clipboard-driver%`) | ✅ 2026-09-16, Linux (§36) — war No-op-Stub mit falschem Methodenvertrag; Text-only, ABI-Änderung. Validiert Windows (Cross-Process OLE) + macOS (Cross-Toolkit) 2026-09-17/18(2) (§45.2). Bild-Zwischenablage bewusst außen vor |
+| Menü-Enable/Check-States vor dem Öffnen nicht nachgeführt | ✅ 2026-09-16, Linux (§37) — `QMenu::aboutToShow` war nirgends verdrahtet, ABI-Änderung. Validiert Windows/macOS 2026-09-17/18(2) (§45.3) |
+| Toolbar-Überlappung (`'deleted`-Stil wurde ignoriert) | ✅ 2026-09-14, Linux (§35), keine ABI-Änderung. Validiert macOS 2026-09-18(2) (§45.4) |
 
-**„8 statt 9 Menüs" gefixt, 2026-09-18 (7), macOS (`docs/HACKING.md` §51.1):**
-Root-Cause war `framework/private/group.rkt`s `create-windows-menu` (macOS-Label
-für das plattformübergreifende „Tabs"-Konzept, **nicht** Cocoas eigenes
-Fenstermenü) — legt das Menü immer leer an, füllt es nur lazy per
-`demand-callback`. Ein bei Erzeugung leeres Top-Level-`menu%` taucht unter Qt in
-der Menüband-Enumeration gar nicht auf (isoliert per Probe bewiesen) — ohne
-Menüband-Slot kein Klick, ohne Klick kein `aboutToShow`, also für immer
-unsichtbar. Fix (`wx/qt/menu.rkt`, keine Shim-ABI-Änderung): `menu%` hält immer
-mindestens eine deaktivierte, blanke Platzhalter-`QAction`, solange keine
-echten Items vorhanden sind (ein Separator reicht dafür nicht, Qt ignoriert ihn
-beim Leerheits-Check). Verifiziert: 3/3 Qt-Starts zeigen jetzt 10 Menüs inkl.
-`Windows`, echter Klick öffnet es mit vollem Inhalt, nativer Kontrolllauf
-unverändert 10/10, Smoke 3/3. Nur auf macOS relevant.
+### Weitere Widget-/Feature-Implementierungen
 
-**Tools-Listbox-Klick (§29/§29.2-C) reklassifiziert, 2026-09-18 (7), macOS
-(`docs/HACKING.md` §51.2):** kein Produktbefund — isolierte `list-box%`-Probe
-mit `cliclick`+`set frontmost` (statt `osascript`/AX) löst die Selektion 2/2
-korrekt aus; Akzeptanztest in echtem DrRacket (Preferences → Tools →
-„Optimization Coach") bestätigt Selektion **und** live aktualisiertes
-`Tool:`-Feld, identisch zu Windows/Linux. Die drei zuvor gescheiterten
-Automatisierungsstrategien waren ein reines AppleScript/AX-Artefakt. Keine
-Code-Änderung.
+- `gauge%` (echter `QProgressBar`) — ✅ 2026-09-17, Windows (§41), ABI-Änderung. Validiert macOS (§49.2) + Linux (§52.2)
+- `cursor-driver%` (Standard-Cursor + `set-image`) — ✅ 2026-09-17, Windows (§40), ABI-Änderung; dabei Bugfix `wx/qt/window.rkt` fehlender `local.rkt`-Require. Validiert macOS (§49.3) + Linux (§52.2, Cursor-Form fotografisch nicht prüfbar, Werkzeuglücke)
+- `get-current-mouse-state` — ✅ 2026-09-17, Windows (§42), ABI-Änderung, volle Symbol-Menge (mehr als win32). Validiert macOS (§49.5, Cmd/Ctrl-Swap bewusst nicht korrigiert) + Linux (§52.3, X11 `XQueryPointer`)
+- `printer-dc%` (Raster-Bridge, kein Vektor-Pfad) — ✅ 2026-09-17, Windows (§43), 11 neue Exporte, Dialoge non-modal (Regel 1). PDF-Pfad auf allen 3 Plattformen grün (§52.2). macOS: eigener Teardown-Crash im Dialog-Pfad gefunden **und gefixt** (§49.4→§50, `shim_app_quit` fehlte als `exit`-Hook, Plumber-Fix, keine ABI-Änderung). Windows `QPrintDialog`-Automatisierung offen, s. u.
 
-**Zombie-Prozess beim Schließen des letzten Fensters
-explizit reproduziert** (§29.2, 2026-09-13, macOS): Fenster schließt, Prozess läuft
->13s unverändert weiter, kein Crash — deckt sich mit dem unten dokumentierten Befund.
-**Auf Linux 2026-09-16 (§38) root-caused und als Testmethodik-Artefakt entlarvt, nicht
-als echter Backend-Bug:** `xdotool windowclose` liefert die Close-Anfrage unter dieser
-KWin/Plasma-X11-Session nie an die Anwendung aus (Fenster wird von außen zerstört, kein
-`closeEvent`, kein `on-close`) — identisch reproduziert unter Qt **und** nativem gtk
-(GTK meldet selbst `Gdk-WARNING: GdkWindow unexpectedly destroyed`), also
-backend-unabhängig. Ein echter simulierter Klick auf den sichtbaren Schließen-Button
-(Koordinaten aus der Fenstergeometrie, nicht geschätzt) beendet den Prozess dagegen
-zuverlässig (n=3/3 isolierte Probe, n=2/2 echtes DrRacket, `PLT_QT=1`). **Auf macOS 2026-09-18 (§44.5) mit echtem Klick auf den nativen Schließen-Button
-nachgeholt und reklassifiziert:** reproduziert (Fenster schließt, Prozess bleibt
-idle am Leben, ~20 ms CPU/5 s) — **aber der native Kontrollversuch (ohne `PLT_QT`,
-identische Klick-Methodik) zeigt exakt dasselbe Verhalten.** Das ist
-Standard-macOS-App-Konvention (Cocoa-Apps beenden sich nicht automatisch beim
-Schließen des letzten Fensters, sofern nicht explizit implementiert), **kein
-Qt-Bug** — der „Prozess überlebt"-Teil von §29.2 ist damit auf macOS analog zu §38
-(Linux) reklassifiziert, mit einer Präzisierung (§47.1): DrRacket selbst setzt
-`framework:exit-when-no-frames` beim Start auf jedem macOS-Backend (nativ wie Qt)
-explizit auf `#f` (`drracket/private/main.rkt`, abhängig von
-`current-eventspace-has-menu-root?`, das auf jedem macOS-Backend wahr ist) —
-das Überleben ist eine bewusste DrRacket-Entscheidung, keine implizite
-Cocoa-Konvention. **Der zunächst vermerkte Nebenbefund „gilt nicht für bare
-`racket/gui`-Skripte" ist widerlegt** (`docs/HACKING.md` §48, 2026-09-18,
-macOS): mit belegter Klick-Methodik (echter Klick auf den nativen
-Schließen-Button, `AXCloseButton`-Subrole, Fokus-Aktivierung unmittelbar davor,
-§45.1) beendet sich `examples/hello.rkt` unter `PLT_QT=1` **n=3/3** sauber,
-identisch zum nativen Kontrolllauf (ebenfalls 3/3) — die naheliegende
-„Fehlklick"-Erklärung wurde gezielt gegengetestet und scheidet ebenfalls aus
-(ein Klick auf ein falsches Widget lässt das Fenster sichtbar offen, erzeugt
-also nicht das ursprünglich beschriebene „Fenster weg, Prozess lebt"-Bild).
-Die tatsächliche Ursache der ursprünglichen §47.1-Beobachtung bleibt unbekannt,
-reproduziert aber nicht — nur auf macOS gemessen, keine Code-Änderung nötig.
-**Menüband-Befund gefixt, 2026-09-18 (4)**
-(`docs/HACKING.md` §47): Root-Cause war letztlich rein `wx/qt/`-lokal, **keine
-Shared-Code-/Shim-ABI-Änderung nötig** — die ursprüngliche Regel-3-Einschätzung
-war zu pessimistisch, zwei native Gegenproben (§47.1) widerlegten den zunächst
-geplanten Ansatz, bevor Code entstand. `wx/qt/frame.rkt`s `set-menu-bar` hängte
-jede QMenuBar bedingungslos per `shim_window_set_menubar` an ihr eigenes
-`QMainWindow` — für den nie gezeigten „Root"-Hilfsframe (denselben, den
-DrRacket über `(new menu-bar% (parent 'root))` mit seinem eigenen File/Help-
-Menü belegt, `mrmenu.rkt`) bedeutete das: die Bar wurde in ein unsichtbares
-Fenster reparented und konnte nie system-sichtbar werden. **Fix:**
-`designate-root-frame` merkt sich den Root-Frame; `set-menu-bar` lässt dessen
-QMenuBar parentless (wie `shim_menubar_create` sie ohnehin erzeugt) und schaltet
-sie per bereits vorhandenem `shim_widget_set_visible` sichtbar; `direct-show`
-zählt reale gezeigte Frames (Dialoge eingeschlossen) und zeigt die Root-Bar nur,
-wenn keiner mehr offen ist. Bewusst **kein** Fokus-/Aktivierungssignal
-verwendet (Cmd+Tab hätte sonst fälschlich mitgezählt) — Regressionswache dafür
-zweimal bestätigt: App-Wechsel und zurück ändert das Menüband in keinem der
-beiden Zustände. Verifiziert: Menüband kollabiert nach Schließen des letzten
-Fensters korrekt auf `racket, File, Help` (Inhalt deckt sich mit nativ, plus
-einem Qt-spezifischen zusätzlichen `Quit`-Eintrag, den DrRacket selbst
-hinzufügt, weil `current-eventspace-has-standard-menus?` unter Qt `#f` ist),
-`File → New` aus der reduzierten Leiste stellt das volle Menüband sofort
-wieder her, zweimal wiederholt. `test-dock-size`-Akzeptanztest erneut
-crashfrei, Smoke 3/3 beide Wege. **Nur auf macOS relevant** (Root-Frame wird
-auf Linux/Windows nie designiert, Code-Pfad degeneriert dort zum alten
-Verhalten) — kein Rebuild auf den anderen Plattformen nötig. Details:
-`docs/HACKING.md` §46.2/§47, `docs/2026-09-18_report-macos.md`.
-Details zum Linux-Befund: `docs/HACKING.md` §38. **Als Lehre für künftige Sessions:
-`xdotool windowclose` nicht mehr als Ersatz für „Klick auf den nativen
-Schließen-Button" verwenden** — wie bei jeder anderen Widget-Interaktion
-(§21.10/§34.7) echte Klickkoordinaten aus der Fenstergeometrie ableiten und per
-`xdotool mousemove`+`click` simulieren.
-**Windows: seit 2026-09-17 (7) reproduziert (4/4), Qt-spezifisch, root cause offen**
-(`docs/2026-09-17-7_report-win.md`). Vorgeschichte: `2026-09-17-2` meldete einen
-n=1-Befund (echter Klick auf Schließen + „Don't Save", `DrRacket.exe` blieb ohne
-sichtbares Fenster am Leben), gestützt allein auf `Process.Responding = True` — `2026-
-09-17 (3)` entwertete diesen Beleg (`Responding` ist für ein fensterloses Fenster
-trivial `True`) und fand in fünf gezielten Versuchen 5/5 saubere Exits; `2026-09-17 (5)`
-bestätigte das für eine lange, ~20-minütige Live-Sitzung (6/6 sauber), aber deckte nur
-die Ein-Prozess-Variante ab. **`2026-09-17 (7)` hat den offen gebliebenen
-Mehrprozess-Schritt nachgeholt und den Befund reproduziert:** vier Versuche (2× mit drei
-parallel laufenden/endenden `racket`-Probenprozessen neben der offenen DrRacket-Instanz,
-2× ganz ohne) zeigten **alle** denselben Zombie — **die Mehrprozess-Bedingung ist damit
-widerlegt als notwendige Ursache**, reproduziert auch im reinen Einzelprozess-Fall.
-Messung (zwei Versuche): CPU-Delta über 5 s = 0 ms, ein Thread, `WaitReason=UserRequest`
-— kein Hang an einer blockierenden Ressource, sondern ein Prozess, der im normalen
-Pump-Leerlauf weiterläuft, weil ihm nie gesagt wird, dass er beenden soll. **Nativer
-Kontrollversuch** (kein `PLT_QT`, identische Schließ-Methodik) beendete sich sauber in
-3 s — grenzt den Befund klar auf das **Qt-Backend** ein. Automatisierungshürde dieser
-Sitzung: echte Mausklicks trafen wiederholt das falsche Fenster (ein anderes Fenster
-stahl in dieser RDP-Sitzung wiederholt den Vordergrund zurück), daher `UIAutomation.
-InvokePattern.Invoke()` bzw. `WM_SYSCOMMAND`/`SC_CLOSE` statt echtem Klick verwendet —
-der native Kontrollversuch mit derselben Methodik spricht gegen ein Methodik-Artefakt,
-schließt einen Qt-spezifischen Unterschied zwischen echtem Klick und `SC_CLOSE` aber
-nicht hundertprozentig aus (einziger noch unkontrollierter Unterschied zu `-3`s 5/5
-sauberen Real-Klick-Versuchen). Nebenfund: jede Zombie-Instanz behielt ein zusätzliches
-`ConsoleWindowClass`-Fenster (Artefakt des `Start-Process`-Starts aus PowerShell, nicht
-von `wx/qt` erzeugt) — dessen Schließen beendete den Prozess (Windows'
-`CTRL_CLOSE_EVENT`-Default-Handler), ein normal per Doppelklick gestarteter Prozess hat
-dieses Sicherheitsnetz nicht. **Root cause nicht lokalisiert** — nur
-reproduziert/eingegrenzt, keine Code-Änderung; nächster Schritt für eine künftige
-Session: `wx/qt/frame.rkt`s `on-close`/`direct-show`-Kette gegen `register-frame-shown`
-prüfen.
-**gefixt 2026-07-14 (§22):**
-macOS-App-Menü-Eintrag an der „Preferences"-Stelle löste den falschen Callback aus
-(DrRackets Help-Menü-Punkt „Configure Command Line for Racket…" statt
-`preferences:show-dialog`) — behoben durch `setMenuRole(NoRole)` in `shim.cpp` +
-PLT_QT-gated `current-eventspace-has-standard-menus?` in `mred/private/app.rkt` (unser
-Fork). **Neuer, ungeklärter Nebenbefund aus demselben Fix (macOS, 2026-07-14):** die
-erhoffte Exit-Bestätigung + tatsächliche Prozessbeendigung beim Schließen des letzten
-Fensters trat NICHT ein (Prozess läuft weiter, kein Crash) — nicht root-caused, zwei
-Hypothesen (DrRacket-eigene Close-Logik vs. Qt-Pump-Loop-Bug bei `queue-callback`).
-**Die zweite Hypothese ist seit 2026-09-16 (§38) auf Linux widerlegt** — der komplette
-Pump-/`queue-callback`-Pfad funktioniert dort nachweislich, sobald der native
-Close-Request die Anwendung überhaupt erreicht; das damalige macOS-Symptom könnte
-also, wie auf Linux, ein Automatisierungsartefakt der jeweils verwendeten Close-Methode
-sein, statt ein echter Pump-Bug — auf macOS aber nicht nachgemessen, weiterhin offen,
-eigene künftige Session (s. `docs/HACKING.md` §38 für den Linux-Befund und die dort
-empfohlene Methode: echter Klick auf den Schließen-Button statt einer
-Automatisierungsabkürzung). Linux Resize/Minimieren unter
-KWin nicht validiert; Linux Crash A
-(„arity mismatch") nach den macOS-Menü-Dispatch-Fixes (§19) in 4 Versuchen nicht mehr
-reproduziert — plausibel behoben, nicht absolut bewiesen (Original war
-n=1-intermittierend). **Linux Crash B (Teardown, „invalid memory reference") gefixt
-2026-09-16 (§39):** per gdb-Backtrace root-caused auf einen fehlenden Pump-Zyklus
-zwischen `QFileDialog::deleteLater()` (im C-seitigen `finished`-Handler,
-`qt-shim/src/shim.cpp`) und Racket-seitigem `(exit)` in einem frameless Skript — mit
-offenem `frame%` drainiert der laufende Event-Pump das `DeferredDelete` längst vorher,
-ohne offenes Fenster lieferte Qts eigener `atexit`-Flush es stattdessen aus, während
-andere Qt-Globals schon abgebaut waren (Absturz tief in `QSettings::QSettings`). Fix:
-ein expliziter `(atomically (shim_pump 0))`-Aufruf in `wx/qt/filedialog.rkt` nach dem
-synchronen Warten — **keine Shim-ABI-Änderung**, per gdb-Breakpoint auf
-`QFileDialog::~QFileDialog` verifiziert (Destruktor läuft jetzt nachweislich über
-genau diesen neuen Aufruf, nicht mehr über `atexit`). Verifiziert: neue Probe
-`examples/crash-b-teardown-probe.rkt` (Accept 3/3, Cancel 1/1), `examples/file-dialog-
-probe.rkt` (frame-offen-Pfad, §19-Stresstest: 3× `put-file` + Cancel + Force GC) grün,
-echtes DrRacket File → Save Definitions As grün, Smoke 3/3 beide Wege. **Auf Windows
-validiert, 2026-09-17 (2)** (`docs/2026-09-17-2_report-win.md`): `examples/crash-b-
-teardown-probe.rkt` Accept 1/1, Cancel 1/1, kein Absturz — Fix generalisiert. **Auf
-macOS validiert, 2026-09-18 (2)** (`docs/2026-09-18-2_report-macos.md`, §45.5):
-`crash-b-teardown-probe.rkt` Accept- und Cancel-Pfad beide ohne Crash, sauberer
-Prozess-Exit — Fix generalisiert auf allen drei Plattformen. Windows/macOS
-brauchten dafür keinen
-Shim-Rebuild. Crash A bleibt von diesem Fix unberührt (anderer Codepfad). `test-dock-
-size`-Crash (früher hier als `htdp-lib`-Contract-Bug geführt) **reklassifiziert 2026-07-14
-(§23/§23.1/§23.2): echte `wx/qt`-Lücke, kein htdp-lib-Bug, auf allen drei Plattformen
-bestätigt** — Windows+Linux+macOS je 1→2-Tab-Sequenz 10/10 Qt-Crash, 0/10 nativ; die
-frühere Linux-Beobachtung „reicht schon 1 Tab" hat sich in der §23.1-Session nicht
-reproduziert (3/3 sauber bei nur einem Tab, beide Backends), Root-Cause bis
-`on-tab-change`/`wx/qt/queue.rkt`-Pump eingegrenzt, Fix offen; nativer
-macOS-Save-Dialog hängt bei fehlender
-Endung ein literales `.*` an den Dateinamen an (nur nativer Pfad, Qt-eigener Dialog
-unbetroffen — Diskriminator bestätigt, §19), bewusst nicht gefixt, da native Pfad ohnehin
-nicht der Standard ist. **Windows Toolbar-Save-Icon-Timing:** 2026-09-11 systematisch
-gegen echtes DrRacket getestet, in keinem Fall reproduziert — kein offener Befund mehr;
-korrigierte Datei-Zuordnung: `mrlib/switchable-button.rkt` + `wx/qt/canvas.rkt`, **nicht**
-`wx/qt/button.rkt` (§24.4). Aus §21.6 (2026-07-14, backend-generisch, auf Linux identisch
-reproduziert) weiterhin offen: Resize/Reflow-Bug (Kind-Controls wandern beim
-Fenster-Vergrößern nicht mit, reproduziert sowohl im Preferences-Dialog als auch in einer
-isolierten Probe, §21.7). **Dritter Fix-Versuch (Linux, 2026-09-13, §21.9):**
-`resizeEvent` verdrahtet (plus neue `shim_window_get_size`-Live-Query, da
-`get-width`/`get-height` zuvor reine Racket-Caches waren) — diesmal **kein Crash und
-kein Hänger** bei mehreren diskreten `xdotool windowsize`-Resizes (anders als
-Fix-Versuch 1/2), aber Kind-Reflow blieb trotzdem aus; vollständig zurückgerollt
-(kein Commit). **Messinstrument als Ursache entlarvt und repariert (2026-09-14,
-§21.10):** in einem bare-`racket`-Skript ist der Hauptthread **selbst** der
-Handler-Thread des Eventspace (`wx/common/queue.rkt:357`), `yield` dispatcht nur aus
-diesem Thread (Z. 464/475) und `(sleep n)` dispatcht gar nichts — geposteste Thunks
-laufen erst beim Programmende über den `executable-yield-handler` (Z. 637). Damit ist
-der Befund „gepostetes Thunk läuft nie" (`resizeEvent` **und** der
-`closeEvent`-Diskriminator) ein **Instrumentenartefakt, kein Qt-Befund**: natives GTK
-verhält sich ohne `PLT_QT` identisch (5019 ms statt 0,6 ms), mit `sleep/yield` läuft
-das Thunk sofort. **Korrektur an §21.9:** „kein Crash/kein Hänger" bleibt gültig,
-**„keine Rückkopplungsschleife" ist gestrichen** — die Schleife setzt voraus, dass
-das Thunk läuft und `set-size` aufruft; der Pfad wurde nie durchlaufen, das Risiko
-ist ungeprüft, nicht entkräftet. Repariert: neues `examples/pump-gate.rkt`
-(`wait/pump` + `pump-gate!`), vier Proben umgestellt, **jede loggt jetzt
-`PUMP OK (n ms)` als eigenen Gültigkeitsbeweis**. **✅ §21.7 gefixt 2026-09-14 im vierten Anlauf (§32), Shim-ABI-Änderung:**
-entscheidend war nicht neue Messtechnik, sondern gtks `remember-size`-Dedup
-(`wx/gtk/window.rkt:640`) — einen Resize nur weitermelden, wenn er die Größe wirklich
-ändert; da `set-size` den Cache **vor** dem nativen Resize schreibt, läuft das Echo des
-eigenen `set-size` ins Leere, und genau dort lief Fix-Versuch 1 endlos. Verifiziert bis
-zum echten Mausziehen (auch unter die Mindestgröße: 6 Korrekturen bei 8 Drag-Schritten,
-je ein sauberer Recheck, kein Kaskadieren) und bis zum Preferences-Dialog in echtem
-DrRacket (1060×663 → 1200×820, alle Kinder folgen, OK klickt an neuer Position).
-**macOS muss `qt-shim` nach dem Pull noch neu bauen** (`shim_window_set_resize_cb`
-neu, wie §27 — seit §33 zusätzlich `shim_canvas_set_wheel_cb`, seit §36 zusätzlich
-`shim_clipboard_{set,get,has}_text`; ein Rebuild deckt alle drei ab). **Windows hat
-gebaut und validiert, 2026-09-17** (`docs/2026-09-17_report-win.md`): Fenster-Shrink
-per echtem Maus-Drag in 9 Schritten reflowt Kind-Controls korrekt (horizontale
-Scrollbar erscheint bei knappem Platz), Mindestgröße wird ohne Hänger verweigert
-(`Responding=True` durchgehend), kein Kaskadieren. Wieder-Vergrößern per Drag ließ
-sich automatisiert nicht zuverlässig reproduzieren (Cursor traf die Resize-Border nach
-dem ersten Release nicht mehr) — **Automatisierungsgrenze, kein Produktbefund**
-(Prozess blieb durchgehend reaktionsfähig). **Auf macOS validiert, 2026-09-18**
-(`docs/2026-09-18_report-macos.md`, §44.4): `qt-shim` war zu Sessionbeginn bereits
-mit allen fälligen Exporten neu gebaut (s. Build-Banner). Resize von außen über AX
-(`set size of window`, kein Live-Drag) reflowt Kind-Control korrekt über zwei
-Schritte (300×200→700×372, Button 696px; →870×472, Button 866px), Mindestgröße
-korrigiert sich einmalig auf 327×432 und bleibt über zwölf weitere Ticks stabil,
-kein Kaskadieren — Fix generalisiert auf allen drei Plattformen.
-Editor-Canvas-Scrollbars **gefixt 2026-09-14 (§33)** — der 2026-09-11 auf Windows
-gemessene degenerierte Scroll-Range (Editor-Inhalt komplett weiß, §24.5) hatte als
-Ursache einen fehlenden `on-size`-Aufruf, nicht den Scrollbar-Code; damit sind auch
-macOS' abweichendes Symptom (§29.2, korrektes Rendering ohne Scrollwirkung) und der
-Linux-Streifenbefund erledigt. **Auf Windows gegengeprüft, 2026-09-17: Editor-Inhalt
-rendert in allen getesteten Tabs korrekt (kein Weißmal-Symptom mehr)** — Scrollbar-
-Erscheinen unter echtem Platzmangel nur indirekt bestätigt (kurze Beispieldateien,
-aber horizontale Scrollbar erschien beim Verkleinern zuverlässig). **macOS weiterhin
-offen.** Der Colors-Tab
-(Fall 2, §25.2, `'(auto-vscroll)`-Panels mit echten Kind-Widgets) ist **2026-09-14
-gefixt (§34)** — das dort vermutete eigene Content-Widget war tatsächlich die Lösung,
-ohne Shim-ABI-Änderung; damit ist dieser Cluster geschlossen.
-Colors-Tab-Rahmen-Teil 2026-09-11 gefixt, §24.3. Font-Size-Slider-Zahl **gefixt 2026-09-11** (§24.2). Nebenbefund
-(2026-09-11, inzident entdeckt, vorbestehend/unabhängig von den Scrollbar-Änderungen,
-per `git stash` bestätigt): grafischer Störeffekt (orange/blau gestreiftes Rechteck) nahe
-dem oberen Rand des DrRacket-Editor-Fensters, Root-Cause nicht untersucht. **§35-Hypothese
-1, 2026-09-17 gegengeprüft: in keinem der drei `test-dock-size`-Läufe und keinem der drei
-geöffneten Tabs sichtbar** — aber nur Abwesenheit in einem anderen Kontext beobachtet,
-nicht der ursprüngliche Auslöseschritt selbst wiederholt. **Mit dem designierten Repro
-geschlossen, 2026-09-17 (4)** (`docs/2026-09-17-4_report-win.md`):
-`examples/scroll-probe.rkt` — exakt die isolierte `editor-canvas%`-Probe
-(`'(auto-hscroll auto-vscroll)`, überlanger Inhalt), mit der Linux dasselbe
-Symptom-Cluster am 2026-09-13 gezielt reproduziert hatte (dort als Farbstreifen, auf
-Windows damals als Weißmalen, auf macOS als korrekt-aber-unscrollbar — alle drei
-dieselbe Root-Cause, §33) — rendert nach dem §33-Fix (fehlender `on-size`-Aufruf in
-`wx/qt/canvas.rkt`) sauber, kein Streifen-/Weißmal-Artefakt an irgendeiner Stelle,
-Mausrad (10 Notches, echte `mouse_event`-Simulation) scrollt den Inhalt korrekt Zeile
-für Zeile. Damit erstmals der tatsächliche Auslöseschritt 1:1 wiederholt statt nur
-seiner Abwesenheit anderswo — **Hypothese 1 gilt als bestätigt erledigt**, keine
-künftige Session mehr nötig.
-**Zwischenablage: gefixt 2026-09-16 (§36).** `clipboard-driver%` war ein reiner
-No-op-Stub, dazu mit Methodennamen, die `wx/common/clipboard.rkt` nie aufruft (falscher
-Vertrag, nicht nur fehlende Implementierung — siehe §36.1). Neu implementiert nach
-gtk/cocoa-Vorbild (eager statt Ownership-Callback, da `QClipboard` synchron ist), drei
-neue Shim-Exporte (`shim_clipboard_{set,get,has}_text`, **ABI-Änderung**). Verifiziert:
-`examples/clipboard-probe.rkt` (3/3, Qt und nativ), Cross-Prozess/Cross-Toolkit
-(Qt-Schreiber → nativer gtk-Leser), und im echten laufenden DrRacket-Prozess über die
-Interactions-REPL (`the-clipboard` set/get-Round-trip). Die GUI-Bedienung selbst
-(Edit-Menü → Copy) blieb bei der Verifikation zunächst unbewiesen — Copy/Cut im
-Edit-Menü waren trotz aktiver Selektion durchgehend ausgegraut, deckte sich mit §34.7s
-damals offenem Befund zu nicht nachgeführten Menü-Enable-States; **seit §37 (2026-09-16,
-gleicher Tag) gefixt**, GUI-Bedienung damit ebenfalls bestätigt. Scope bewusst nur Text — `get-bitmap-data`/
-`set-bitmap-data` bleiben No-op-Stubs. Auf Windows (2026-09-17) und macOS
-(2026-09-18) validiert, s. eigene Tabellenzeile oben. Im selben Zug
-erhoben, eine von vier weiterhin offen, aus derselben Bestandsaufnahme:
-`printer-dc%` (`platform.rkt:115`, Drucken tat nichts) war Stub — **seit 2026-09-17
-implementiert, s. eigener Absatz (§43) weiter unten.** Bestandsaufnahme aus
-dem Quelltext, nicht untersucht — Details und Tabelle:
-`docs/2026-09-14-4_report-linux.md`, Abschnitt „Nachtrag nach Abschluss".
-**`gauge%` implementiert, 2026-09-17, Windows (§41)** — echter `QProgressBar`, dessen
-Ganzzahl-`min`/`max`/`value`-API direkt wx' `0..range`-Vertrag entspricht (keine
-Fraction-Umrechnung wie bei gtk nötig, `get-range`/`get-value` fragen den nativen
-Zustand live ab statt Racket-seitig zu cachen). Fünf neue Shim-Exporte (ABI-Änderung,
-s. Build-Banner oben). Eigene `wx/qt/gauge.rkt`-Datei (Konvention aller echten
-Widget-Klassen dieses Backends), `message.rkt` als nähere Vorlage als `slider.rkt`
-(beide nicht-interaktiv, kein Container/Label-Wrapper nötig). Verifiziert: neue Probe
-`examples/gauge-probe.rkt` (horizontaler + vertikaler Gauge, per Screenshot bei zwei
-Ständen als echter, wachsender Balken bestätigt — vorher zeichnete der Stub gar
-nichts). Smoke 3/3 beide Wege. **Auf macOS validiert, 2026-09-18 (6)**
-(`docs/HACKING.md` §49.2): `get-value`/`get-range` roundtrippen korrekt,
-zwei Screenshots bei unterschiedlichen Ständen zeigen einen echten,
-wachsenden Balken horizontal **und** vertikal. Fix generalisiert
-(Windows+macOS). **Auf Linux validiert, 2026-09-19** (`docs/HACKING.md`
-§52.2): `get-value`/`get-range` roundtrippen exakt, zwei Screenshots
-(per `md5sum` als unterschiedlich bestätigt) zeigen einen wachsenden Balken
-horizontal und vertikal. Fix auf allen drei Plattformen bestätigt.
-**`printer-dc%` implementiert, 2026-09-17, Windows (§43)** — letzter der vier seit §36
-bekannten Stubs. Qt6 hat `QPrinter::getDC()` ersatzlos gestrichen und bietet keinen
-öffentlichen Weg von einem `cairo_t*` in einen `QPainter` — anders als win32
-(`cairo_win32_printing_surface_create(HDC)`) und gtk (natives `GtkPrintOperation`-
-Cairo-Fenster) bleibt hier also nur ein Raster-Bridge: jede aufgezeichnete Seite wird
-in eine ARGB32-Cairo-Image-Surface (fest 300dpi) repliziert, der rohe prämultiplizierte
-Puffer geht als `QImage` an `QPainter::drawImage`, gestreckt auf die volle Druckseite —
-**Text/Vektorgrafik kommt auf diesem Backend als Raster aus dem Drucker, nicht vektoriell**
-(bewusst offengelegt, nicht verschwiegen). `QPrintDialog`/`QPageSetupDialog` laufen
-nicht-modal (`open()` + `finished`-Signal, exakt das `filedialog.rkt`-Muster) — `exec()`
-öffnet einen verschachtelten `QEventLoop` und verstößt damit gegen Regel 1, ganz gleich
-ob darunter ein natives Betriebssystem-Fenster hängt. Elf neue Shim-Exporte (ABI-
-Änderung, s. Build-Banner oben, zusätzlich die Qt-Komponente `PrintSupport`). Eigene
-Datei `wx/qt/printer-dc.rkt` (Konvention aller echten Widget-/DC-Klassen). Seitengeometrie
-kommt direkt aus `ps-setup%`s eigenen `orientation`/`paper-name`-Feldern (Punkte, über
-`paper-sizes`) statt aus einem nativen `PAGESETUPDLG`-artigen Objekt — Qt hat dafür kein
-Äquivalent, und `show-print-setup` hält dieses Racket-seitige Feld ohnehin schon mit dem,
-was der Nutzer im `QPageSetupDialog` wählt, synchron (Paper-Name-Rückweg nur für die vier
-von `ps-setup%` akzeptierten Größen A4/A3/Letter/Legal, sonst bleibt der alte Name
-stehen). **Ein nicht offensichtlicher Bug unterwegs gefunden:** `(class (dc-mixin
-default-dc-backend%) (define/override (init-cr-matrix cr) ...) ...)` — 1:1 aus win32/
-gtks eigenem Vorbild abgeschrieben — schlug mit `superclass does not provide an expected
-method for override` fehl, reproduzierbar sogar in einem Zwei-Zeilen-Minimalskript ganz
-ohne `wx/qt`-Bezug. Root-Cause per Bisektion gefunden, nicht geraten: `init-cr-matrix`/
-`get-cr`/etc. sind in `racket/draw/private/local.rkt` als `define-local-member-name`
-deklariert (Bindung an Lexikalische Identität, nicht an den bloßen Symboltext) — win32/
-gtks `printer-dc.rkt` requiren `local.rkt` bereits, meine erste Fassung nicht; ohne
-diesen Require griff `define/override` einen bloßen, öffentlichen, aber *anderen*
-`init-cr-matrix` statt der lokalen Member-Name-Bindung, die `default-dc-backend%`
-tatsächlich trägt. **Verifiziert:** neue Probe `examples/printer-probe.rkt` mit
-`PLT_QT_PRINT_TO_PDF=<pfad>` (Test-Escape-Hatch, umgeht den echten Dialog für einen
-reproduzierbaren Lauf) — zwei Seiten (Ellipse+Linie+Text, Rundrechteck+Text), per
-ImageMagick zu PNG gerastert und sichtgeprüft: beide Seiten korrekt, MediaBox 612×792pt
-(Letter, Default), Inhalt an der richtigen Position, kein Verzerren/Clipping. Echter,
-interaktiver Pfad separat geprüft (`examples/printer-dialog-probe.rkt`): `QPageSetupDialog`
-öffnet nicht-modal, per `WM_CLOSE` sauber geschlossen, Ergebnis (`#f`/`reject`) korrekt bis
-`get-page-setup-from-user` zurückgereicht, kein Crash, kein Hänger. `QPrintDialog` selbst
-erzeugt unter dieser RDP-Automatisierungssitzung zwar sein Fenster (Titel „Print“,
-`GetWindowRect` liefert plausible Koordinaten), bleibt aber dauerhaft `IsWindowVisible=
-False` und rendert nicht — Spooler-Dienst lief, zwölf Drucker installiert (u. a.
-„Microsoft Print to PDF“), also kein Spooler-/Treiberproblem; plausibel eine
-Automatisierungsgrenze des nativen `PrintDlgEx`-Fensters in dieser Fernwartungssitzung,
-kein Produktbefund (Prozess blieb durchgehend `Responding=True`, kein Absturz) — nicht
-abschließend bewiesen, da von hier aus nicht weiter diagnostizierbar. Smoke 3/3 beide
-Wege. **Nur auf Windows implementiert/getestet** (Dialog-Pfad auf Windows). **Auf
-macOS geprüft, 2026-09-18 (6), PDF-Rasterpfad validiert, Dialog-Pfad zeigt einen
-neuen, reproduzierbaren Crash** (`docs/HACKING.md` §49.4): PDF-Pfad (`PLT_QT_
-PRINT_TO_PDF`) läuft beliebig oft crashfrei, zweiseitige PDF korrekt gerastert —
-**aber** `QPageSetupDialog`/`QPrintDialog` öffnen auf macOS (anders als auf
-Windows, §43.7) tatsächlich sichtbar, und nach Cancel + Prozessende crasht der
-Prozess reproduzierbar 3/3 (`invalid memory reference`). Fünf Hypothesen
-(Pump-Timing vor `shim_printer_destroy`, Parent-Handle+Enable-Kaskade,
-`queue-event`/`yield`-Indirektion, `printer-dc%`s eigener Bitmap/Cairo-Zustand,
-`moredialogs.rkt`s `parameterize`+`ps-setup%`-Wrapper) per Racket-Ebene-Bisektion
-geprüft und **alle widerlegt** — die Speicherbeschädigung zeigt sich vermutlich
-dort, wo als Nächstes alloziert wird, nicht an ihrem Ursprung. Erster `lldb`-
-Versuch scheiterte an `task_for_pid`-Berechtigungen, auch nach `sudo
-DevToolsSecurity -enable`. **Root-caused und gefixt, noch in derselben
-Session (§50):** eine zweite Hürde (`get-task-allow`-Entitlement fehlte dem
-Racket-Binary selbst, Hardened Runtime) wurde durch Neusignieren einer Kopie
-umgangen — Xcodes `lldb` hängt damit erfolgreich an, nativer Backtrace zeigt
-den Crash in `libsystem_c.dylib`'s `__cxa_finalize_ranges` (Qts eigene
-statische C++-Destruktoren), aufgerufen von `exit()`. Ursache: `shim_app_quit()`
-(zerstört `QApplication` ordentlich) existierte im Shim bereits, hatte aber
-**nirgends im Racket-Code einen Aufrufer** — ohne geordnete
-`QApplication`-Zerstörung läuft die Qt-Statics-Abbaureihenfolge in einem nie
-vorgesehenen Zustand, sobald ein lazy geladenes Plugin (hier: Print-Support,
-erst beim ersten Dialog geladen) eigene Globals hinterlassen hat — dieselbe
-Bug-Klasse wie §39 (Crash B). **Fix (gui-Submodul, `wx/qt/queue.rkt`):** ein
-`(plumber-add-flush! (current-plumber) (lambda (handle) (shim_app_quit)))` in
-`qt-init!` — läuft synchron innerhalb von `(exit)`, bevor die eigentliche
-`exit()` aufgerufen wird. Keine Shim-/ABI-Änderung. Verifiziert: alle drei
-ursprünglichen Repros je 3/3 crashfrei, Smoke 3/3 beide Wege. PDF-Pfad **und**
-interaktiver Dialog-Pfad sind auf macOS jetzt produktionsreif. **Nur auf
-macOS reproduziert/gefixt/verifiziert** — derselbe tote Code-Pfad
-(`shim_app_quit` ohne Aufrufer) besteht identisch auf Windows/Linux, dort aber
-nicht nachgeprüft (auf Windows blieb `QPrintDialog` laut §43.7 unsichtbar,
-das Plugin also vermutlich nie voll initialisiert). **Auf Linux validiert,
-2026-09-19** (`docs/HACKING.md` §52.2): PDF-Rasterpfad (`PLT_QT_PRINT_TO_PDF`,
-zwei Seiten, per `pdftoppm` sichtgeprüft) **und** der interaktive Dialog-Pfad
-laufen crashfrei — einschließlich des auf macOS kritischen Teardown-Falls
-(Print-Support-Plugin lazy geladen, `shim_app_quit`-Plumber-Flush greift auch
-hier, vorher auf Linux nie getestet). Drucker-Auswahl im `QPrintDialog`
-degeneriert auf dieser Maschine zu nur "Print to File (PDF)", weil keine
-CUPS-Destinations registriert sind (`lpstat -p` → „No destinations added",
-Daemon läuft) — Umgebungslücke, kein Bug. Damit auf allen drei Plattformen
-mindestens einmal ausgeführt, PDF-Pfad überall grün. Details:
-`docs/HACKING.md` §43, §49.4, §50, §52.2.
-**`get-current-mouse-state` implementiert, 2026-09-17, Windows (§42)** — Position aus
-`QCursor::pos()`, Modifikatoren aus `QGuiApplication::queryKeyboardModifiers()` (echter
-synchroner Hardware-Query laut Qt-Doku), Maustasten + Caps Lock aus `GetAsyncKeyState`
-(Windows-spezifisch, wie win32s eigene Implementierung, da Qt dafür keinen portablen
-Hardware-Query anbietet). Volle Symbol-Menge `left middle right shift control alt meta
-caps` implementiert statt win32s unvollständiger Teilmenge (kein `middle`/`meta`) —
-`wx/qt` läuft auf allen drei Plattformen, win32s Lücke war eine
-Racket-Implementierungslücke, kein Windows-Limit. **Ein Messfehler unterwegs
-gefunden:** `QGuiApplication::mouseButtons()` sah wie das portable Äquivalent für
-Maustasten aus, spiegelt aber laut Test nur Events, die die eigene Anwendung tatsächlich
-empfangen hat — ein synthetischer Klick ohne Fensterfokus tauchte darin nie auf, obwohl
-`queryKeyboardModifiers()` (dieselbe Klasse) echtes Hardware-Polling ist und Shift/Strg
-korrekt ohne Fokus erkannte. Ein neuer Shim-Export (ABI-Änderung, s. Build-Banner oben).
-Verifiziert: neue Probe `examples/mouse-state-probe.rkt` + gezielte Einzel-Checks
-(Position exakt, Shift/Strg über `keybd_event`, alle drei Maustasten über `mouse_event`
-— erst nach dem Fix korrekt, vorher blieb `mods` bei jeder Maustaste leer). Caps Lock
-nicht live getestet (hätte den System-Zustand umgeschaltet), Code-Pfad ist wortwörtlich
-win32s eigener. Smoke 3/3 beide Wege. **Auf macOS implementiert + validiert,
-2026-09-18 (6)** (`docs/HACKING.md` §49.5): neuer `#elif defined(__APPLE__)`-Zweig
-in `shim_get_mouse_state` — `CGEventSourceButtonState`/`CGEventSourceFlagsState`
-(dieselbe Klasse globaler HID-Session-Abfrage wie Windows' `GetAsyncKeyState`,
-kein neuer Shim-Export, keine ABI-Änderung; `qt-shim/CMakeLists.txt` linkt neu
-`ApplicationServices` auf `APPLE`). Position/Maustaste `left`/alle vier Modifikatoren
-per `cliclick` verifiziert (`middle`/`right` nicht einzeln, `cliclick` kann diese
-Tasten nicht halten — Code-Pfad aber identisch). Physisches Cmd↔Ctrl vertauscht sich
-zu `'control`/`'meta` (Qts bekannter macOS-Swap, `AA_MacDontSwapCtrlAndMeta` nirgends
-gesetzt) — deckt sich mit `wx/qt/key-map.rkt`s eigener, ebenfalls unverswappter
-Modifier-Behandlung, deshalb bewusst nicht korrigiert. **Auf Linux implementiert +
-validiert, 2026-09-19** (`docs/HACKING.md` §52.3): neuer `#elif defined(__linux__)`-
-Zweig — eine eigene, lazy geöffnete `XOpenDisplay`-Verbindung, `XQueryPointer` auf
-dem Root-Window liefert Maustasten- **und** Caps-Lock-Bit (`LockMask`) in einem
-Aufruf, kein separater `XkbGetIndicatorState`-Aufruf nötig. Stolperstein: `X11/X.h`
-definiert `CursorShape` als Makro, kollidierte mit `Qt::CursorShape` — gezieltes
-`#undef CursorShape` nach dem Include (einziges Kollisionswort im File, per Grep
-geprüft). `find_package(X11 REQUIRED)` + `X11::X11`-Linkage neu in
-`qt-shim/CMakeLists.txt` unter `if(UNIX AND NOT APPLE)`. Per echtem `xdotool
-mousedown`/`mouseup` verifiziert (`mods=(left)` jetzt korrekt, vorher immer leer);
-Caps-Lock-Zweig teilt sich denselben Aufruf, durch Code-Inspektion mitverifiziert,
-nicht physisch umgeschaltet. Keine neue Shim-ABI (Export existiert bereits seit
-§42), nur Linux-interner Code. Damit ist `get-current-mouse-state` auf allen drei
-Plattformen vollständig.
-**`cursor-driver%` implementiert, 2026-09-17, Windows (§40)** — echte Standard-Cursor
-(`Qt::CursorShape`, symbolisch per Namensstring aus Racket ausgewählt statt rohem Enum-
-Wert) plus `set-image`/`'bullseye` über eine ARGB-`QCursor(QPixmap, hotX, hotY)`, ohne
-win32s AND/XOR-Masken-Komplexität. Vier neue Shim-Exporte (ABI-Änderung, s. Build-Banner
-oben). Dabei ein echter, nicht offensichtlicher Bug gefunden und gefixt: `wx/qt/
-window.rkt` fehlte `(require "../common/local.rkt")` — `get-driver` ist ein
-`define-local-member-name` (an die Modul-Identität gebunden, nicht an den Methodennamen-
-String), ohne diesen Require schlägt jeder Aufruf über die öffentliche `set-cursor`-API
-mit `send: no such method` fehl, obwohl `wx/common/cursor.rkt` die Methode sichtbar
-`define/public` definiert — win32/gtk/cocoa requiren `local.rkt` bereits, `wx/qt` tat es
-nie (nie gebraucht, solange der Stub ein No-op war). Verifiziert: neue Probe
-`examples/cursor-probe.rkt` (zwölf Standard-Cursor + ein selbstgebauter Bitmap-Cursor,
-per echtem `SetCursorPos` und `GetCursorInfo`+`DrawIcon`-Screenshot visuell bestätigt),
-echtes DrRacket zeigt jetzt einen I-Beam über der Definitions-Pane (vorher durchgehend
-Pfeil) und fällt beim Verlassen automatisch auf den Pfeil zurück — bestätigt, dass Qts
-native `QWidget::setCursor()`-Kaskade win32/gtks manuelle `mouse-in?`/`reset-cursor-in-
-child`-Buchführung überflüssig macht. Smoke 3/3 beide Wege. **Auf macOS validiert,
-2026-09-18 (6)** (`docs/HACKING.md` §49.3): `arrow`/`hand`/`bullseye` (eigenes
-ARGB-Bitmap) und der selbstgebaute Plus-Cursor (`set-image`-Pfad) per `cliclick` +
-`screencapture -C` (zeichnet den System-Cursor mit ein, sonst wären alle Screenshots
-leer) visuell bestätigt. Fix generalisiert. **Auf Linux validiert, 2026-09-19**
-(`docs/HACKING.md` §52.2): alle 12 `set-cursor`-Aufrufe (11 Standard-Symbole +
-`set-image`-Pfad) laufen ohne Exception, alle Canvases rendern korrekt. Die
-System-Cursor-Form selbst konnte mangels Werkzeug (kein `screencapture
--C`-Äquivalent; `spectacle` fängt den Cursor nicht mit ein, `scrot`/`import`
-nicht installiert) nicht fotografisch verifiziert werden — Werkzeuglücke dieser
-Maschine, kein Produktbefund. Funktional auf allen drei Plattformen bestätigt.
+### Weitere Bugfixes
 
-Die übereinander gezeichneten Toolbar-Controls (`Untitled`/`Undock`) sind **2026-09-14
-gefixt (§35)** — Nativ-Gate bestand, Ursache war der unter Qt nie beachtete Fensterstil
-`'deleted`; §35-Hypothese 2 (`switchable-button%`) ist damit erledigt, Hypothese 1 (das
-gestreifte Rechteck auf Windows) bleibt offen und ist erst beim gebündelten
-Windows-Durchlauf entscheidbar. **§34.7 (Menü-Enable-States, u. a. DrRackets Tabs-Menü
-„Previous/Next Tab" bei zwei offenen Tabs) ist gefixt (2026-09-16, §37)** — s. eigene
-Tabellenzeile oben; `QMenu::aboutToShow` war unter Qt nirgends verdrahtet, `on-demand`
-lief deshalb nie vor dem Öffnen eines Menüs. Details je
-Fund: `STATUS.md`, `docs/HACKING.md`.
+- Linux Crash B (Teardown, „invalid memory reference" nach `QFileDialog`) — ✅ 2026-09-16 (§39), fehlender Pump-Zyklus vor `exit`, keine ABI-Änderung. Validiert Windows + macOS 2026-09-17/18(2) (§45.5)
+- macOS: Preferences-Menüpunkt löste falschen Callback aus — ✅ 2026-07-14 (§22), `setMenuRole(NoRole)` + `current-eventspace-has-standard-menus?`-Gate
+- macOS: „8 statt 9 Menüs" (leeres `Windows`-Menü unsichtbar) — ✅ 2026-09-18(7) (§51.1), Platzhalter-`QAction`, keine ABI-Änderung
+- macOS: Menüband kollabiert nicht korrekt beim Schließen des letzten Fensters — ✅ 2026-09-18(4) (§46.2/§47), reines `wx/qt`-lokal, keine ABI-Änderung
+
+### Reklassifiziert (kein Produktbefund)
+
+- Tools-Listbox-Klick (macOS) — reines AppleScript/AX-Automatisierungsartefakt, kein Bug (§51.2)
+- „Zombie-Prozess" beim Schließen des letzten Fensters (Linux §38, macOS §44.5/§47.1) — `xdotool windowclose` liefert Close-Event nie aus (Linux, backend-unabhängig, auch nativ reproduzierbar); auf macOS Standard-Cocoa-Konvention (`framework:exit-when-no-frames` bewusst `#f`), kein Qt-Bug. Bare-Skript-Variante (§47.1-Nebenbefund) auf macOS mit belegter Klick-Methodik **nicht reproduzierbar** (§48)
+- Windows Toolbar-Save-Icon-Timing — 2026-09-11 systematisch gegen echtes DrRacket getestet, nicht reproduziert (§24.4)
+- Linux Crash A („arity mismatch") — nach macOS-Menü-Dispatch-Fixes (§19) in 4 Versuchen nicht mehr reproduziert, plausibel behoben (nicht absolut bewiesen, Original war n=1-intermittierend)
+
+### Offene Befunde (künftige Session nötig)
+
+- **Windows Zombie-Prozess beim Schließen des letzten Fensters** — anders als Linux/macOS **Qt-spezifisch reproduziert** (4/4, auch Einzelprozess), nativer Kontrollversuch beendet sauber. Root Cause nicht lokalisiert; nächster Schritt: `wx/qt/frame.rkt`s `on-close`/`direct-show`-Kette gegen `register-frame-shown` prüfen. Kein HACKING.md-§ — nur `STATUS.md` „Session 2026-09-17 (Windows, 10)" + `docs/2026-09-17-7_report-win.md`
+- §33.7 — einmaliger, seither in 17 Wiederholungen nicht reproduzierter Tab-2-Zeilennummern-Defekt (Linux, `editor-canvas%`), Rate ≤1-in-18, `PLT_QT_SCROLL_DEBUG=1` für künftige Diagnose vorbereitet
+- Windows `printer-dc%`: `QPrintDialog` blieb in dieser RDP-Automatisierungssitzung unsichtbar — plausibel Automatisierungsgrenze, nicht abschließend geklärt (§43.7)
+- Linux: Resize/Minimieren unter KWin nicht validiert
 
 ## Dokumentation
 
