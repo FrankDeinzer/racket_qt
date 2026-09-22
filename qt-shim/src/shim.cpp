@@ -66,6 +66,13 @@
 // Qt::CursorShape used later in this file (shim_cursor_create_standard).
 // It's the only Qt/Xlib macro collision in this translation unit (checked).
 #undef CursorShape
+// QNativeInterface::QX11Application -- gives wx/qt/gcwin.rkt (DrRacket's GC
+// indicator, register-collecting-blit) the same Display* Qt itself uses, so
+// a raw Xlib child window created on it shares X11's request ordering with
+// the rest of the app instead of opening a second, independent connection
+// (unlike shim_x11_display() below, which is deliberately separate and
+// query-only).
+#include <QtGui/qguiapplication_platform.h>
 #endif
 
 extern "C" {
@@ -2107,6 +2114,41 @@ void shim_bell(void)
 int shim_double_click_time(void)
 {
     return QApplication::doubleClickInterval();
+}
+
+// ---- gc indicator (register-collecting-blit / X11 raw-window support) ----
+// wx/qt/gcwin.rkt (DrRacket's GC indicator, framework/private/frame.rkt's
+// gc-canvas) ports wx/gtk/gcwin.rkt's design: at registration time it opens a
+// small raw Xlib child window and, from then on, toggles its background
+// pixmap through a Racket-runtime GC-callback opcode-vector that runs during
+// a live GC pause -- so the toggle itself must never touch Qt, Racket, or the
+// event loop (Regel 1/2). These two functions supply the only two pieces
+// gtk got from GDK that Qt exposes differently: the X11 Display* connection
+// Qt itself uses, and a widget's native X11 Window XID. Both are called only
+// at registration/unregistration time (ordinary Racket context, not from
+// inside the GC callback) -- see gcwin.rkt for the rest of the design and
+// the GC-safety argument for what the callback itself calls (plain Xlib:
+// XSetWindowBackgroundPixmap/XMapRaised/XUnmapWindow/XFlush).
+#ifdef __linux__
+// Null when Qt isn't running the xcb platform plugin (e.g. Wayland) -- the
+// Racket side treats that as "unsupported here" and register-collecting-blit
+// degrades to a no-op rather than crash (Regel 4).
+void* shim_get_x11_display(void)
+{
+    if (auto* iface = qGuiApp->nativeInterface<QNativeInterface::QX11Application>())
+        return iface->display();
+    return nullptr;
+}
+#else
+void* shim_get_x11_display(void) { return nullptr; }
+#endif
+
+// QWidget::winId() -- unlike GDK's gdk_x11_window_get_xid(gdk_window)
+// indirection, this *is* the X11 Window XID directly on this platform, no
+// separate lookup needed.
+unsigned long shim_widget_get_x11_window(void* widget)
+{
+    return static_cast<unsigned long>(static_cast<QWidget*>(widget)->winId());
 }
 
 } // extern "C"
