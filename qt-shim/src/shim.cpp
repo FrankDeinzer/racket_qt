@@ -1921,26 +1921,48 @@ void shim_group_panel_set_label(void* handle, const char* label)
 // ownership-callback model -- clipboard-driver% (wx/qt/platform.rkt) writes
 // through eagerly and reads back live, no C-to-Racket callback involved, so
 // none of the #:atomic? rules (CLAUDE.md Regel 2) apply here.
+//
+// `mode` selects the QClipboard::Mode: 0 = QClipboard::Clipboard (the normal
+// clipboard), 1 = QClipboard::Selection (X11's PRIMARY selection, used for
+// middle-click paste; a no-op on platforms without selection support --
+// see shim_clipboard_supports_selection below). Same three functions serve
+// both the-clipboard and the-x-selection (wx/qt/platform.rkt's
+// clipboard-driver%), not parallel duplicates.
 
-void shim_clipboard_set_text(const char* utf8)
+static QClipboard::Mode shim_clipboard_qmode(int mode)
 {
-    QApplication::clipboard()->setText(QString::fromUtf8(utf8), QClipboard::Clipboard);
+    return mode ? QClipboard::Selection : QClipboard::Clipboard;
+}
+
+void shim_clipboard_set_text(const char* utf8, int mode)
+{
+    QApplication::clipboard()->setText(QString::fromUtf8(utf8), shim_clipboard_qmode(mode));
 }
 
 // Returned pointer is only valid until the next shim_clipboard_* call --
 // matches shim_version's convention (Racket's _string return type copies
 // immediately during FFI marshaling, before this buffer can be reused).
-const char* shim_clipboard_get_text(void)
+const char* shim_clipboard_get_text(int mode)
 {
     static QByteArray buf;
-    buf = QApplication::clipboard()->text(QClipboard::Clipboard).toUtf8();
+    buf = QApplication::clipboard()->text(shim_clipboard_qmode(mode)).toUtf8();
     return buf.constData();
 }
 
-int shim_clipboard_has_text(void)
+int shim_clipboard_has_text(int mode)
 {
-    const QMimeData* md = QApplication::clipboard()->mimeData(QClipboard::Clipboard);
+    const QMimeData* md = QApplication::clipboard()->mimeData(shim_clipboard_qmode(mode));
     return (md && md->hasText()) ? 1 : 0;
+}
+
+// QClipboard::supportsSelection() -- true on X11 (always has a PRIMARY
+// selection), false on Wayland/Windows/macOS depending on the platform
+// plugin. Genuinely dynamic, unlike gtk's/win32's own hardcoded
+// has-x-selection? values (gtk: always #t: X11-only backend; win32: always
+// #f: no such concept) -- Qt is cross-platform, so it has to ask.
+int shim_clipboard_supports_selection(void)
+{
+    return QApplication::clipboard()->supportsSelection() ? 1 : 0;
 }
 
 // ---- control font -----------------------------------------------------
