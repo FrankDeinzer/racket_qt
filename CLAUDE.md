@@ -79,25 +79,33 @@ Aufgabe:
 > neuen Shim-Exporten hier wieder einen Banner dieser Art einfügen, bis alle drei
 > Maschinen nachgebaut haben (gleiche Klasse wie §27/§52.1).
 >
-> **Neuer Shim-ABI-Stand seit 2026-09-22 (Block C, auf Linux gefixt und bereits nach
-> `origin/qt-backend` (Submodul) und `origin/main` (Umbrella-Zeiger) gepusht — Windows/
-> macOS aber noch nicht nachgebaut/validiert). Elf neue Exporte aus dem
-> Vertrags-Audit: `shim_control_font_face`, `shim_control_font_size`, `shim_bell`,
+> **Shim-ABI-Stand seit 2026-09-22 (Block C) — Windows nachgebaut+validiert
+> (2026-09-22), macOS noch offen.** Elf neue Exporte aus dem Vertrags-Audit:
+> `shim_control_font_face`, `shim_control_font_size`, `shim_bell`,
 > `shim_double_click_time`, `shim_clipboard_supports_selection`,
 > `shim_clipboard_set_image`, `shim_clipboard_has_image`, `shim_clipboard_image_size`,
 > `shim_clipboard_get_image_argb`, `shim_get_x11_display`, `shim_widget_get_x11_window`
 > (docs/2026-09-22_report-linux.md §2.1/§2.3/§2.4/§2.6/§2.7/§2.10). **Zusätzlich
 > Arity-Änderung** (kein neuer Name, aber ABI-relevant):
 > `shim_clipboard_set_text`/`_get_text`/`_has_text` haben jetzt einen zusätzlichen
-> `mode`-Int-Parameter (§2.6) — ein altes Windows/macOS-Binary mit der alten
-> 1-Parameter-Signatur würde beim `get-ffi-obj`-Aufruf mit der neuen Racket-Bindung
-> crashen, nicht still falsch laufen. Windows/macOS müssen `qt-shim` nach dem
-> nächsten Pull neu bauen — mit `nm -D`/`nm -g` (Windows: `dumpbin /exports`) gegen
-> die neuen Namen verifizieren. `shim_get_x11_display`/`shim_widget_get_x11_window`
-> sind Linux/X11-spezifisch (§55.5) — auf macOS/Windows kompilieren sie mit, laufen
-> aber ins No-op/degradieren sauber (kein XCB dort), das ist erwartet, kein Bug.
-> Diese Zeile hier wieder entfernen/aktualisieren, sobald beide Maschinen
-> nachgezogen haben (gleiche Klasse wie §27/§52.1).
+> `mode`-Int-Parameter (§2.6) — ein altes Binary mit der alten 1-Parameter-Signatur
+> würde beim `get-ffi-obj`-Aufruf mit der neuen Racket-Bindung crashen, nicht still
+> falsch laufen. `shim_get_x11_display`/`shim_widget_get_x11_window` sind
+> Linux/X11-spezifisch (§55.5) — auf macOS/Windows kompilieren sie mit, laufen aber
+> ins No-op/degradieren sauber (kein XCB dort), das ist erwartet, kein Bug.
+>
+> **Windows-spezifischer Build-Fix nötig beim Nachbauen (bereits gefixt, Commit
+> `2e91ee3`):** `shim_clipboard_get_image_argb` nutzte `std::min`/`std::max` ohne
+> die schützenden Klammern — kollidiert mit den `min`/`max`-Makros aus
+> `<windows.h>` (MSVC C2589). Datei hat an anderer Stelle bereits die Hauskonvention
+> dafür (`(std::max)(...)`), jetzt konsequent angewendet. **Auf macOS/Clang tritt
+> diese Kollision nicht auf** — kein Analogon zu erwarten dort, aber beim Rebuild
+> im Hinterkopf behalten, falls doch ein `min`/`max`-Konflikt auftaucht.
+>
+> **Alle 11 Exporte + Arity-Änderung auf Windows per `dumpbin /exports` verifiziert**
+> (`docs/2026-09-22_report-win.md`). **macOS noch nicht nachgebaut/validiert** — diese
+> Zeile hier wieder entfernen/aktualisieren, sobald macOS nachgezogen hat (gleiche
+> Klasse wie §27/§52.1).
 
 **Windows:**
 ```powershell
@@ -225,7 +233,7 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 - `cursor-driver%` (Standard-Cursor + `set-image`) — ✅ 2026-09-17, Windows (§40), ABI-Änderung; dabei Bugfix `wx/qt/window.rkt` fehlender `local.rkt`-Require. Validiert macOS (§49.3) + Linux (§52.2, Cursor-Form fotografisch nicht prüfbar, Werkzeuglücke)
 - `get-current-mouse-state` — ✅ 2026-09-17, Windows (§42), ABI-Änderung, volle Symbol-Menge (mehr als win32). Validiert macOS (§49.5, Cmd/Ctrl-Swap bewusst nicht korrigiert) + Linux (§52.3, X11 `XQueryPointer`)
 - `printer-dc%` (Raster-Bridge, kein Vektor-Pfad) — ✅ 2026-09-17, Windows (§43), 11 neue Exporte, Dialoge non-modal (Regel 1). PDF-Pfad auf allen 3 Plattformen grün (§52.2). macOS: eigener Teardown-Crash im Dialog-Pfad gefunden **und gefixt** (§49.4→§50, `shim_app_quit` fehlte als `exit`-Hook, Plumber-Fix, keine ABI-Änderung). Windows `QPrintDialog`-Automatisierung offen, s. u.
-- Block-C-Vertrags-Audit (elf Prompt-Kandidaten geprüft, drei davon kein Befund, ein neuer Fund) — ✅ 2026-09-22, Linux (§55), zehn Fixes: Control-Font-Metrik (höchste Wirkung), `find-graphical-system-path` (neuer Fund, maskierte `.gracketrc`-Fallback), `bell`, `get-double-click-time`, `flush-display` (Regel-1-Fall, `shim_pump(0)`), `has-x-selection?` + X11-Selection-Mode-Threading, Bild-Zwischenablage, `location->window`, `make-stub-class`-Aufräumen, `register-/unregister-collecting-blit` (DrRacket-GC-Indikator, Port von gtks rohem Xlib-GC-Callback-Protokoll auf Qt6.11, GC-Sicherheit live verifiziert). Elf neue Shim-Exporte + eine Arity-Änderung an drei bestehenden — Windows/macOS-Rebuild nötig, s. Build-Banner oben. Gate PASS (Suite A + neue Suite C + Akzeptanztest). Noch nicht gepusht/validiert auf Windows/macOS.
+- Block-C-Vertrags-Audit (elf Prompt-Kandidaten geprüft, drei davon kein Befund, ein neuer Fund) — ✅ 2026-09-22, Linux (§55), zehn Fixes: Control-Font-Metrik (höchste Wirkung), `find-graphical-system-path` (neuer Fund, maskierte `.gracketrc`-Fallback), `bell`, `get-double-click-time`, `flush-display` (Regel-1-Fall, `shim_pump(0)`), `has-x-selection?` + X11-Selection-Mode-Threading, Bild-Zwischenablage, `location->window`, `make-stub-class`-Aufräumen, `register-/unregister-collecting-blit` (DrRacket-GC-Indikator, Port von gtks rohem Xlib-GC-Callback-Protokoll auf Qt6.11, GC-Sicherheit live verifiziert). Elf neue Shim-Exporte + eine Arity-Änderung an drei bestehenden. Gate PASS (Suite A + neue Suite C + Akzeptanztest). **Windows nachgebaut+validiert 2026-09-22** (`docs/2026-09-22_report-win.md`, §56): 9/10 Fixes vollständig PASS, ein Windows-spezifischer MSVC-Build-Fix nötig (`min`/`max`-Makro-Kollision, Commit `2e91ee3`), Bild-Zwischenablage-Cross-Toolkit-Test **pixelgenau PASS** (stützt die Linux-Klipper-Hypothese: Windows hat kein Klipper-Äquivalent und läuft sauber durch, wo Linux 3× scheiterte). **Akzeptanztest `test-dock-size` auf Windows nicht abgeschlossen** — reiner Automatisierungsblocker (Klick-Automatisierung traf den Run-Knopf in echtem DrRacket wiederholt nicht, RCA nicht isoliert, Empfehlung: dediziertes/unbeobachtetes Desktop für einen Nachtest), kein Produktbefund. macOS noch offen (Rebuild + Validierung).
 
 ### Weitere Bugfixes
 

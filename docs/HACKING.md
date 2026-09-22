@@ -6834,3 +6834,108 @@ nicht gefixt — Nutzerentscheidung offen (escalieren jetzt vs. Backlog), siehe
 
 S. §55.1 — für künftige Sessions als geschlossen markieren, nicht erneut aufgreifen, außer
 ein neuer Konsument mit anderer Erwartung wird gefunden.
+
+## §56 — Windows: Block-C-Rebuild + Validierung, MSVC-Fix, CRLF-Stat-Cache-Falle (2026-09-22)
+
+Fortsetzung von §55 (Linux). Gebündelter Windows-Durchlauf: Shim-Rebuild gegen die elf
+neuen §55-Exporte, Validierung der zehn Fixes. Details: `docs/2026-09-22_report-win.md`.
+
+### §56.1 CRLF-Hygiene: Git "racy stat cache" hat `git status`/`diff`/`checkout` gleichermaßen getäuscht
+
+Der Prompt vermutete `core.autocrlf` sei "unset". Gemessen: **global `true`** — sehr wohl
+die Ursache, nur maskiert durch einen Git-internen Effekt, der Session-Zeit gekostet hat:
+
+- Erste Messung (`git status`/`git diff --stat`) zeigte **fälschlich "clean"** für
+  `third_party/gui`/`third_party/draw`, obwohl `git hash-object` und direkte
+  Byte-Inspektion echte CRLF-Kontamination bestätigten — **exakt** die vom Prompt
+  genannten Zahlen (797/115 Dateien).
+- **Root Cause:** Index-Einträge cachen (mtime, size) der **ungefilterten**
+  Arbeitsverzeichnis-Bytes (CRLF, aus einer Phase mit `core.autocrlf=true`) neben dem
+  **gefilterten** LF-Blob-Hash. Solange sich mtime/size nicht ändern, überspringt Git
+  (`status`/`diff`/**auch** `checkout-index -f` und `update-index --refresh`) die
+  tatsächliche Neuberechnung — unabhängig davon, ob der Inhalt bei geänderten
+  Filtereinstellungen (`core.autocrlf=false`) noch übereinstimmt. Verifiziert per
+  gezieltem `touch`: erst danach zeigte `git diff-files` den echten Unterschied.
+- **Auch `git ls-files --eol` ist von diesem Effekt betroffen** und bleibt nach
+  vollständiger Bereinigung unzuverlässig — nicht als alleinige Diagnosequelle
+  vertrauen.
+- **Funktionierende Fix-Sequenz** (ein einfaches `git checkout -- .` reicht **nicht**,
+  weil `checkout` denselben Kurzschluss nimmt): Datei **löschen** (kein Stat mehr, der
+  getrickst werden könnte) → `git checkout-index -a -f` (Neuschreiben aus Index
+  erzwingen) → `git update-index --refresh` (meldet "needs update", ändert nichts) →
+  **`git add -u`** (schreibt Stat-Cache neu fest, kein neuer Blob bei identischem
+  Inhalt). Vor dem destruktiven Löschschritt jede betroffene Datei einzeln gegen ihren
+  `HEAD`-Blob geprüft (`\r` entfernt, dann Textvergleich) — 0 Inhaltsunterschiede über
+  den Zeilenumbruch hinaus, risikofrei.
+- Umbrella: `git add --renormalize .` (nutzt das bereits committete `.gitattributes`)
+  fand eine Datei mit echtem CRLF-**Blob** (nicht nur Arbeitsverzeichnis-Rauschen):
+  `docs/BRIEF.md`, aus der Zeit vor der `.gitattributes`-Einführung — committed
+  (`d09f67d`).
+- Nebenfund: SourceTree lief parallel zu Sessionbeginn und hatte gerade gefetcht;
+  zusätzlich lagen verwaiste 0-Byte-`index.lock`-Dateien in beiden Submodul-Gitdirs
+  (9h alt, kein haltender Prozess). Nutzer hat SourceTree geschlossen und die
+  Lock-Entfernung autorisiert, bevor weitergearbeitet wurde — Lehre: vor
+  Submodul-Git-Operationen auf einer Multi-Client-Maschine kurz prüfen, ob ein
+  GUI-Git-Client offen ist.
+
+### §56.2 MSVC-Build-Fix: `min`/`max`-Makro-Kollision in `shim_clipboard_get_image_argb`
+
+Die auf Linux (§55, §2.7) neu geschriebene Bild-Zwischenablage-Funktion nutzte
+`std::min`/`std::max` ohne schützende Klammern. Auf Windows kollidiert das mit den
+`min`/`max`-Makros aus `<windows.h>` (via Qt-Header transitiv eingebunden): MSVC C2589,
+`std::min(...)` wird zu `std::(...)` makro-expandiert. `shim.cpp` hat an anderer Stelle
+(Zeile ~1253) bereits die Hauskonvention dafür — `(std::max)(...)`, die zusätzlichen
+Klammern unterdrücken die Makro-Expansion. Fix: dieselbe Konvention auf die zwei neuen
+Stellen angewendet (Commit `2e91ee3`). **Lehre:** ein auf Linux/macOS (kein
+`<windows.h>`) geschriebener Shim-Fix kann auf Windows unsichtbar brechen — dieser
+Klassenfehler betrifft potenziell jeden künftigen `std::min`/`std::max`-Aufruf in
+`shim.cpp`, nicht nur diese eine Stelle.
+
+### §56.3 Neun von zehn Fixes vollständig validiert, ein Klipper-Tie-Breaker
+
+Suite A (15 Proben inkl. Suite-B-Feature-Regressionschecks) komplett PASS gegen die
+`docs/2026-09-19_report-win.md`-Baseline, keine reale Regression. 2.1 (Control-Font):
+Face jetzt korrekt "Segoe UI" (vorher hartcodiert "Arial"), Größe konsistent (9pt = 12px
+bei 96 DPI — **kein Einheitenfehler**, nur andere Einheit als win32s pixelbasierte
+Angabe), keine Button-Größen-Regression. 2.2a/2.3/2.4/2.6/2.8 alle PASS ohne
+Windows-Überraschung. **2.7 (Bild-Zwischenablage) ist der informativste Einzelbefund
+der ganzen Block-C-Serie:** Cross-Toolkit-Test (Qt-Schreiber → nativer win32-Leser)
+läuft auf Windows **pixelgenau durch** (max. Differenz 0 über 1600 Bytes) — derselbe
+Test war auf Linux 3× reproduzierbar an KDE Klipper gescheitert. Windows hat kein
+Klipper-Äquivalent, das stützt die Klipper-Hypothese deutlich (Shim-Code selbst
+verhält sich auf beiden Plattformen identisch korrekt). macOS wäre der Tie-Breaker:
+sauber wie Windows würde die Hypothese stark erhärten, ein Scheitern würde sie
+widerlegen. 2.10 (`collecting-blit`): kritischer Gate-Test (startet DrRacket unter
+`PLT_QT=1` überhaupt noch?) **PASS**, verifiziert über Prozess-/Fenstertitel-Prüfung —
+erwarteter stiller No-op (kein XCB auf Windows), kein Loch in der `ffi-lib`/Gating-Logik
+gefunden. Optionaler GC-Stresstest in der laufenden GUI nicht abgeschlossen (ehrlich als
+offen markiert, s. §56.4).
+
+### §56.4 Akzeptanztest `test-dock-size` auf Windows nicht abgeschlossen — Automatisierungsblocker, kein Produktbefund
+
+Drei unabhängige Techniken (Bildschirmkoordinaten-Klick, Qt-Menü-Mnemonics über
+Tastatur, pixel-verifizierter Klick) scheiterten reproduzierbar daran, den
+Run-Toolbar-Knopf in echtem DrRacket zu treffen — Klicks landeten stattdessen im
+Editor-Textbereich, obwohl `GetCursorPos` die Zielkoordinate exakt bestätigte. Suite A
+hatte zuvor mehrere erfolgreiche Bildschirmkoordinaten-Klicks gegen **andere**
+Probe-Fenster in derselben Session — Klick-Automatisierung ist auf diesem Desktop
+grundsätzlich funktionsfähig, nur hier wiederholt fehlgeschlagen. Root-Cause-Hypothese
+(Fensterüberlappung durch parallele Fremdnutzung des RDP-Desktops: Total Commander,
+Firefox, mehrere Einstellungs-Fenster gleichzeitig offen) wurde geprüft und **verworfen**
+— Minimieren des Terminalfensters behob das Vordergrundproblem sichtbar, aber nicht das
+eigentliche Klick-Ziel-Problem. Tiefere Ursache (evtl. DPI-/Skalierungs-bedingte
+Koordinatensystem-Diskrepanz zwischen `SetCursorPos` und dem tatsächlichen
+Klick-Ziel-Mapping in diesem einen Qt-Fenster) **nicht isoliert**, Regel-4-Budget
+(zwei Hypothesen-Zyklen) ausgeschöpft. Nebenbefund: Qt-eigene Menü-Mnemonics über
+synthetische `SendKeys`-Tastatureingaben kamen nicht zuverlässig an, während
+OS-Akzeleratoren (Alt+F4) zuverlässig funktionierten — möglicher Hinweis auf eine
+Tastatur-Zugänglichkeitslücke im Qt-Backend, hier nicht weiter untersucht, außerhalb
+des Sessionumfangs. **Empfehlung für eine Folge-Session:** Akzeptanztest unter direkter
+menschlicher Beobachtung oder auf einem dedizierten (nicht durch Fremdnutzung
+geteilten) RDP-Desktop wiederholen, bevor erneut automatisiert versucht wird. Kein
+racket-qt-Produktbefund — Automatisierungsblocker dieser einen Session.
+
+### §56.5 `platform.rkt`-Dateikopf-Korrektur bereits durch §55.3 (2.9) erledigt
+
+Kein separater Windows-Fix nötig — der Aufräum-Commit aus §55.3 (`make-stub-class`
+entfernt, Dateikopf korrigiert) kam mit dem Submodul-Fast-Forward automatisch mit.

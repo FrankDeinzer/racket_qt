@@ -5,6 +5,43 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-22 (Windows) — Block C: gebündelter Rebuild+Validierungsdurchlauf, ein MSVC-Fix, Akzeptanztest offen
+
+**Kontext:** Fortsetzung von Session "2026-09-22 (Linux)" (zehn Block-C-Fixes,
+Vertrags-Audit). Diese Session: gebündelter Windows-Durchlauf (Modell aus
+`docs/2026-09-13_prompt.md`) — Shim-Rebuild gegen die elf neuen Exporte, Validierung
+der zehn Fixes, kein neues Feature-Audit.
+
+- **Phase 0 Hygiene:** CRLF-Kontamination war entgegen der ersten (fehlerhaften)
+  Messung real vorhanden (797/115 Dateien in `gui`/`draw`, exakt wie vom Prompt
+  vorhergesagt) — maskiert durch einen Git-„racy stat cache"-Effekt, der `git
+  status`/`diff`/sogar `checkout -- .` gleichermaßen täuschte. Robuste Fix-Sequenz
+  gefunden (Datei löschen → `checkout-index -a -f` → `update-index --refresh` →
+  `add -u`). `docs/BRIEF.md` hatte einen echten CRLF-Blob aus der Zeit vor
+  `.gitattributes` (committed, `d09f67d`). Details: `docs/HACKING.md` §56.1.
+- **Sync:** gui-Submodul lokal per Fast-Forward `278ef9c1`→`6bae83df` (11 Commits,
+  rein lokal, bereits vorher auf `origin` gepusht laut Linux-Session).
+- **Ein echter Windows-Build-Fix nötig:** MSVC `min`/`max`-Makro-Kollision in
+  `shim_clipboard_get_image_argb` (auf Linux geschrieben, dort unsichtbar) — Fix nach
+  bestehender Hauskonvention, Commit `2e91ee3`. Alle 11 neuen Exporte + die
+  Arity-Änderung per `dumpbin /exports` verifiziert. Details: `docs/HACKING.md` §56.2.
+- **Suite A (15 Proben) komplett PASS**, keine Regression gegen
+  `docs/2026-09-19_report-win.md`-Baseline.
+- **Neun von zehn Fixes vollständig validiert.** Highlight: Bild-Zwischenablage
+  Cross-Toolkit-Test (Qt-Schreiber → nativer win32-Leser) läuft auf Windows
+  **pixelgenau durch** — derselbe Test war auf Linux 3× an vermuteter KDE-Klipper-
+  Interferenz gescheitert; Windows stützt damit die Klipper-Hypothese deutlich.
+  `collecting-blit`-Gate (startet DrRacket unter `PLT_QT=1` überhaupt?) PASS. Details:
+  `docs/HACKING.md` §56.3.
+- **Akzeptanztest `test-dock-size` (n=3) nicht abgeschlossen** — reiner
+  Automatisierungsblocker (drei unabhängige Klick-Techniken trafen den Run-Knopf in
+  echtem DrRacket wiederholt nicht, RCA nicht isoliert, kein Produktbefund).
+  Empfehlung: dediziertes/unbeobachtetes Desktop für einen Nachtest. Details:
+  `docs/HACKING.md` §56.4.
+- Details: `docs/2026-09-22_report-win.md` (vollständiger Bericht).
+
+---
+
 ## Session 2026-09-22 (Linux) — Block C: Vertragsfläche des Qt-Backends fertiggestellt, zehn Fixes, Gate PASS
 
 **Kontext:** `docs/2026-09-22_prompt.md` — systematisches Vertrags-Audit (Fortsetzung
