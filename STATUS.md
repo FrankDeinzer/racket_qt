@@ -5,6 +5,51 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-22 (Linux) — Block C: Vertragsfläche des Qt-Backends fertiggestellt, zehn Fixes, Gate PASS
+
+**Kontext:** `docs/2026-09-22_prompt.md` — systematisches Vertrags-Audit (Fortsetzung
+§26/§30/§36) über die verbleibenden Plattformfunktionen, die unter Qt feste Werte/No-ops
+lieferten, während gtk **und** win32 sie echt implementieren.
+
+- **Phase 0 Hygiene:** Linux war von der auf Windows gemessenen CRLF-Verschmutzung nicht
+  betroffen (alle drei Repos clean). `.gitattributes` im Umbrella als Prävention gesetzt.
+- **Phase 1 Inventar verifiziert, nicht blind aus dem Prompt übernommen:** von elf
+  Prompt-Kandidaten waren **drei kein echter Befund** (`hide-cursor`,
+  `is-color-display?`/`get-display-depth` — alle drei nativen Backends hartcodieren
+  identisch; `enable-top` — bereits echt implementiert, Prompt verwechselte einen
+  irrelevanten Stub-Fallback mit der tatsächlich benutzten Override). **Ein neuer,
+  nicht im Prompt enthaltener Bug gefunden:** `find-graphical-system-path` maskierte
+  `mred.rkt`s `.gracketrc`-Fallback (lud die falsche Startup-Datei). Details: `docs/
+  HACKING.md` §55.1/§55.2.
+- **Zehn Fixes, alle Linux-only (Cross-Platform-Modell seit §30):** Control-Font-Metrik
+  (höchste Wirkung — Basis jedes Widget-Layouts), `find-graphical-system-path`, `bell`,
+  `get-double-click-time`, `flush-display` (Regel-1-Fall, sorgfältig geprüft:
+  `shim_pump(0)`, kein neuer Nested Loop), `has-x-selection?` + X11-Selection-Mode-
+  Threading im Clipboard-Driver, Bild-Zwischenablage, `location->window`, ein
+  Aufräum-Commit, und `register-/unregister-collecting-blit` (DrRacket-GC-Indikator —
+  komplexeste Session-Aufgabe: Port von gtks rohem Xlib-GC-Callback-Protokoll auf
+  Qt6.11s `QNativeInterface::QX11Application`, GC-Sicherheit live per `xwininfo`-Polling
+  während echter Hintergrund-GCs verifiziert, nicht nur angenommen). Details je Fix:
+  `docs/2026-09-22_report-linux.md` §2.1–§2.10, `docs/HACKING.md` §55.3–§55.5.
+- **Nebenfund, bewusst nicht gefixt:** `wx/common/clipboard.rkt` hat einen
+  Dead-Code-`if`-Bug (prüft den rohen Prozedurwert `has-x-selection?` statt
+  `(has-x-selection?)`, immer truthy) — betrifft alle vier Backends identisch, ist
+  Shared Code, Nutzerentscheidung offen (escalieren vs. Backlog). `docs/HACKING.md` §55.6.
+- **Phase 3 Gate: PASS.** Suite A (12 Probes) komplett PASS, alle Zahlenabweichungen
+  durch den Font-Fix erklärt (meist sogar identisch zur 2026-09-19-Baseline). Drei neue
+  Suite-C-Integrationschecks (Multi-Frame-Lifecycle, `collecting-blit` kombiniert mit
+  Mehrfenster-Zyklus, kombinierter Smoke-Sweep) alle PASS, keine X-Fehler.
+  Akzeptanztest `test-dock-size` n=3, 0/3 Crashes.
+- **Zehn Commits im gui-Submodul (`278ef9c1`→`8266b89a`), sechs im Umbrella
+  (`qt-shim/src/shim.cpp` + `.gitattributes`) — alle nur lokal, nicht gepusht, Submodul-
+  Zeiger im Umbrella bewusst nicht nachgezogen (Regel 7/8).** Push-Autorisierung + die
+  Shared-Code-Bug-Eskalationsentscheidung stehen als Nutzerfrage am Sessionende aus.
+- **"Später zu validieren"-Liste** (Windows/macOS, getrennt nach Shim-Rebuild-nötig vs.
+  reiner Racket-Code) in `docs/2026-09-22_report-linux.md` angelegt — sieben Fixes
+  brauchen einen Shim-Rebuild (neuer Build-Banner in `CLAUDE.md`), drei nicht.
+- Details: `docs/2026-09-22_report-linux.md` (vollständiger Bericht), `docs/HACKING.md`
+  §55.
+
 ## Session 2026-09-19 (2, Windows) — gebündelter Cross-Platform-Durchlauf: Zombie-Befund verschwunden, §35 erstmals validiert
 
 **Kontext:** Fortsetzung des Nutzerauftrags "Windows-Nachtests" — die "später zu

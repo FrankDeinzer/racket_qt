@@ -6693,3 +6693,144 @@ während des Laufs, zählt. Ein per Snapshot **nach** Ablauf ausgewertetes
 Log (wie in §54.3 fälschlich als Bestätigung gewertet) ist **keine**
 Live-Beobachtung und beweist nichts über das, was während der Ausführung
 sichtbar war.
+
+## §55 — Linux: Vertragsfläche des Qt-Backends fertiggestellt — Block C, zehn Fixes (2026-09-22)
+
+**Kontext:** `docs/2026-09-22_prompt.md`, voller Bericht `docs/2026-09-22_report-linux.md`.
+Fortsetzung der systematischen Vertrags-Audit-Methodik aus §26 (Vergleichsmethodik gegen
+die drei nativen Backends) und §30 (erster Audit-Fix-Zyklus, Cluster 1: `is-shown?` +
+Enable-Kaskade) — diese Runde schließt den Rest der ursprünglich elf identifizierten
+Plattformfunktionen plus drei weitere Lücken aus §36s Bestandsaufnahme.
+
+### §55.1 Methodik-Korrektur: drei der elf Prompt-Kandidaten waren kein Befund
+
+Der Prompt lieferte eine vorgefertigte Elf-Punkte-Tabelle als „Startpunkt, kein Zaun".
+Beim Nachverifizieren gegen `wx/gtk/`/`wx/win32/` (nicht aus dem Prompt übernommen,
+selbst gelesen) stellten sich **drei Einträge als falsch** heraus — dieselbe §36.1-Lehre
+wie beim Clipboard-Stub: nie den Vertrag als gegeben annehmen, immer gegen den echten
+Code prüfen.
+
+- **`hide-cursor`**: alle drei nativen Backends sind `(void)`-No-ops (`gtk/procs.rkt:146`,
+  `win32/procs.rkt:94`) — Qt war schon korrekt, kein Gap.
+- **`is-color-display?`/`get-display-depth`**: alle drei Backends hartcodieren identisch
+  `#t`/`32` (`gtk/procs.rkt:141/148`, `win32/procs.rkt:96/98`) — ebenfalls kein Gap.
+- **`enable-top`**: war **bereits echt implementiert** — die reale `menu-bar%`-Klasse
+  (`wx/qt/menu-bar.rkt`) überschreibt `enable-top` längst mit `shim_menubar_enable_at`
+  (ruft `QAction::setEnabled`). Der Prompt hatte den irrelevanten `(void)`-Fallback in
+  `platform.rkt`s `make-stub-class` (das `menu-bar%` nie erbt) mit der tatsächlich
+  benutzten Override verwechselt. Per Live-Probe verifiziert (`(send top-level-menu
+  enable #f)`, kein Crash, ruft nachweislich den Shim auf).
+- Zusätzlich war `get-double-click-time` nur zur Hälfte ein Positivbeispiel — win32
+  hardcodet ebenfalls `500`, nur gtk berechnet hier live.
+
+Vollständige Inventar-Tabelle mit allen Konsumenten-Fundstellen: `docs/2026-09-22_report-linux.md`
+Phase 1.
+
+### §55.2 Neuer Fund, nicht im Prompt: `find-graphical-system-path` maskierte `mred.rkt`s `.gracketrc`-Fallback
+
+`mred/private/mred.rkt:170-179` wrapt den Plattform-Aufruf mit einem eigenen Fallback für
+`'init-file`, der nur greift, wenn `wx:find-graphical-system-path` `#f` liefert. Qts alter
+`'init-file`-Fall lieferte `(find-system-path 'init-file)` — Rackets **eigene** Init-Datei
+(`~/.racketrc`), ein Wahrheitswert, der den `or`-basierten Fallback komplett maskierte.
+DrRacket lud unter diesem Backend also die falsche Startup-Datei. Fix: `'init-file`-Fall
+entfernt (fällt auf `#f`, wie win32), `'x-display` neu ergänzt (`getenv "DISPLAY"`, nur
+`'unix`, analog zu gtks echtem Fall). Verifiziert: liefert jetzt identisch zu nativem gtk
+`~/.config/racket/.gracketrc`.
+
+### §55.3 Zehn Fixes, alle Linux-only diese Session (gui-Submodul `278ef9c1` → `8266b89a`)
+
+| # | Fix | Qt-Entsprechung | Shim-ABI? | Commit (gui / Umbrella) |
+|---|---|---|---|---|
+| 2.1 | `get-control-font-face`/`-size`/`-size-in-pixels?` | `QApplication::font()` via `QFontInfo`, Einheit disambiguiert (`pointSize()`/`pixelSize()`, `-1`-Fallstrick) | ja | `7925ce72` / `7148ed9` |
+| 2.2a | `find-graphical-system-path` | s. §55.2 | nein | `1ad739ef` |
+| 2.3 | `bell` | `QApplication::beep()` | ja | `d2dbbda3` / `6544607` |
+| 2.4 | `get-double-click-time` | `QApplication::doubleClickInterval()` | ja | `a3c27b2f` / `0c83769` |
+| 2.5 | `flush-display` | `(atomically (shim_pump 0))` — Regel-1-Fall, s. §55.4 | nein (nutzt vorhandenes `shim_pump`) | `27ea301c` |
+| 2.6 | `has-x-selection?` + Selection-Mode-Threading | `QClipboard::supportsSelection()`; `clipboard-driver%` routet `x-selection?` jetzt auf `QClipboard::Selection` statt immer `Clipboard` | ja (Arity-Änderung an 3 bestehenden Exporten + 1 neuer) | `a5f67f6a` / `0600ad2` |
+| 2.7 | `get-bitmap-data`/`set-bitmap-data` (Bild-Zwischenablage) | `QClipboard::setImage`/`image()`, ARGB-Konvertierung wie `shim_canvas_blit_argb` | ja (4 neue Exporte) | `2879d143` / `c9ef315` |
+| 2.8 | `location->window` | kein natives API — `all-frames`-Weak-Hash-Registry wie gtk, Bounding-Box-Scan | nein | `86c932fc` |
+| 2.9 | Aufräumen: `make-stub-class` entfernt, Dateikopf korrigiert | — | nein | `d4228b91` |
+| 2.10 | `register-`/`unregister-collecting-blit` (DrRacket-GC-Indikator) | s. §55.5 | ja (2 neue Exporte) | `8266b89a` / `ae1823a` |
+
+Alle Commits nur lokal, **nicht gepusht**, Umbrella-Submodul-Zeiger bewusst nicht
+nachgezogen (Regel 7/8 — Push-Autorisierung ist eine eigene Nutzerentscheidung am
+Sessionende).
+
+### §55.4 `flush-display` — Regel-1-Analyse (der als riskant markierte Punkt)
+
+gtks `flush-display` ist `pre-event-sync` (gtk-eigener, Qt-fremder Event-Pump-Mechanismus,
+`common/queue.rkt:131`) **plus** `gdk_display_flush` (reiner X11-Protokoll-Flush, ohne
+Dispatch). Qt hat in diesem Shim keine „nur Zeichnen rausschieben"-Funktion — die
+architektonisch passende Entsprechung ist `shim_pump(0)`, **nicht** ein direkter
+`QApplication::processEvents()`-Aufruf (das wäre die von Regel 1 verbotene geschachtelte
+Schleife). Entscheidend: `(atomically (shim_pump 0))` ist exakt derselbe Aufruf, der
+bereits an drei Stellen etabliert ist (`queue.rkt`s `set-queue-wakeup!`/
+`qt-start-event-pump`, `filedialog.rkt`, §39) — kein neuer, paralleler Loop.
+Wiedereintritts-Sicherheit: C→Racket-Callbacks posten nach Regel 2 nur Events und kehren
+sofort zurück, laufen also nie synchron im C-Stack eines `shim_pump`-Aufrufs; Rackets
+Green Threads sind kooperativ auf einem OS-Thread geplant, zusätzlich durch `atomically`
+serialisiert. **Dokumentierter Caveat:** anders als `gdk_display_flush` dispatcht
+`shim_pump(0)` auch anstehende Input-Events, nicht nur einen reinen Protokoll-Flush — bei
+dem schmalen bekannten Konsumenten (`framework/splash.rkt`s Splash-Animation) ein
+akzeptabler Unterschied.
+
+### §55.5 `collecting-blit` (DrRacket-GC-Indikator) — der komplexeste Fix dieser Session
+
+Konsument: `framework/private/frame.rkt:823/845/916`s `gc-canvas`, das blinkende Icon in
+der Status-Zeile jedes DrRacket-Fensters — entgegen der Prompt-Vermutung (die
+vorschlug, dies bei fehlendem Konsumenten zu parken) ein sichtbares, aktives Feature.
+
+gtks Implementierung (`wx/gtk/gcwin.rkt`) nutzt `unsafe-add-collect-callbacks` — einen
+Racket-Laufzeit-Hook, der während einer **laufenden GC-Pause** feuert, wenn praktisch kein
+normaler Racket-Code sicher laufen darf. Die Callbacks sind keine Racket-Prozeduren,
+sondern **vor-marshalte Vektoren roher C-Funktionszeiger-Aufrufe** (Opcode-Vektor-
+Protokoll), vom Racket-CS-Runtime direkt interpretiert. gtk umgeht dafür GTK selbst
+komplett und macht rohe Xlib-Aufrufe (`XCreateSimpleWindow`, `XSetWindowBackgroundPixmap`,
+`XMapRaised`/`XUnmapWindow`) plus einen rohen Cairo-Xlib-Surface-Blit.
+
+**Port statt Neuentwurf:** das Opcode-Vektor-Protokoll, die Cairo-Pixmap-Erzeugung
+(toolkit-unabhängig, nutzt nur `racket/draw`s Cairo-Handle) und die rohen Xlib-Aufrufe
+sind zwischen gtk und Qt **identisch** — nur die Beschaffung von X11-`Display*` und
+Fenster-XID unterscheidet sich. Qt6.11 stellt das über
+`QNativeInterface::QX11Application::display()` (neuer Shim-Export
+`shim_get_x11_display`, `#include <QtGui/qguiapplication_platform.h>`, verifiziert gegen
+die tatsächlich installierten Header dieser Maschine) und `QWidget::winId()`
+(`shim_widget_get_x11_window`) bereit — beide `nullptr`/no-op-sicher unter Wayland statt
+zu crashen. Neue Datei `wx/qt/gcwin.rkt` (X11-only, kein Wayland-Zweig — diese Maschine
+läuft X11).
+
+**Zwei echte Stolperfallen, vor dem Ship gefunden und gefixt:**
+1. Fenster-Tiefe/Visual muss per `XGetWindowAttributes` vom tatsächlichen Eltern-Fenster
+   gelesen werden, nicht `XDefaultVisual`/`XDefaultDepth` — ein Mismatch hätte einen
+   `BadMatch`-X-Error erzeugen können, potenziell mitten in der GC-Pause.
+2. `gcwin.rkt` lädt auf allen drei Betriebssystemen (ein gemeinsames Qt-Backend) — jede
+   libX11-Bindung degradiert über `ffi-lib #:fail`/`make-not-available` statt zu werfen;
+   der X11-Display wird lazy (nicht beim Modul-Load) geholt, da `qt-init!` zu dem
+   Zeitpunkt noch nicht gelaufen ist.
+
+**GC-Sicherheit verifiziert, nicht nur angenommen:** 20 erzwungene GCs ohne Crash; das
+rohe X11-Kindfenster per `xwininfo` bei korrekter Geometrie bestätigt, nach `unregister`
+verschwunden. Echtes DrRacket unter `PLT_QT=1`: 200×`collect-garbage` + 2-Mio-Element-Liste
+in der Interactions-Pane ohne Hang/Crash; das X11-Kindfenster wurde per `xwininfo`-Polling
+**live zwischen `IsViewable`/`IsUnMapped` umschaltend beobachtet** — allein durch
+gewöhnliche Hintergrund-Minor-GCs im Leerlauf, ganz ohne die erzwungene
+Allokationsschleife. Kein `X Error of failed request` in der gesamten Session-Log-Ausgabe.
+DrRacket ohne `PLT_QT` startet weiterhin nativ.
+
+### §55.6 Nebenfund, bewusst nicht gefixt: `wx/common/clipboard.rkt`s Dead-Code-`if`
+
+Bei §2.6 (`has-x-selection?`) aufgefallen: `wx/common/clipboard.rkt:86-90` prüft den
+**rohen Prozedurwert** `has-x-selection?` statt `(has-x-selection?)` — jede Prozedur ist
+truthy, das `if` nimmt also immer den True-Zweig, unabhängig vom tatsächlichen
+Rückgabewert. Empirisch verifiziert (`(eq? the-clipboard the-x-selection-clipboard)`
+liefert `#f` sowohl unter nativem gtk als auch dem alten Qt-Stand, obwohl Qts
+`has-x-selection?` damals `#f` zurückgab). Betrifft **alle vier Backends identisch** —
+kein Qt-spezifisches Problem, und `wx/common/` ist Shared Code (CLAUDE.md: Fix dort
+braucht Subagent + `AskUserQuestion`, keine stille Reparatur in dieser Session). Dokumentiert,
+nicht gefixt — Nutzerentscheidung offen (escalieren jetzt vs. Backlog), siehe
+`docs/2026-09-22_report-linux.md`.
+
+### §55.7 Verifikations-Nebenfund: `is-color-display?`/`get-display-depth`/`hide-cursor` sind kein Qt-Sonderfall
+
+S. §55.1 — für künftige Sessions als geschlossen markieren, nicht erneut aufgreifen, außer
+ein neuer Konsument mit anderer Erwartung wird gefunden.
