@@ -1984,4 +1984,14 @@ void shim_bell(void)
     QApplication::beep();
 }
 
+// ---- double-click time ---------------------------------------------------
+// gtk reads the gtk-double-click-time GSetting; win32 hardcodes 500ms (no
+// live query). Qt's equivalent is the static QApplication::doubleClickInterval()
+// (ms), which reflects the platform theme setting.
+
+int shim_double_click_time(void)
+{
+    return QApplication::doubleClickInterval();
+}
+
 } // extern "C"
