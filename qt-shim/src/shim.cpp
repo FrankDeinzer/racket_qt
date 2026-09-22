@@ -40,6 +40,8 @@
 #include <QEnterEvent>
 #include <QClipboard>
 #include <QMimeData>
+#include <QFont>
+#include <QFontInfo>
 #include <QCursor>
 #include <QPixmap>
 #include <QString>
@@ -1939,6 +1941,38 @@ int shim_clipboard_has_text(void)
 {
     const QMimeData* md = QApplication::clipboard()->mimeData(QClipboard::Clipboard);
     return (md && md->hasText()) ? 1 : 0;
+}
+
+// ---- control font -----------------------------------------------------
+// QApplication::font() is Qt's default/control font (what freshly-created
+// widgets inherit). QFontInfo resolves it against the actual font database,
+// so the reported family is the real matched font (e.g. "Noto Sans" instead
+// of a generic alias) -- mirrors gtk's approach of reading GtkSettings'
+// already-resolved font name (docs/HACKING.md, Block C prompt 2026-09-22).
+
+const char* shim_control_font_face(void)
+{
+    static QByteArray buf;
+    QFontInfo info(QApplication::font());
+    buf = info.family().toUtf8();
+    return buf.constData();
+}
+
+// QFont can be set in either unit (setPointSize vs setPixelSize); when set
+// in pixels, pointSize() returns -1 (and vice versa for pixelSize()) -- the
+// unit actually in use must be read back, not assumed, or sizes come out
+// off by the DPI ratio. *is_pixels reports which one shim_control_font_size
+// returned.
+int shim_control_font_size(int* is_pixels)
+{
+    QFontInfo info(QApplication::font());
+    int pt = info.pointSize();
+    if (pt > 0) {
+        *is_pixels = 0;
+        return pt;
+    }
+    *is_pixels = 1;
+    return info.pixelSize();
 }
 
 } // extern "C"
