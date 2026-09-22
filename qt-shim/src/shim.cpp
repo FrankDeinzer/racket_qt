@@ -1965,6 +1965,99 @@ int shim_clipboard_supports_selection(void)
     return QApplication::clipboard()->supportsSelection() ? 1 : 0;
 }
 
+// ---- clipboard: bitmap (inventory item #13) --------------------------
+// Always QClipboard::Clipboard -- unlike the text functions above, the
+// bitmap clipboard has no Selection-mode consumer in wx/common/clipboard.rkt
+// (only the-clipboard's get-clipboard-bitmap/set-clipboard-bitmap call these,
+// never the-x-selection), so no mode parameter here.
+//
+// Byte convention: tightly packed (no stride padding), (A,R,G,B) per pixel --
+// same as shim_cursor_create_from_argb/shim_canvas_blit_argb above, and the
+// same convention racket/draw's bitmap%get-argb-pixels/set-argb-pixels use.
+//
+// shim_clipboard_set_image takes an already-premultiplied ARGB buffer (the
+// Racket side calls get-argb-pixels with pre-mult?=#t, exactly like
+// wx/qt/canvas.rkt's existing blit_argb caller) and unpacks it into a
+// QImage::Format_ARGB32_Premultiplied the same way shim_cursor_create_from_argb
+// does.
+void shim_clipboard_set_image(const uint8_t* src, int w, int h)
+{
+    QImage img(w, h, QImage::Format_ARGB32_Premultiplied);
+    for (int y = 0; y < h; y++) {
+        auto*          dst_row = reinterpret_cast<uint32_t*>(img.scanLine(y));
+        const uint8_t* src_row = src + (std::ptrdiff_t)y * w * 4;
+        for (int x = 0; x < w; x++) {
+            uint8_t a = src_row[x * 4 + 0];
+            uint8_t r = src_row[x * 4 + 1];
+            uint8_t g = src_row[x * 4 + 2];
+            uint8_t b = src_row[x * 4 + 3];
+            dst_row[x] = (uint32_t(a) << 24)
+                       | (uint32_t(r) << 16)
+                       | (uint32_t(g) <<  8)
+                       |  uint32_t(b);
+        }
+    }
+    QApplication::clipboard()->setImage(img, QClipboard::Clipboard);
+}
+
+// hasImage() is a MIME-type check only, unlike image() which would force a
+// (possibly expensive) format conversion just to answer a presence question.
+int shim_clipboard_has_image(void)
+{
+    const QMimeData* md = QApplication::clipboard()->mimeData(QClipboard::Clipboard);
+    return (md && md->hasImage()) ? 1 : 0;
+}
+
+// Two-step size-then-fill pattern (mirrors shim_group_panel_get_content_margins's
+// multi-out-param style): lets the Racket side allocate the right-sized
+// buffer before shim_clipboard_get_image_argb fills it. Returns 0 if the
+// clipboard has no image (out params left untouched).
+int shim_clipboard_image_size(int* out_w, int* out_h)
+{
+    if (!shim_clipboard_has_image()) return 0;
+    QImage img = QApplication::clipboard()->image(QClipboard::Clipboard);
+    if (img.isNull()) return 0;
+    *out_w = img.width();
+    *out_h = img.height();
+    return 1;
+}
+
+// Converts to Format_ARGB32 (Qt's *non*-premultiplied 0xAARRGGBB layout --
+// distinct from Format_ARGB32_Premultiplied used on the write side above) so
+// Qt itself does the un-premultiplication, rather than this shim
+// reimplementing that math by hand. Racket's set-argb-pixels is then called
+// with its default pre-mult?=#f, matching this straight-alpha output.
+//
+// dst must already be sized (w*h*4 bytes) per a prior shim_clipboard_image_size
+// call, and w/h are that same call's result -- the clipboard is a live
+// external resource, so its content can change between the two calls (same
+// caveat as native-text's read-back-live comment above); w/h let this
+// function clamp its copy to the buffer Racket actually allocated instead of
+// writing conv.width()*conv.height()*4 bytes of a possibly-larger new image
+// into it (heap overflow otherwise). Any pixels beyond a shrunk clipboard
+// image are left as zero (transparent black), matching bitmap%'s own
+// out-of-range fill convention in do-get-argb-pixels.
+void shim_clipboard_get_image_argb(uint8_t* dst, int w, int h)
+{
+    memset(dst, 0, (size_t)w * h * 4);
+    QImage img = QApplication::clipboard()->image(QClipboard::Clipboard);
+    if (img.isNull()) return;
+    QImage conv = img.convertToFormat(QImage::Format_ARGB32);
+    int copy_w = std::min(w, conv.width());
+    int copy_h = std::min(h, conv.height());
+    for (int y = 0; y < copy_h; y++) {
+        const auto* src_row = reinterpret_cast<const uint32_t*>(conv.constScanLine(y));
+        uint8_t*    dst_row = dst + (std::ptrdiff_t)y * w * 4;
+        for (int x = 0; x < copy_w; x++) {
+            uint32_t px = src_row[x];
+            dst_row[x * 4 + 0] = (px >> 24) & 0xFF; // A
+            dst_row[x * 4 + 1] = (px >> 16) & 0xFF; // R
+            dst_row[x * 4 + 2] = (px >>  8) & 0xFF; // G
+            dst_row[x * 4 + 3] =  px        & 0xFF; // B
+        }
+    }
+}
+
 // ---- control font -----------------------------------------------------
 // QApplication::font() is Qt's default/control font (what freshly-created
 // widgets inherit). QFontInfo resolves it against the actual font database,
