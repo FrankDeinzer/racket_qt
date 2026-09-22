@@ -1975,4 +1975,13 @@ int shim_control_font_size(int* is_pixels)
     return info.pixelSize();
 }
 
+// ---- bell ---------------------------------------------------------------
+// gtk calls gdk_display_beep(); win32 calls MessageBeep(MB_OK). Qt's portable
+// equivalent is QApplication::beep().
+
+void shim_bell(void)
+{
+    QApplication::beep();
+}
+
 } // extern "C"
