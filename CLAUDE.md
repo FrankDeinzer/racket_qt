@@ -79,8 +79,9 @@ Aufgabe:
 > neuen Shim-Exporten hier wieder einen Banner dieser Art einfügen, bis alle drei
 > Maschinen nachgebaut haben (gleiche Klasse wie §27/§52.1).
 >
-> **Neuer Shim-ABI-Stand seit 2026-09-22 (Block C, nur Linux, noch ungepusht — final,
-> alle zehn Fixes der Session eingerechnet).** Elf neue Exporte aus dem
+> **Neuer Shim-ABI-Stand seit 2026-09-22 (Block C, auf Linux gefixt und bereits nach
+> `origin/qt-backend` (Submodul) und `origin/main` (Umbrella-Zeiger) gepusht — Windows/
+> macOS aber noch nicht nachgebaut/validiert). Elf neue Exporte aus dem
 > Vertrags-Audit: `shim_control_font_face`, `shim_control_font_size`, `shim_bell`,
 > `shim_double_click_time`, `shim_clipboard_supports_selection`,
 > `shim_clipboard_set_image`, `shim_clipboard_has_image`, `shim_clipboard_image_size`,
@@ -232,6 +233,7 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 - macOS: „8 statt 9 Menüs" (leeres `Windows`-Menü unsichtbar) — ✅ 2026-09-18(7) (§51.1), Platzhalter-`QAction`, keine ABI-Änderung
 - macOS: Menüband kollabiert nicht korrekt beim Schließen des letzten Fensters — ✅ 2026-09-18(4) (§46.2/§47), reines `wx/qt`-lokal, keine ABI-Änderung
 - Linux: stdout-Rauschen beim Laden (`qt-init!`/`qt-start-event-pump` ungevoidet) — ✅ 2026-09-19 (§52.4), rein kosmetisch, keine ABI-Änderung. Validiert Windows 2026-09-19(2) (§53)
+- `wx/common/clipboard.rkt`-Dead-Code-`if`-Bug (§55.6) — ✅ 2026-09-22 (Linux), Ein-Zeilen-Fix (`(has-x-selection?)` statt `has-x-selection?`), gui-Submodul `6bae83df`. Shared Code, betrifft alle vier Backends identisch, keine ABI-Änderung (reiner Racket-Code). Smoke getestet Linux Qt + nativ (gtk), Windows/macOS noch nicht validiert.
 
 ### Reklassifiziert (kein Produktbefund)
 
@@ -246,7 +248,6 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 
 - §33.7 — einmaliger, seither in 17 Wiederholungen nicht reproduzierter Tab-2-Zeilennummern-Defekt (Linux, `editor-canvas%`), Rate ≤1-in-18, `PLT_QT_SCROLL_DEBUG=1` für künftige Diagnose vorbereitet
 - Linux: Resize/Minimieren unter KWin nicht validiert
-- **`wx/common/clipboard.rkt`-Dead-Code-`if`-Bug** (§55.6, gefunden 2026-09-22, nicht gefixt) — prüft den rohen Prozedurwert `has-x-selection?` statt `(has-x-selection?)` (immer truthy), betrifft alle vier Backends identisch. Shared Code, Nutzerentscheidung nötig (escalieren vs. Backlog) — bisher nicht getroffen.
 - Bild-Zwischenablage Cross-Toolkit (Qt→gtk) auf Linux **ungeklärt fehlgeschlagen** (§2.7/§55.3, vermutete KDE-Klipper-Interferenz, nicht bestätigt) — auf Windows/macOS erneut versuchen, dort kein Klipper im Weg.
 - `register-/unregister-collecting-blit` ist bewusst **nur für X11 implementiert** (§55.5) — Wayland/Windows/macOS bleiben ohne GC-Indikator-Sichtbarkeit (kein Regressionsschaden, aber auch kein neuer Fortschritt dort); ein echter macOS/Windows-Pfad wäre ein eigener künftiger Block.
 
