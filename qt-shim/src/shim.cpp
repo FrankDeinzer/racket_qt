@@ -2050,8 +2050,8 @@ void shim_clipboard_get_image_argb(uint8_t* dst, int w, int h)
     QImage img = QApplication::clipboard()->image(QClipboard::Clipboard);
     if (img.isNull()) return;
     QImage conv = img.convertToFormat(QImage::Format_ARGB32);
-    int copy_w = std::min(w, conv.width());
-    int copy_h = std::min(h, conv.height());
+    int copy_w = (std::min)(w, conv.width());
+    int copy_h = (std::min)(h, conv.height());
     for (int y = 0; y < copy_h; y++) {
         const auto* src_row = reinterpret_cast<const uint32_t*>(conv.constScanLine(y));
         uint8_t*    dst_row = dst + (std::ptrdiff_t)y * w * 4;
