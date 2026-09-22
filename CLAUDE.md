@@ -212,6 +212,7 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 | htdp-Lackmustest (`2htdp/image`, big-bang, `test-engine`) | ✅ trägt htdp auf allen 3 Plattformen (§23/§23.1/§23.2). `test-dock-size`-Crash war echte `wx/qt`-Lücke (hartcodiertes `is-shown? #t`), **gefixt** §30 (Linux) + validiert Windows/macOS 2026-09-17/18; `enable`-Kaskade (§26) mitvalidiert. `2htdp/image`-4-von-6-Bug war reiner Viewport-Effekt, erledigt durch §32-Resize-Fix |
 | `frame%`-Zustand (Maximize/Iconize/Fullscreen) | ✅ 2026-09-12, Windows (§27), Shim-ABI-Änderung — macOS/Linux Rebuild nötig. Nicht getestet: Zustands-Kombinationen, Fenster-Chrome |
 | Resize/Reflow-Bug (Kind-Controls folgen bei Fenster-Resize nicht) | ✅ 2026-09-14, Linux, 4. Anlauf (§21.7→§32) — Root-Cause: gtks `remember-size`-Dedup fehlte, ABI-Änderung. Validiert Windows 2026-09-17, macOS 2026-09-18 (§44.4) |
+| Linux Resize/Minimieren unter echter KWin-Window-Manager-Integration | ✅ 2026-09-22 — 3/3 PASS (Extremresizes 200×150/1000×700, `xdotool windowminimize`/`windowactivate` via `_NET_WM_STATE_HIDDEN`/`_FOCUSED`, 5×-Stresstest), keine ABI-Änderung, reiner Validierungslauf |
 | Editor-Canvas-Scrollbars (Scroll Fall 1: `canvas%`/`editor-canvas%`) | ✅ 2026-09-14, Linux (§33) — fehlender `on-size`-Aufruf war Root-Cause, nicht Scrollbar-Code; ABI-Änderung (Mausrad). Validiert Windows 2026-09-17(4) inkl. Streifenrechteck-Altbefund (§24.5/§35-Hyp.1) geschlossen, macOS 2026-09-18(2) vertikal+horizontal (§45.7/§46.1) |
 | Scroll Fall 2 (`'(auto-vscroll)`-Panels: Kind-Widgets bewegen sich) | ✅ 2026-09-14, Linux (§34) — eigenes Content-Widget, keine ABI-Änderung. Validiert Windows/macOS 2026-09-17/18(2) (§45.6), inkl. Mausrad |
 | Zwischenablage (Copy/Paste, `clipboard-driver%`) | ✅ 2026-09-16, Linux (§36) — war No-op-Stub mit falschem Methodenvertrag; Text-only, ABI-Änderung. Validiert Windows (Cross-Process OLE) + macOS (Cross-Toolkit) 2026-09-17/18(2) (§45.2). Bild-Zwischenablage bewusst außen vor |
@@ -247,7 +248,6 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 ### Offene Befunde (künftige Session nötig)
 
 - §33.7 — einmaliger, seither in 17 Wiederholungen nicht reproduzierter Tab-2-Zeilennummern-Defekt (Linux, `editor-canvas%`), Rate ≤1-in-18, `PLT_QT_SCROLL_DEBUG=1` für künftige Diagnose vorbereitet
-- Linux: Resize/Minimieren unter KWin nicht validiert
 - Bild-Zwischenablage Cross-Toolkit (Qt→gtk) auf Linux **ungeklärt fehlgeschlagen** (§2.7/§55.3, vermutete KDE-Klipper-Interferenz, nicht bestätigt) — auf Windows/macOS erneut versuchen, dort kein Klipper im Weg.
 - `register-/unregister-collecting-blit` ist bewusst **nur für X11 implementiert** (§55.5) — Wayland/Windows/macOS bleiben ohne GC-Indikator-Sichtbarkeit (kein Regressionsschaden, aber auch kein neuer Fortschritt dort); ein echter macOS/Windows-Pfad wäre ein eigener künftiger Block.
 
