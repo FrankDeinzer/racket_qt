@@ -6959,6 +6959,61 @@ racket-qt-Produktbefund — Automatisierungsblocker dieser einen Session.
 Kein separater Windows-Fix nötig — der Aufräum-Commit aus §55.3 (`make-stub-class`
 entfernt, Dateikopf korrigiert) kam mit dem Submodul-Fast-Forward automatisch mit.
 
+### §56.6 Akzeptanztest `test-dock-size` auf Windows nachgeholt — n=3, 0/3 Crash, kein Produktbefund (2026-09-23)
+
+**Umgebung diesmal fundamental anders als §56.4:** natives Windows (kein RDP-Desktop,
+keine Fremdnutzung), 3 physische Monitore. Wichtig: Monitor-DPI ist gemischt (Display 1
+= eingebautes Notebook-Display, 125 %; Display 2 = primär, 100 %; Display 3 = 100 %).
+DrRacket wurde bewusst nur auf Display 2 gehalten (Fensterrect per `GetWindowRect`
+verifiziert, vollständig innerhalb `(0,0)-(2560,1440)`), um die in §56.4 vermutete
+(nicht isolierte) DPI-/Koordinatensystem-Diskrepanz als Variable auszuschließen.
+
+**Neue Technik, löst den eigentlichen Blocker:** Statt den Run-Toolbar-Knopf per
+Mausklick zu treffen (drei Techniken dafür in §56.4 gescheitert), `F5` per
+`System.Windows.Forms.SendKeys` gesendet — **funktioniert zuverlässig**, in allen drei
+Durchläufen dieser Session. Das ist auf Windows ungetestet gewesen; die Enttäuschung in
+§56.4 betraf ausschließlich Klick-/Mnemonic-Techniken, nie den direkten Tastatur-
+Shortcut. Root Cause des ursprünglichen Klick-Problems bleibt **weiterhin nicht
+isoliert** (der Run-Knopf wurde diesmal nicht erneut per Klick versucht) — aber nicht
+mehr blockierend, da F5 ihn umgeht.
+
+**Nebenbefund 1 — Menüklicks funktionieren, Dialogfenster aktivieren sich nur nicht
+automatisch:** `File → Open...` per Klick auf die Menüleiste + den Menüpunkt hat in
+allen drei Durchläufen den Racket-eigenen `get-file`-Dialog („Select a file") korrekt
+geöffnet — er war nur **unsichtbar im Screenshot**, obwohl `EnumWindows`/
+`IsWindowVisible` ihn meldete (Fenster existierte, war aber nicht im Vordergrund/nicht
+neu gezeichnet). Erst `ShowWindow(hwnd, 9)` (`SW_RESTORE`) + `SetForegroundWindow`
+brachte ihn sichtbar nach vorne. Das erklärt vermutlich einen Teil der scheinbaren
+Klick-Fehlschläge in früheren Sessions (z. B. den ersten "Open…"-Versuch dieser
+Session, der zunächst wie ein Fehlklick aussah, tatsächlich aber den — nur unsichtbaren
+— Dialog erzeugt hatte). **Lehre für künftige GUI-Automatisierung in diesem Projekt:**
+nach jedem Klick, der einen neuen Top-Level-Dialog öffnen soll, per `EnumWindows`
+prüfen, ob das Fenster existiert, bevor ein Screenshot als "nichts passiert" gewertet
+wird — nicht nur den Screenshot als Wahrheit nehmen.
+
+**Nebenbefund 2 — kleine Klickziele bleiben unzuverlässig, auch ohne RDP/mit
+kontrolliertem 100 %-DPI:** Ein Klick auf das kleine ×-Icon zum Schließen eines Tabs
+(Tab-Leiste) verfehlte reproduzierbar sein Ziel (keine sichtbare Aktion), während
+große Ziele (Titelleiste, Menüleisten-Einträge „File", Menüpunkte wie „Open...")
+zuverlässig trafen. Das schwächt die reine DPI-Hypothese aus §56.4 (hier war DPI
+kontrolliert 100 % und dasselbe Muster trat trotzdem auf) — deutet eher auf ein
+Hit-Test-Problem bei kleinen Icon-Targets im Qt-Backend selbst oder in der
+Klick-Automatisierungstechnik, nicht auf eine globale Koordinaten-Verschiebung. Hier
+nicht weiter untersucht, kein Blocker (die Tab-Leisten-Beschriftung selbst reicht als
+Beweis, s. u.).
+
+**Ergebnis:** Sequenz „frischer Start → `F5` (Run, erzeugt absichtlich fehlschlagenden
+Test-Report-Dock) → `File → Open...` (Klick, Dialog per Force-Foreground sichtbar
+gemacht) → Pfad tippen + Enter" dreimal unabhängig (je frischer DrRacket-Prozess)
+gefahren. **3/3 crashfrei.** Zwei-Tab-Bedingung diesmal nicht über den alten
+Titel-Umschalt-Trick (§34.7) nachgewiesen, sondern direkter und eindeutiger: diese
+DrRacket-Version zeigt eine echte Tab-Leiste mit Beschriftungen (`1: htdp-tests-…` /
+`2: hello.rkt`), per Screenshot in allen drei Durchläufen einzeln belegt. Fenster blieb
+in allen drei Durchläufen `Responding: True`.
+
+**Damit ist `test-dock-size` auf Windows abgeschlossen** (Block C, letzter offener
+Punkt aus §56.3/§56.4). Kein racket-qt-Produktbefund.
+
 ## §57 — macOS: Block-C-Rebuild + Validierung, §55.6-Erstvalidierung, zwei neue Befunde (2026-09-22/25)
 
 **Kontext:** dritter und letzter Durchlauf des gebündelten Block-C-Validierungsmodells

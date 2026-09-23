@@ -411,6 +411,33 @@ AppleClang-Äquivalent zum MSVC-Fix nötig), alle 11 neuen Exporte + Arity-Ände
   CLAUDE.md-Checkpoint-Update.
 - Report: `docs/2026-09-22_report-macos.md`.
 
+## Session 2026-09-23 (Windows) — Akzeptanztest `test-dock-size` nachgeholt, n=3 PASS
+
+**Kontext:** Fortsetzung/Abschluss des einzigen offenen Punkts aus Session
+"2026-09-22 (Windows)" (`docs/HACKING.md` §56.4). Diesmal natives Windows (kein RDP),
+3 Monitore mit gemischtem DPI (Display 1 = 125 %, Display 2/3 = 100 %); DrRacket
+bewusst nur auf einem 100 %-Monitor gehalten, um die zuvor vermutete
+DPI-/Koordinaten-Diskrepanz als Variable auszuschließen.
+
+- **Neue Technik löst den Blocker:** `F5` (Run) per `SendKeys` statt Klick auf den
+  Toolbar-Knopf — funktioniert zuverlässig, in allen drei Durchläufen. War auf Windows
+  vorher nicht probiert worden (§56.4 hatte nur Klick-/Mnemonic-Techniken).
+- **Nebenbefund:** `File → Open...`-Dialoge, die durch synthetische Klicks geöffnet
+  werden, aktivieren sich nicht automatisch im Vordergrund (`ShowWindow`+
+  `SetForegroundWindow` nötig) — sehen im Screenshot aus wie ein Fehlklick, existieren
+  aber (`EnumWindows` bestätigt). Relevant für künftige GUI-Automatisierung in diesem
+  Projekt.
+- **Nebenbefund:** kleine Klickziele (Tab-×-Icon) bleiben unzuverlässig auch unter
+  kontrolliertem 100 %-DPI ohne RDP — schwächt die reine DPI-Hypothese aus §56.4,
+  deutet eher auf ein Hit-Test-Problem bei kleinen Icons. Nicht weiter untersucht, kein
+  Blocker.
+- **Ergebnis: 3/3 unabhängige Durchläufe (frischer DrRacket-Prozess je Durchlauf)
+  crashfrei.** Zwei-Tab-Bedingung direkt per sichtbarer Tab-Leisten-Beschriftung belegt
+  (`1: htdp-tests-…` / `2: hello.rkt`), nicht mehr über den alten Titel-Umschalt-Trick.
+  Fenster durchgehend `Responding: True`.
+- Details: `docs/HACKING.md` §56.6. Damit ist der letzte offene Block-C-Punkt für
+  Windows abgeschlossen.
+
 ---
 
 ## Session 2026-09-22 (Windows) — Block C: gebündelter Rebuild+Validierungsdurchlauf, ein MSVC-Fix, Akzeptanztest offen
