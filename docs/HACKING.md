@@ -7014,6 +7014,36 @@ in allen drei Durchläufen `Responding: True`.
 **Damit ist `test-dock-size` auf Windows abgeschlossen** (Block C, letzter offener
 Punkt aus §56.3/§56.4). Kein racket-qt-Produktbefund.
 
+### §56.7 §55.6-Clipboard-Fix auf Windows validiert (2026-09-23)
+
+gui-Submodul stand bereits auf `6bae83df` (Fast-Forward aus der 2026-09-22-Session,
+Umbrella-Pointer bereits vorher nachgezogen) — kein neuer Sync-Schritt nötig. Der
+Ein-Zeilen-Fix (`(if (has-x-selection?) …)` statt `(if has-x-selection? …)` in
+`gui-lib/mred/private/wx/common/clipboard.rkt`) betrifft laut Commit-Message alle
+vier Backends identisch: vor dem Fix testete der Guard das Prozedur-Objekt selbst
+(immer wahr) statt es aufzurufen, wodurch `the-x-selection` überall eine eigene,
+funktionslose zweite `clipboard%`-Instanz bekam statt korrekt auf `the-clipboard` zu
+verweisen.
+
+**Smoke-Test (racket, kein DrRacket nötig):** kleines Skript unter `PLT_QT=1`, das
+`racket/gui/base`s `the-clipboard`/`the-x-selection-clipboard` per `eq?` vergleicht.
+
+```
+the-clipboard eq? the-x-selection-clipboard: #t
+```
+
+**Erwartung bestätigt:** auf Qt/Windows liefert `has-x-selection?`
+(`mred/private/wx/qt/platform.rkt:215`) über `shim_clipboard_supports_selection`
+`#f` (kein X11 hier, sauberer No-op-Pfad, s. §2.10/§55.5-Klasse) — nach dem Fix
+aliast `the-x-selection-clipboard` deshalb korrekt `the-clipboard`, statt (wie vor
+dem Fix, auch auf Windows reproduzierbar gewesen) eine separate, nie befüllte
+Instanz zu erzeugen. Diff des Fixes selbst (`git -C third_party/gui show 6bae83df`)
+zur Gegenprobe gelesen statt den Bug live zurückgedreht — die Semantik
+„Prozedur-Objekt vs. Aufruf" ist eindeutig, ein Revert-Test hätte keine zusätzliche
+Sicherheit gebracht.
+
+Kein racket-qt-Produktbefund, reine Bestätigung. macOS weiterhin offen.
+
 ## §57 — macOS: Block-C-Rebuild + Validierung, §55.6-Erstvalidierung, zwei neue Befunde (2026-09-22/25)
 
 **Kontext:** dritter und letzter Durchlauf des gebündelten Block-C-Validierungsmodells

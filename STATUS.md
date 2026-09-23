@@ -440,6 +440,18 @@ DPI-/Koordinaten-Diskrepanz als Variable auszuschließen.
 
 ---
 
+## Session 2026-09-23 (Windows), Fortsetzung — §55.6-Clipboard-Fix validiert
+
+gui-Submodul stand bereits auf `6bae83df` (Sync aus 2026-09-22), kein Nachzieh-Schritt
+nötig. Racket-Skript unter `PLT_QT=1` bestätigt: `the-clipboard eq?
+the-x-selection-clipboard` → `#t` — `has-x-selection?` liefert auf Windows/Qt korrekt
+`#f` (`shim_clipboard_supports_selection`, kein X11), der Ein-Zeilen-Fix (Prozedur-Wert
+vs. Aufruf) verhindert die vorher auf allen vier Backends reproduzierbare phantome
+zweite `clipboard%`-Instanz. Details: `docs/HACKING.md` §56.7. Kein Produktbefund,
+macOS noch offen.
+
+---
+
 ## Session 2026-09-22 (Windows) — Block C: gebündelter Rebuild+Validierungsdurchlauf, ein MSVC-Fix, Akzeptanztest offen
 
 **Kontext:** Fortsetzung von Session "2026-09-22 (Linux)" (zehn Block-C-Fixes,
