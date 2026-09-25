@@ -7090,6 +7090,29 @@ statt spekulativ vertieft. Kein Blocker für den Akzeptanztest selbst (Crash-
 Kriterium unberührt, Tab-Zustand nach Reaktivierung über das Menü korrekt
 verifizierbar).
 
+**Einordnung, Recherche nach Abschluss des Fixversuchs:** eine Web-Recherche
+(Qt-Forum, Qt-Doku, kein exakter QTBUG-Treffer für genau dieses Symptom) legt nahe,
+dass dies eine bekannte, seit Jahren wiederkehrende Schwachstelle in Qts
+Cocoa-Plattform-Plugin ist, keine racket-qt-spezifische Regression. Ein
+Qt-5.8-Forum-Thread beschreibt ein strukturell verwandtes Symptom (Menüleisten-
+Zustand nach einem nativen File-Dialog kaputt — dort Copy/Paste-Items deaktiviert,
+`NSMenuItem`-Target/Selector-Rebinding beim Dialog-Handling wird beim Schließen
+nicht sauber zurückgesetzt, heilt ebenfalls nicht von selbst, Workaround dort:
+Menüleiste explizit neu aufbauen); ein weiterer Forum-Thread beschreibt
+verschwindende Menüleisten zwischen Qt 6.7 und 6.8. Qts eigene macOS-Dokumentation
+benennt die Ursache der ganzen Problemklasse selbst: „Qt's event dispatcher is more
+flexible than what Cocoa offers, which makes mixing native panels complicated and
+requires extra management in Qt to handle this correctly." Passt zu unserem eigenen
+Befund (Kollaps beim Key-Window-Wechsel zu einem menülosen Fenster, keine
+Selbstheilung ohne echten `NSApplication`-Aktivierungs-Zyklus) und dazu, dass beide
+eigenen Root-Cause-Hypothesen (§ oben) experimentell widerlegt wurden — spricht dafür,
+dass die Ursache oberhalb von `wx/qt/` liegt, in Qts Cocoa-Menü-Tracking selbst.
+Keine 100%ige Gewissheit ohne exakten Upstream-Bugreport, aber die plausibelste
+Einordnung: kein racket-qt-Bug, sondern eine bekannte Fragilität von
+`QCocoaMenuBar`. Quellen: [Qt-Forum #90731](https://forum.qt.io/topic/90731/macos-copy-paste-menu-items-disabled-after-opening-a-native-file-open-dialog),
+[Qt-Forum #159622](https://forum.qt.io/topic/159622/menu-bar-does-not-show-up-in-mac-qml-application-after-upgrading-from-qt6-7-0-to-6-8-0),
+[Qt for macOS - Specific Issues](https://doc.qt.io/qt-6/macos-issues.html).
+
 ### §57.6 Suite A (16 Proben) + Akzeptanztest `test-dock-size`: PASS, zwei Automatisierungsfallen dokumentiert
 
 16/16 Suite-A-Proben PASS, keine Regression gegen die 2026-09-18(-N)-Baseline-Serie
