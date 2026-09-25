@@ -6939,3 +6939,121 @@ racket-qt-Produktbefund — Automatisierungsblocker dieser einen Session.
 
 Kein separater Windows-Fix nötig — der Aufräum-Commit aus §55.3 (`make-stub-class`
 entfernt, Dateikopf korrigiert) kam mit dem Submodul-Fast-Forward automatisch mit.
+
+## §57 — macOS: Block-C-Rebuild + Validierung, §55.6-Erstvalidierung, zwei neue Befunde (2026-09-22/25)
+
+**Kontext:** dritter und letzter Durchlauf des gebündelten Block-C-Validierungsmodells
+(nach Linux §55, Windows §56) — `docs/2026-09-22_report-macos.md`. Kein AppleClang-
+spezifischer Build-Fix nötig (anders als Windows' MSVC-`min`/`max`-Kollision, §56.2 —
+Kollision ist `<windows.h>`-spezifisch, wie in `CLAUDE.md` vorhergesagt). Alle elf
+neuen Exporte + die Arity-Änderung per `nm -gU` (macOS-Äquivalent zu Linux' `nm -D`)
+verifiziert.
+
+### §57.1 2.1 Control-Font auf macOS: Face und Punktgröße bit-identisch zu Cocoa
+
+`QFontInfo` löst unter Qt exakt `.AppleSystemUIFont`/Punktgröße 13 auf — identisch zu
+Cocoas eigenem `NSFont.systemFont`. Der von `advisor` befürchtete Fallback-Fall (Qt
+meldet eine unsichtbare Alias-Familie statt der echten aufgelösten Schrift) ist **nicht**
+eingetreten. Button-Größe unverändert vor/nach Fix (`(118 32)`) — bestätigt zum dritten
+Mal (nach Linux/Windows) das Muster, dass Qts `sizeHint()` hier dominiert, nicht die
+Racket-seitige Font-Metrik.
+
+### §57.2 §55.6 (Clipboard-`eq?`-Dead-Code-Fix) erstmals empirisch validiert
+
+Der Fix wirkt sich auf gtk als No-op aus (dort war `has-x-selection?` bereits `#t`,
+beide Zweige des kaputten `if` liefern dasselbe) — war also bislang nur auf Linux
+gefahrlos, aber nirgends dort validiert, wo er tatsächlich etwas ändert (Cocoa/win32).
+Auf macOS: `(eq? the-clipboard the-x-selection-clipboard)` wechselt von `#f` (vor
+Fix, auf beiden Backends identisch — der Bug erzeugte auf **jedem** Backend
+bedingungslos ein neues `clipboard%`-Objekt) zu `#t` (nach Fix, ebenfalls auf beiden
+Backends identisch — `has-x-selection?` liefert auf macOS strukturell `#f`, also nimmt
+der reparierte Code jetzt den Zweig, der `the-x-selection` zu `the-clipboard` selbst
+macht). Risikoprüfung (schreibt bloßes Markieren jetzt in die echte Pasteboard?):
+`wxme/editor.rkt`s `do-own-x-selection`-Pfad ist über `ALLOW-X-STYLE-SELECTION? =
+(eq? 'unix (system-type))` strukturell auf macOS `#f` — der Risikofall ist
+architektonisch ausgeschlossen, nicht nur empirisch nicht beobachtet.
+`clipboard-probe.rkt` bestätigt unverändert grün (Qt + nativ).
+
+### §57.3 2.7 Bild-Zwischenablage: Tie-Breaker fällt zugunsten von Windows aus, ein neuer Befund in der vierten Richtung
+
+Drei von vier getesteten Richtungen PASS (In-Process Qt, Cross-Prozess Qt→Qt,
+Cross-Toolkit Qt→nativ) — der eigentliche Linux-vs-Windows-Tie-Breaker
+(Qt-Schreiber → nativer Leser) läuft auf macOS **sauber durch**, wie auf Windows,
+nicht wie auf Linux (KDE-Klipper-Verdacht, §55-Bestand). Einschränkung: macOS/Windows
+nutzen andere Qt-Platform-Plugins als Linux (`cocoa`/`windows` statt `xcb`) — ein
+sauberes Ergebnis auf beiden kann nicht zwischen „Klipper-spezifisch" und
+„xcb-Plugin-spezifisch" unterscheiden. Linux bleibt der einzige ungeklärte Fall.
+
+Beobachtete RGB-Kanal-Drift in der Qt→nativ-Zelle ist **kein racket-qt-Befund**:
+dieselbe Drift tritt bytegleich auch in einer rein nativen Cocoa-Kontrollzelle
+(kein Qt beteiligt) auf — eine Cocoa-eigene Farbraum-/ICC-Transformation auf dem
+System-Pasteboard, symmetrisch nachgewiesen.
+
+**Neuer, eigenständiger Befund (nicht gefixt): Nativ→Qt liest Retina-Bilder bei
+doppelter Pixelgröße.** Ein vom nativen Prozess geschriebenes 20×20-Bild bei
+Backing-Scale 1 wird vom Qt-Leser als 40×40 bei gemeldeter Backing-Scale 1.0 gelesen
+(`shim_clipboard_image_size`/`_get_image_argb` melden Cocoas 2×-Retina-Repräsentation
+ohne Skalierungskorrektur). Pixelinhalt selbst korrekt (kein Datenverlust), aber die
+gemeldete Größe/Skalierung ist API-sichtbar falsch — ein `racket/gui`-Programm unter
+Qt bekäme ein aus einer nativen macOS-App kopiertes Bild doppelt so groß wie unter
+jedem anderen Backend. Tritt nur in dieser Richtung auf (Qt selbst publiziert beim
+Schreiben nur eine 1×-Repräsentation) und nur auf Retina-Systemen. Konsument:
+`get-clipboard-bitmap` (`wx/common/clipboard.rkt`). Offen für eine künftige Session.
+
+### §57.4 2.10 `collecting-blit`: sauberer No-op, strukturell erklärt trotz installierter XQuartz
+
+Anders als Linux/Windows konnte diese Session den Fall „XQuartz ist installiert und
+läuft" tatsächlich prüfen (beide anderen Plattformen haben kein X11 zur Verfügung).
+Zwei unabhängige Gründe, warum `x11-gc-available?` trotzdem strukturell `#f` bleibt:
+(1) `shim_get_x11_display` steht in `qt-shim/src/shim.cpp` hinter `#ifdef __linux__`
+— der macOS-Zweig liefert unbedingt `nullptr`, der `QNativeInterface::QX11Application`-
+Pfad wird auf macOS nie kompiliert; (2) unabhängig davon lädt `libX11` auf dieser
+Maschine ohnehin nicht über die Racket-FFI (`/opt/X11/lib` liegt nicht im
+`dyld`-Suchpfad, `#:fail`-Fallback liefert `#f`) — reine Zusatzabsicherung, kein
+Architektur-Blocker (`libX11.6.dylib` ist laut `lipo -archs` ein
+arm64/x86_64/i386-Universal-Binary, würde bei passendem Suchpfad architekturkompatibel
+laden). Beide DrRacket-Gate-Tests (`PLT_QT=1` und nativ) PASS, skriptbasierter
+50×`collect-garbage`-Stresstest über die öffentliche API PASS, kein GC-Indikator-Icon
+sichtbar (konsistent mit dem erwarteten No-op).
+
+### §57.5 Neuer Befund: native Menüleiste kollabiert nach jedem Dialog-Öffnen/-Schließen
+
+Während des Akzeptanztests reproduzierbar (3/3) aufgetreten, nicht Teil der
+ursprünglichen Block-C-Fixliste, dokumentiert statt gefixt (Regel 4). Erstbeobachtung
+„nach Tab-Hinzufügen über `File → Open…`" war zu eng — ein gezielter Nachtest zeigt:
+derselbe Kollaps auf den reduzierten Drei-Menü-Zustand (`racket, File, Help`, wie in
+§44.5/§47s Befund nach dem Schließen des letzten Fensters) tritt bereits ein, wenn ein
+`QFileDialog` geöffnet und per Escape/Cancel wieder geschlossen wird — **ganz ohne**
+dass ein zweiter Tab entsteht. Der tatsächliche Trigger ist damit das
+Öffnen/Schließen **irgendeines** Dialogs, nicht das Tab-Hinzufügen selbst. Passt zu
+§47.3/§47.4s Mechanismus (`wx/qt/frame.rkt`s `shown-real-frames`-Buchführung, da
+`dialog%` von `frame%` erbt und ebenfalls durch `direct-show` läuft) — plausibelste
+Einordnung: der Zähl-Mechanismus verzählt sich kurzzeitig beim Dialog-Show/Hide-Zyklus,
+bis ein externes Aktivierungs-Event erzwingt, neu zu synchronisieren. Heilt nicht von
+selbst (15s ohne Wirkung getestet), heilt sofort durch App-Reaktivierung
+(`Cmd+Tab` weg und zurück). Per Screenshot visuell verifiziert (nicht nur AX-Cache).
+Root Cause nicht isoliert (Regel-4-Fall, außerhalb des Sessionumfangs) — kein
+Blocker für den Akzeptanztest selbst (Crash-Kriterium unberührt, Tab-Zustand nach
+Reaktivierung über das Menü korrekt verifizierbar). Offen für eine künftige Session.
+
+### §57.6 Suite A (16 Proben) + Akzeptanztest `test-dock-size`: PASS, zwei Automatisierungsfallen dokumentiert
+
+16/16 Suite-A-Proben PASS, keine Regression gegen die 2026-09-18(-N)-Baseline-Serie
+(kein `2026-09-19_report-macos.md` existiert — nur Linux/Windows haben ein
+09-19-Dokument). Zwei Klick-Automatisierungsfallen dieser Session gefunden und
+umgangen: `cliclick` scheiterte reproduzierbar bei `enable-cascade-probe.rkt` trotz
+exakt verifizierter Koordinaten, `osascript click at` (AX-Ebene) traf sofort — das
+Gegenteil der in §51.2 dokumentierten Erfahrung (dort löste `cliclick` gerade das
+Problem, das AX bei `list-box%` hatte); und `CGWarpMouseCursorPosition` löst keine
+Hover-Events aus (durch `CGEventCreateMouseEvent(kCGEventMouseMoved)` ersetzt). Beide
+sind Werkzeugartefakte, keine `racket-qt`-Befunde. Akzeptanztest 0/3 Crash über drei
+frische Durchläufe, Run per Menü-Äquivalent ausgelöst (der Toolbar-„Run"-Button bleibt
+laut erneutem Gegentest ohne AX-Repräsentation und damit für Koordinatenklicks
+wirkungslos — §44.2-Befund reproduziert, auch nach der §45-Reklassifizierung als
+mögliches Fokus-Problem).
+
+**Ergebnis Block C, alle drei Plattformen:** Linux 10/10 PASS (§55), Windows 9/10 PASS
++ Akzeptanztest dort offen wegen Automatisierungsblocker, kein Produktbefund (§56),
+macOS 10/10 PASS inkl. Akzeptanztest (§57) — plus zwei neue, über den ursprünglichen
+Block-C-Umfang hinausgehende macOS-Befunde (§57.3, §57.5), beide offen für eine
+künftige Session.

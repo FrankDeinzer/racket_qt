@@ -5,6 +5,47 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-25 (macOS) — Block C: gebündelter Rebuild+Validierungsdurchlauf, alle 10 Fixes PASS, zwei neue Befunde
+
+**Kontext:** dritter und letzter Durchlauf des Block-C-Bündelmodells nach Linux
+(2026-09-22, §55) und Windows (2026-09-22, §56). gui-Submodul per Fast-Forward
+`91ee4869`→`6bae83df` (Regel 7, Nutzerfreigabe eingeholt), Shim-Rebuild sauber (kein
+AppleClang-Äquivalent zum MSVC-Fix nötig), alle 11 neuen Exporte + Arity-Änderung per
+`nm -gU` verifiziert. Smoke 3/3 beide Wege.
+
+- **Alle zehn Block-C-Fixes validiert, PASS.** Highlight 2.1: `.AppleSystemUIFont`
+  bit-identisch zu Cocoa (Face + Punktgröße), kein Fallback-Artefakt. **§55.6**
+  (Clipboard-`eq?`-Dead-Code-Fix, nicht Teil der zehn Fixes, aber im selben Sync)
+  erstmals empirisch validiert — auf gtk war er ein No-op, auf macOS/win32 wirkt er
+  sich tatsächlich aus; Risikofall (Markieren schreibt in Pasteboard) strukturell
+  ausgeschlossen (`ALLOW-X-STYLE-SELECTION?` ist auf macOS `#f`). Details:
+  `docs/HACKING.md` §57.1/§57.2.
+- **2.7 Bild-Zwischenablage-Tie-Breaker fällt zugunsten von Windows:** Qt→nativ läuft
+  auf macOS sauber (wie Windows), nicht wie Linux (KDE-Klipper-Verdacht) — 2:1 für
+  „kein racket-qt-Bug", Linux bleibt ungeklärt. **Neuer Befund:** Nativ→Qt liest
+  Retina-Bilder bei doppelter Pixelgröße (`40×40` statt `20×20`@Scale2) — nicht
+  gefixt. Details: `docs/HACKING.md` §57.3.
+- **2.10 `collecting-blit`:** sauberer No-op, strukturell erklärt (Compile-Guard
+  `#ifdef __linux__`) — erstmals gegen eine Maschine mit **installierter und
+  laufender** XQuartz getestet (Linux/Windows hatten kein X11 zur Verfügung), Befund
+  bleibt stabil. Details: `docs/HACKING.md` §57.4.
+- **Suite A 16/16 PASS**, Akzeptanztest `test-dock-size` 0/3 Crash (Run per
+  Menü-Äquivalent, Toolbar-Button bleibt ohne AX-Repräsentation). Zwei
+  Automatisierungsfallen gefunden+umgangen (`cliclick` vs. `osascript click at`,
+  `CGWarpMouseCursorPosition` ohne Hover-Event). Details: `docs/HACKING.md` §57.6.
+- **Neuer Befund:** native Menüleiste kollabiert reproduzierbar (3/3) nach jedem
+  Dialog-Öffnen/-Schließen (nicht nur Tab-Hinzufügen — per Gegentest auf
+  Escape-ohne-Tab präzisiert), heilt durch App-Reaktivierung, Root Cause nicht
+  isoliert. Details: `docs/HACKING.md` §57.5.
+- **Damit sind alle zehn Block-C-Fixes auf allen drei Plattformen validiert** (Linux
+  10/10, Windows 9/10 + Akzeptanztest dort offen/Automatisierungsblocker, macOS
+  10/10 inkl. Akzeptanztest). Zwei neue macOS-Befunde offen für eine künftige Session,
+  nicht gefixt (reine Validierungssession). Noch offen: Commit/Push (Regel 7/8),
+  CLAUDE.md-Checkpoint-Update.
+- Report: `docs/2026-09-22_report-macos.md`.
+
+---
+
 ## Session 2026-09-22 (Windows) — Block C: gebündelter Rebuild+Validierungsdurchlauf, ein MSVC-Fix, Akzeptanztest offen
 
 **Kontext:** Fortsetzung von Session "2026-09-22 (Linux)" (zehn Block-C-Fixes,

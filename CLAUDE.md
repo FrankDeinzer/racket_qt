@@ -79,8 +79,9 @@ Aufgabe:
 > neuen Shim-Exporten hier wieder einen Banner dieser Art einfügen, bis alle drei
 > Maschinen nachgebaut haben (gleiche Klasse wie §27/§52.1).
 >
-> **Shim-ABI-Stand seit 2026-09-22 (Block C) — Windows nachgebaut+validiert
-> (2026-09-22), macOS noch offen.** Elf neue Exporte aus dem Vertrags-Audit:
+> **Shim-ABI-Stand seit 2026-09-22 (Block C) — abgeschlossen, alle drei Maschinen
+> nachgebaut+validiert (Windows 2026-09-22, macOS 2026-09-25).** Elf neue Exporte
+> aus dem Vertrags-Audit:
 > `shim_control_font_face`, `shim_control_font_size`, `shim_bell`,
 > `shim_double_click_time`, `shim_clipboard_supports_selection`,
 > `shim_clipboard_set_image`, `shim_clipboard_has_image`, `shim_clipboard_image_size`,
@@ -103,9 +104,10 @@ Aufgabe:
 > im Hinterkopf behalten, falls doch ein `min`/`max`-Konflikt auftaucht.
 >
 > **Alle 11 Exporte + Arity-Änderung auf Windows per `dumpbin /exports` verifiziert**
-> (`docs/2026-09-22_report-win.md`). **macOS noch nicht nachgebaut/validiert** — diese
-> Zeile hier wieder entfernen/aktualisieren, sobald macOS nachgezogen hat (gleiche
-> Klasse wie §27/§52.1).
+> (`docs/2026-09-22_report-win.md`) **und auf macOS per `nm -gU` verifiziert**
+> (`docs/2026-09-22_report-macos.md`, §57). Kein AppleClang-Äquivalent zum MSVC-Fix
+> nötig — Build lief sauber durch. Damit sind alle drei Maschinen auf demselben
+> Shim-ABI-Stand (gleiche Klasse wie §27/§52.1).
 
 **Windows:**
 ```powershell
@@ -233,7 +235,7 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 - `cursor-driver%` (Standard-Cursor + `set-image`) — ✅ 2026-09-17, Windows (§40), ABI-Änderung; dabei Bugfix `wx/qt/window.rkt` fehlender `local.rkt`-Require. Validiert macOS (§49.3) + Linux (§52.2, Cursor-Form fotografisch nicht prüfbar, Werkzeuglücke)
 - `get-current-mouse-state` — ✅ 2026-09-17, Windows (§42), ABI-Änderung, volle Symbol-Menge (mehr als win32). Validiert macOS (§49.5, Cmd/Ctrl-Swap bewusst nicht korrigiert) + Linux (§52.3, X11 `XQueryPointer`)
 - `printer-dc%` (Raster-Bridge, kein Vektor-Pfad) — ✅ 2026-09-17, Windows (§43), 11 neue Exporte, Dialoge non-modal (Regel 1). PDF-Pfad auf allen 3 Plattformen grün (§52.2). macOS: eigener Teardown-Crash im Dialog-Pfad gefunden **und gefixt** (§49.4→§50, `shim_app_quit` fehlte als `exit`-Hook, Plumber-Fix, keine ABI-Änderung). Windows `QPrintDialog`-Automatisierung offen, s. u.
-- Block-C-Vertrags-Audit (elf Prompt-Kandidaten geprüft, drei davon kein Befund, ein neuer Fund) — ✅ 2026-09-22, Linux (§55), zehn Fixes: Control-Font-Metrik (höchste Wirkung), `find-graphical-system-path` (neuer Fund, maskierte `.gracketrc`-Fallback), `bell`, `get-double-click-time`, `flush-display` (Regel-1-Fall, `shim_pump(0)`), `has-x-selection?` + X11-Selection-Mode-Threading, Bild-Zwischenablage, `location->window`, `make-stub-class`-Aufräumen, `register-/unregister-collecting-blit` (DrRacket-GC-Indikator, Port von gtks rohem Xlib-GC-Callback-Protokoll auf Qt6.11, GC-Sicherheit live verifiziert). Elf neue Shim-Exporte + eine Arity-Änderung an drei bestehenden. Gate PASS (Suite A + neue Suite C + Akzeptanztest). **Windows nachgebaut+validiert 2026-09-22** (`docs/2026-09-22_report-win.md`, §56): 9/10 Fixes vollständig PASS, ein Windows-spezifischer MSVC-Build-Fix nötig (`min`/`max`-Makro-Kollision, Commit `2e91ee3`), Bild-Zwischenablage-Cross-Toolkit-Test **pixelgenau PASS** (stützt die Linux-Klipper-Hypothese: Windows hat kein Klipper-Äquivalent und läuft sauber durch, wo Linux 3× scheiterte). **Akzeptanztest `test-dock-size` auf Windows nicht abgeschlossen** — reiner Automatisierungsblocker (Klick-Automatisierung traf den Run-Knopf in echtem DrRacket wiederholt nicht, RCA nicht isoliert, Empfehlung: dediziertes/unbeobachtetes Desktop für einen Nachtest), kein Produktbefund. macOS noch offen (Rebuild + Validierung).
+- Block-C-Vertrags-Audit (elf Prompt-Kandidaten geprüft, drei davon kein Befund, ein neuer Fund) — ✅ 2026-09-22, Linux (§55), zehn Fixes: Control-Font-Metrik (höchste Wirkung), `find-graphical-system-path` (neuer Fund, maskierte `.gracketrc`-Fallback), `bell`, `get-double-click-time`, `flush-display` (Regel-1-Fall, `shim_pump(0)`), `has-x-selection?` + X11-Selection-Mode-Threading, Bild-Zwischenablage, `location->window`, `make-stub-class`-Aufräumen, `register-/unregister-collecting-blit` (DrRacket-GC-Indikator, Port von gtks rohem Xlib-GC-Callback-Protokoll auf Qt6.11, GC-Sicherheit live verifiziert). Elf neue Shim-Exporte + eine Arity-Änderung an drei bestehenden. Gate PASS (Suite A + neue Suite C + Akzeptanztest). **Windows nachgebaut+validiert 2026-09-22** (`docs/2026-09-22_report-win.md`, §56): 9/10 Fixes vollständig PASS, ein Windows-spezifischer MSVC-Build-Fix nötig (`min`/`max`-Makro-Kollision, Commit `2e91ee3`), Bild-Zwischenablage-Cross-Toolkit-Test **pixelgenau PASS** (stützt die Linux-Klipper-Hypothese: Windows hat kein Klipper-Äquivalent und läuft sauber durch, wo Linux 3× scheiterte). **Akzeptanztest `test-dock-size` auf Windows nicht abgeschlossen** — reiner Automatisierungsblocker (Klick-Automatisierung traf den Run-Knopf in echtem DrRacket wiederholt nicht, RCA nicht isoliert, Empfehlung: dediziertes/unbeobachtetes Desktop für einen Nachtest), kein Produktbefund. **macOS nachgebaut+validiert 2026-09-25** (`docs/2026-09-22_report-macos.md`, §57): alle zehn Fixes PASS, inkl. Akzeptanztest (0/3 Crash, Run per Menü-Äquivalent — Toolbar-Button ohne AX-Repräsentation). Bild-Zwischenablage-Tie-Breaker (Qt→nativ) läuft auch auf macOS sauber durch, stützt die Klipper-Hypothese weiter (2:1 gegen einen racket-qt-Bug, Linux bleibt ungeklärt). Zusätzlich erstmals validiert: §55.6 (Clipboard-`eq?`-Fix, auf gtk No-op, auf macOS/win32 tatsächlich wirksam, Risikofall strukturell ausgeschlossen). **Zwei neue, offene macOS-Befunde** (nicht gefixt, reine Validierungssession): native Menüleiste kollabiert reproduzierbar nach jedem Dialog-Öffnen/-Schließen (heilt durch App-Reaktivierung, Root Cause nicht isoliert); Nativ→Qt-Bildzwischenablage meldet Retina-Inhalte bei doppelter Pixelgröße (`40×40` statt `20×20`@Scale2, API-sichtbar falsch). **Block C damit auf allen drei Plattformen abgeschlossen.**
 
 ### Weitere Bugfixes
 
@@ -256,8 +258,10 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 ### Offene Befunde (künftige Session nötig)
 
 - §33.7 — einmaliger, seither in 17 Wiederholungen nicht reproduzierter Tab-2-Zeilennummern-Defekt (Linux, `editor-canvas%`), Rate ≤1-in-18, `PLT_QT_SCROLL_DEBUG=1` für künftige Diagnose vorbereitet
-- Bild-Zwischenablage Cross-Toolkit (Qt→gtk) auf Linux **ungeklärt fehlgeschlagen** (§2.7/§55.3, vermutete KDE-Klipper-Interferenz, nicht bestätigt) — auf Windows/macOS erneut versuchen, dort kein Klipper im Weg.
-- `register-/unregister-collecting-blit` ist bewusst **nur für X11 implementiert** (§55.5) — Wayland/Windows/macOS bleiben ohne GC-Indikator-Sichtbarkeit (kein Regressionsschaden, aber auch kein neuer Fortschritt dort); ein echter macOS/Windows-Pfad wäre ein eigener künftiger Block.
+- Bild-Zwischenablage Cross-Toolkit (Qt→gtk) auf **Linux weiterhin ungeklärt fehlgeschlagen** (§2.7/§55.3, vermutete KDE-Klipper-Interferenz, nicht bestätigt) — auf Windows **und** macOS lief derselbe Test (Qt→nativ) sauber durch (§56.3/§57.3), stützt die Klipper-Hypothese 2:1, beweist sie aber nicht (andere Qt-Platform-Plugins auf Windows/macOS als auf Linux). Nur noch Linux offen.
+- `register-/unregister-collecting-blit` ist bewusst **nur für X11 implementiert** (§55.5) — Wayland/Windows/macOS bleiben ohne GC-Indikator-Sichtbarkeit (kein Regressionsschaden, aber auch kein neuer Fortschritt dort); ein echter macOS/Windows-Pfad wäre ein eigener künftiger Block. Auf macOS zusätzlich strukturell bestätigt: sauberer No-op auch bei installierter/laufender XQuartz (§57.4, Compile-Guard `#ifdef __linux__`).
+- **macOS: native Menüleiste kollabiert reproduzierbar (3/3) nach jedem Dialog-Öffnen/-Schließen** (nicht nur Tab-Hinzufügen) auf den reduzierten Drei-Menü-Zustand, heilt nicht von selbst, aber sofort durch App-Reaktivierung (`Cmd+Tab` weg/zurück). Vermutlich verwandt mit §47.3/§47.4s `shown-real-frames`-Zählmechanismus (`dialog%` erbt von `frame%`, läuft durch `direct-show`), Root Cause nicht isoliert. Details: §57.5.
+- **macOS: Nativ→Qt-Bildzwischenablage meldet Retina-Inhalte bei doppelter Pixelgröße** (`40×40` statt korrekt skaliertem `20×20`@Scale2) — `shim_clipboard_image_size`/`_get_image_argb` geben Cocoas 2×-Backing-Repräsentation ohne Skalierungskorrektur weiter, API-sichtbar falsch. Tritt nur in dieser Richtung auf (Qt schreibt selbst nur 1×). Details: §57.3.
 
 ## Dokumentation
 
