@@ -5,6 +5,37 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-25 (2, macOS) — Fixversuch für die zwei Block-C-Nebenbefunde, beide geparkt
+
+**Kontext:** Nutzer fragte nach der vorigen Session, ob die zwei offenen macOS-Befunde
+(Menüleisten-Kollaps, Nativ→Qt-Bildgröße) jetzt gefixt werden können. Advisor-Review
+lieferte für beide je eine konkrete, testbare Hypothese bzw. einen billigen
+Zusatzcheck — beide durchgeführt, beide negativ.
+
+- **Menüleisten-Kollaps:** zwei diskriminierende Experimente (advisors
+  `setEnabled`-Timing-Hypothese testweise per Auskommentieren widerlegt; ein
+  `activateWindow()`/`QMenuBar`-Hide-Show-Fix im C++-`finished`-Handler ebenfalls
+  ohne Wirkung). Root-Cause-Verständnis präzisiert: `QFileDialog` läuft nie durch
+  `frame%`/`dialog%` (kein natives Panel, `DontUseNativeDialog` ist Default) — die
+  ursprüngliche `shown-real-frames`-Hypothese aus der Vorsession war falsch. Kollaps
+  tritt schon **während** der Dialog offen ist auf, nicht erst beim Schließen.
+  Vermutlich Qt-Cocoa-internes Key-Window-Menü-Tracking, nicht über `QWidget`-API
+  beeinflussbar. Regel-4-Budget (zwei Zyklen) ausgeschöpft, geparkt. Details:
+  `docs/HACKING.md` §57.5 (korrigiert).
+- **Nativ→Qt-Bildgröße:** billiger Check (`QImage::dotsPerMeterX/Y()`) zeigt `0` —
+  keine DPI-/Skalierungsmetadaten im Qt-Pasteboard-Lesepfad verfügbar. Kein
+  Qt-API-only-Fix möglich; ein echter Fix bräuchte natives Pasteboard-API (Carbon
+  `PasteboardRef` oder Objective-C++ `NSPasteboard`/`NSImage`) — neue
+  Build-Komplexität, bewusst nicht ohne Nutzerentscheidung begonnen. Details:
+  `docs/HACKING.md` §57.3 (ergänzt).
+- Alle temporären Debug-Änderungen (Shim + `filedialog.rkt`) zurückgesetzt und
+  verifiziert (`git status` clean in Umbrella + gui-Submodul), `racket-prefs.rktd`
+  auf Session-Hash zurückgespielt, keine verwaisten Prozesse. Kein Code-Commit aus
+  dieser Session — nur Doku-Korrektur (CLAUDE.md, HACKING.md §57.3/§57.5, dieser
+  Eintrag).
+
+---
+
 ## Session 2026-09-25 (macOS) — Block C: gebündelter Rebuild+Validierungsdurchlauf, alle 10 Fixes PASS, zwei neue Befunde
 
 **Kontext:** dritter und letzter Durchlauf des Block-C-Bündelmodells nach Linux

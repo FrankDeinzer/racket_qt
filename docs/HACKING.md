@@ -6998,7 +6998,21 @@ gemeldete Größe/Skalierung ist API-sichtbar falsch — ein `racket/gui`-Progra
 Qt bekäme ein aus einer nativen macOS-App kopiertes Bild doppelt so groß wie unter
 jedem anderen Backend. Tritt nur in dieser Richtung auf (Qt selbst publiziert beim
 Schreiben nur eine 1×-Repräsentation) und nur auf Retina-Systemen. Konsument:
-`get-clipboard-bitmap` (`wx/common/clipboard.rkt`). Offen für eine künftige Session.
+`get-clipboard-bitmap` (`wx/common/clipboard.rkt`).
+
+**Nachtrag (Hauptagent, 2026-09-25 (2), Advisor-Review):** billiger Zusatzcheck vor
+einer Aufwandsentscheidung — `QImage::dotsPerMeterX/Y()` der aus der Zwischenablage
+gelesenen 40×40-`QImage` liefert **`0`** (keine DPI-Metadaten), ebenso
+`devicePixelRatio()` weiterhin `1.0` (§57.3 oben). Qts NSPasteboard→`QImage`-
+Konvertierungspfad verliert also jede Skalierungs-/Auflösungsinformation vollständig
+— es gibt **keinen** Qt-API-only-Fix (kein Feld, das man einfach auslesen könnte).
+Ein echter Fix bräuchte natives Pasteboard-/`NSImage`-API-Zugriff (Carbon
+`PasteboardRef` oder Objective-C++ `NSPasteboard`/`NSImage`, um die vom Schreiber
+deklarierte logische Größe statt der rohen Pixel-Repräsentation zu lesen) — neue
+Build-Komplexität (bislang keine Objective-C++-Datei in `qt-shim/`), kein triviales
+Ein-Zeilen-Fix. Bewusst nicht begonnen ohne Nutzerentscheidung zum Umfang (Debug-Code
+wieder entfernt, `qt-shim/src/shim.cpp` verifiziert clean). Offen für eine künftige
+Session.
 
 ### §57.4 2.10 `collecting-blit`: sauberer No-op, strukturell erklärt trotz installierter XQuartz
 
@@ -7016,25 +7030,65 @@ laden). Beide DrRacket-Gate-Tests (`PLT_QT=1` und nativ) PASS, skriptbasierter
 50×`collect-garbage`-Stresstest über die öffentliche API PASS, kein GC-Indikator-Icon
 sichtbar (konsistent mit dem erwarteten No-op).
 
-### §57.5 Neuer Befund: native Menüleiste kollabiert nach jedem Dialog-Öffnen/-Schließen
+### §57.5 Neuer Befund: native Menüleiste kollabiert bei offenem `QFileDialog` — Root-Cause-Hypothese widerlegt, geparkt (Regel 4)
 
 Während des Akzeptanztests reproduzierbar (3/3) aufgetreten, nicht Teil der
-ursprünglichen Block-C-Fixliste, dokumentiert statt gefixt (Regel 4). Erstbeobachtung
-„nach Tab-Hinzufügen über `File → Open…`" war zu eng — ein gezielter Nachtest zeigt:
-derselbe Kollaps auf den reduzierten Drei-Menü-Zustand (`racket, File, Help`, wie in
-§44.5/§47s Befund nach dem Schließen des letzten Fensters) tritt bereits ein, wenn ein
-`QFileDialog` geöffnet und per Escape/Cancel wieder geschlossen wird — **ganz ohne**
-dass ein zweiter Tab entsteht. Der tatsächliche Trigger ist damit das
-Öffnen/Schließen **irgendeines** Dialogs, nicht das Tab-Hinzufügen selbst. Passt zu
-§47.3/§47.4s Mechanismus (`wx/qt/frame.rkt`s `shown-real-frames`-Buchführung, da
-`dialog%` von `frame%` erbt und ebenfalls durch `direct-show` läuft) — plausibelste
-Einordnung: der Zähl-Mechanismus verzählt sich kurzzeitig beim Dialog-Show/Hide-Zyklus,
-bis ein externes Aktivierungs-Event erzwingt, neu zu synchronisieren. Heilt nicht von
-selbst (15s ohne Wirkung getestet), heilt sofort durch App-Reaktivierung
-(`Cmd+Tab` weg und zurück). Per Screenshot visuell verifiziert (nicht nur AX-Cache).
-Root Cause nicht isoliert (Regel-4-Fall, außerhalb des Sessionumfangs) — kein
-Blocker für den Akzeptanztest selbst (Crash-Kriterium unberührt, Tab-Zustand nach
-Reaktivierung über das Menü korrekt verifizierbar). Offen für eine künftige Session.
+ursprünglichen Block-C-Fixliste, dokumentiert statt gefixt (Regel 4).
+
+**Korrektur gegenüber der Erstfassung dieses Abschnitts (Nachtest im Hauptagenten,
+2026-09-25 (2)):** die ursprünglich hier notierte Hypothese — „Trigger ist
+`dialog%`s `direct-show`, das über `shown-real-frames` mitzählt" — ist **falsch**
+und durch Code-Lesen widerlegt: `get-file`/`put-file` laufen über
+`wx/qt/filedialog.rkt`, ein reines natives `QFileDialog` (`shim_file_dialog_create`
+in `qt-shim/src/shim.cpp`), das **nie** `frame%`/`dialog%`/`direct-show` durchläuft
+— `shown-real-frames` bleibt beim Öffnen/Schließen dieses Dialogs unverändert.
+`dialog%`-basierte Dialoge (`message-box` u. ä.) wurden in dieser Session **nicht**
+getestet — „nach jedem Dialog" ist daher eine unbelegte Verallgemeinerung, ebenso
+war die ursprüngliche Formulierung „natives Panel" falsch: `QFileDialog` läuft mit
+`DontUseNativeDialog` (`plt_qt_native_file_dialog()` ist per Default `#f`,
+`PLT_QT_NATIVE_FILE_DIALOG` env-var nicht gesetzt) — es ist ein gewöhnliches
+Qt-eigenes `QDialog`-Fenster, kein natives Cocoa-Panel.
+
+**Zwei diskriminierende Experimente (Advisor-Review, gemessen statt geraten),
+beide negativ:**
+1. **Hypothese „Parent-Fenster ist beim `hide()` des Dialogs noch über
+   `shim_widget_set_enabled` deaktiviert, Qt wählt deshalb den Root-Bar-Fallback,
+   spätere Reaktivierung stößt keinen Re-Sync an"** (advisor, plausibel aus
+   `filedialog.rkt:93/99`s Timing). Getestet über zwei Varianten in
+   `shim_file_dialog_create`s `finished`-Handler (synchron `activateWindow()`;
+   verzögert per `QTimer::singleShot(0, …)` + `menuBar()->hide()/show()` +
+   `raise()`+`activateWindow()`) — **beide ohne Wirkung**, Menü blieb nach Escape
+   weiterhin auf `Apple, racket, File, Help` reduziert.
+2. **Advisors eigentliches diskriminierendes Experiment:** beide
+   `shim_widget_set_enabled`-Aufrufe in `filedialog.rkt` (Zeilen 93/99, reiner
+   Racket-Code, kein Rebuild) testweise auskommentiert — **Kollaps tritt weiterhin
+   ein**, sogar schon **während** der Dialog offen ist (nicht erst nach dem
+   Schließen), unverändert zum Ausgangszustand. Damit ist die `setEnabled`-Klammer
+   **nicht** die Ursache — beide Zeilen danach zurückgesetzt (`git checkout --`,
+   verifiziert clean).
+
+**Zusätzliche Korrektur:** „heilt durch App-Reaktivierung (`Cmd+Tab`)" ließ sich im
+Nachtest **nicht** zuverlässig reproduzieren — weder `System Events`' `set
+frontmost` noch `Finder`-Aktivieren-und-zurück heilten den Zustand sofort; die
+Heilung trat irgendwann später, ohne klar isolierbaren Auslöser, ein. Die
+ursprüngliche Beobachtung war vermutlich ein echter `Cmd+Tab`-Tastendruck
+(physisches OS-Ereignis), was etwas grundlegend anderes auslöst als ein per
+Accessibility-API gesetztes `frontmost` — dieser Unterschied selbst ist ein
+Datenpunkt: die Heilung braucht offenbar einen echten
+`NSApplication`-Resign-/BecomeActive-Übergang, nicht bloß einen
+Qt-Fokus-/Sichtbarkeits-Toggle.
+
+**Damit bestätigt (nicht nur vermutet): der Kollaps ist Qt-Cocoa-internes
+Menüleisten-Tracking-Verhalten** (welches `QMenuBar` beim Key-Window-Wechsel als
+System-Menü installiert wird), reagiert bereits beim Öffnen eines menülosen
+`QDialog`/`QFileDialog`, und ist über Qts öffentliche `QWidget`-API
+(`activateWindow`/`raise`/`QMenuBar::show`) nicht zu beeinflussen. Ein echter Fix
+bräuchte vermutlich native Cocoa-API-Zugriff (`NSApplication`/`NSMenu` direkt,
+Objective-C++, neue Build-Komplexität in `qt-shim/`) — **außerhalb des
+Budgets dieser Session** (Regel 4, zwei Hypothesen-Zyklen ausgeschöpft), geparkt
+statt spekulativ vertieft. Kein Blocker für den Akzeptanztest selbst (Crash-
+Kriterium unberührt, Tab-Zustand nach Reaktivierung über das Menü korrekt
+verifizierbar).
 
 ### §57.6 Suite A (16 Proben) + Akzeptanztest `test-dock-size`: PASS, zwei Automatisierungsfallen dokumentiert
 
