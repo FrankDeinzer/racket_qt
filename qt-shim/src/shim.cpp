@@ -22,6 +22,8 @@
 #include <QAction>
 #include <QLabel>
 #include <QFileDialog>
+#include <QListView>
+#include <QTreeView>
 #include <QImage>
 #include <QPainter>
 #include <QPrinter>
@@ -903,6 +905,11 @@ void shim_button_destroy(void* btn_ptr)
     delete static_cast<QPushButton*>(btn_ptr);
 }
 
+void shim_button_set_label(void* btn_ptr, const char* label)
+{
+    static_cast<QPushButton*>(btn_ptr)->setText(QString::fromUtf8(label));
+}
+
 // ---- menu-bar ---------------------------------------------------------------
 
 void* shim_menubar_create(void)
@@ -1175,13 +1182,40 @@ int shim_check_box_get_checked(void* cb_ptr)
 // implement multi-column/report-mode lists (no driver needs it; see
 // docs/HACKING.md's widget-addition checklist).
 
+// QListWidget::sizeHint() grows with row count, without an upper bound --
+// unlike gtk/win32's native list controls, which report a small constant
+// preferred height and rely on the surrounding layout plus their own
+// scrollbar for anything longer. wx/qt/window.rkt's
+// seed-size-from-native-hint captures sizeHint() once, right after the
+// list is populated, and that becomes the widget's minimum height for the
+// rest of its life -- for a long list (e.g. DrRacket's "Choose Language"
+// "Collection Paths" panel) that minimum can exceed the space its parent
+// panel actually has, pushing sibling widgets (the Add/Remove buttons
+// below it) out of view instead of the list gaining a scrollbar. Capping
+// the hint at a handful of rows here reproduces the gtk/win32 behavior.
+class RacketListWidget : public QListWidget {
+public:
+    explicit RacketListWidget(QWidget* parent) : QListWidget(parent) {}
+    QSize sizeHint() const override
+    {
+        QSize hint = QListWidget::sizeHint();
+        int rowH = sizeHintForRow(0);
+        if (rowH > 0) {
+            static const int kMaxVisibleRows = 6;
+            int capped = rowH * kMaxVisibleRows + 2 * frameWidth();
+            if (hint.height() > capped) hint.setHeight(capped);
+        }
+        return hint;
+    }
+};
+
 void* shim_list_box_create(void*           parent_widget,
                            int             kind, // 0=single 1=multiple 2=extended
                            shim_callback_t sel_cb,
                            void*           ud)
 {
     auto* parent = static_cast<QWidget*>(parent_widget);
-    auto* lb = new QListWidget(parent);
+    auto* lb = new RacketListWidget(parent);
     QAbstractItemView::SelectionMode mode;
     switch (kind) {
         case 1:  mode = QAbstractItemView::MultiSelection;    break;
@@ -1570,6 +1604,40 @@ int shim_radio_box_button_focus(void* handle, int i)
     return i;
 }
 
+// Swallows Key_Return/Key_Enter on a QFileDialog's internal list/tree views
+// and calls QDialog::accept() instead of letting the event reach the view's
+// own keyPressEvent (see the comment at its installation site below for why
+// this is macOS-only).
+#ifdef Q_OS_MACOS
+class EnterAcceptsFilter : public QObject {
+public:
+    explicit EnterAcceptsFilter(QDialog* dlg) : QObject(dlg), m_dlg(dlg) {}
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override
+    {
+        if (event->type() == QEvent::KeyPress) {
+            auto* ke = static_cast<QKeyEvent*>(event);
+            if (ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter) {
+                m_dlg->accept();
+                return true;
+            }
+        }
+        return QObject::eventFilter(watched, event);
+    }
+private:
+    QDialog* m_dlg;
+};
+
+static void install_enter_accepts_filter(QDialog* dlg)
+{
+    auto* filter = new EnterAcceptsFilter(dlg);
+    for (auto* view : dlg->findChildren<QListView*>())
+        view->installEventFilter(filter);
+    for (auto* view : dlg->findChildren<QTreeView*>())
+        view->installEventFilter(filter);
+}
+#endif
+
 // ---- file dialog (get-file / put-file) -----------------------------------
 // QFileDialog run non-modally: open() (window-modal to `parent`, returns to
 // the caller immediately) instead of exec() -- no nested QEventLoop, so it
@@ -1639,6 +1707,30 @@ void shim_file_dialog_create(void* parent_widget, int mode,
         if (cb) cb(ud, nullptr);
         dlg->deleteLater();
     });
+
+    // Qt's own (non-native) file/tree view treats Return/Enter as one of its
+    // EditKeyPressed triggers ONLY on macOS -- confirmed in Qt's own source
+    // (qabstractitemview.cpp's keyPressEvent, #ifdef Q_OS_MACOS), where
+    // pressing Enter on a selected file starts inline rename instead of
+    // accepting the dialog (long-standing Qt/Cocoa convention, not something
+    // wx/qt introduced -- native OS file pickers don't have this because
+    // they don't use QAbstractItemView). On Windows/Linux, the #else branch
+    // already does the right thing (emits `activated`, F2 is the only
+    // rename key) -- installing this filter there would be redundant at
+    // best, so it's scoped to macOS to avoid touching working behavior.
+    // Blanket-disabling EditTriggers would also remove the F2-rename
+    // convention users may expect from a native-feeling file list; instead,
+    // install an event filter that intercepts only Key_Return/Key_Enter
+    // *before* the view's own keyPressEvent (and its edit-trigger check)
+    // sees it, and calls QFileDialog::accept() directly -- the same thing
+    // the "Open" button does, which already contains the correct "it's a
+    // directory, navigate into it instead" logic (qfiledialog.cpp's
+    // accept(), AnyFile/Directory cases: `if (info.isDir()) { setDirectory
+    // (...); return; }` before ever closing the dialog). F2 (and the view's
+    // own "Rename" context-menu action) are untouched.
+#ifdef Q_OS_MACOS
+    install_enter_accepts_filter(dlg);
+#endif
 
     if (plt_qt_debug())
         fprintf(stderr,

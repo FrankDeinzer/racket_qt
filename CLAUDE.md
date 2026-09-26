@@ -123,6 +123,21 @@ Aufgabe:
 > **müssen den Shim neu bauen, bevor sie danach `PLT_QT=1` erneut starten** (der
 > `git pull` des Submoduls allein reicht nicht — erst rebuilden, dann starten).
 > Auf macOS/Clang kein Build-Fix nötig, `nm -gU` bestätigt den Export.
+>
+> **Shim-ABI-Stand seit 2026-09-26 (§60.3) — nur macOS gebaut+validiert, Windows/Linux
+> noch offen, Rebuild dort zwingend vor dem nächsten Start.** Ein neuer Export:
+> `shim_button_set_label` (→ `QPushButton::setText()`) — behebt `button%`s `set-label`,
+> das bis dahin ein reiner No-op-Stub war (z. B. DrRacket-„Choose Language…"s
+> „Show Details"/„Hide Details"-Button wechselte nie sein Label). **Kein rein
+> additiver Fall ohne Konsequenz:** `wx/qt/utils.rkt` bindet `shim_button_set_label`
+> unbedingt per `get-ffi-obj` — ein altes Shim-Binary ohne diesen Export lässt das
+> Backend beim Laden fehlschlagen (Modul-Instantiierungsfehler, kein Fenster), nicht
+> nur eine fehlende Einzelfunktion. Windows/Linux müssen den Shim neu bauen, bevor sie
+> danach `PLT_QT=1` erneut starten. Gleichzeitig zwei ABI-neutrale Fixes (kein neuer
+> Export, aber Verhaltensänderung im bestehenden Code, daher nur wirksam nach Rebuild):
+> `shim_file_dialog_create` (Enter im Datei-Dialog startet nicht mehr Inline-Rename,
+> macOS-only via `#ifdef Q_OS_MACOS`) und `shim_list_box_create` (sizeHint auf 6 Zeilen
+> gedeckelt, `RacketListWidget`). Details/Verifikation: `docs/HACKING.md` §60.
 
 **Windows:**
 ```powershell
@@ -267,6 +282,8 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 - macOS: Cmd/Ctrl in jedem Modifier-Keyboard/Maus-Event vertauscht (§49.5-Root-Cause, jetzt gefixt) — ✅ 2026-09-26 (§58.1), `QCoreApplication::setAttribute(Qt::AA_MacDontSwapCtrlAndMeta)` in `shim_app_init`, ABI-neutral (kein neuer Export). Machte jeden Cmd-Menü-Shortcut (Cmd+A/C/V/…) funktionslos — funktional in echtem DrRacket verifiziert (Select-All+Copy+Paste dupliziert Text korrekt). Zusammen mit einem zweiten, unabhängigen Fix (Menü-Shortcut-**Anzeige**, reiner Racket-Code in `wx/qt/menu.rkt`, kein Rebuild nötig, §58.2) aus einem freien manuellen Test nach Block C entdeckt.
 - Popup-/Kontextmenüs (`popup-menu%`) im gesamten Backend funktionslos + Absturz bei GC — ✅ 2026-09-26, macOS (§59.1), gefunden über DrRacket „Choose Language…" (Statuszeile → Sprachauswahl-Dialog öffnete sich nie, nach mehreren Versuchen Absturz `terminated in atomic mode!`). Root Cause zwei unabhängige Bugs in `wx/qt/menu.rkt`: (1) `find-top-frame` liefert für standalone Popup-Menüs immer `#f`, das dafür vorgesehene `popup-callback`-Dispatch-Protokoll wurde komplett verworfen; (2) `QMenu::popup()` ist nicht-blockierend, nichts hielt das Menü-Objekt am Leben, GC zwischen Öffnen und Klick führte zu Use-after-free im atomaren FFI-Callback. Fix: `popup-callback` als Fallback verdrahtet + Ein-Slot-GC-Pin (spiegelt gtks `do-selected`/`global-prevent-gc`), reiner Racket-Fix, kein Rebuild nötig. Verifiziert per Minimal-Repro (erzwungener GC-Timer) + echtem DrRacket, Smoke 3/3. **Abbruch-Pfad (Klick außerhalb) direkt im Anschluss nachgerüstet** — ✅ 2026-09-26, macOS (§59.2): neuer Shim-Export `shim_menu_set_about_to_hide_cb` (`QMenu::aboutToHide`) + `cancel-none-box`-Muster (spiegelt gtks `cancel-none-box`/`do-no-selected`, order-unabhängig korrekt egal ob `aboutToHide` vor oder nach `triggered` feuert). ABI-Änderung, kein additiver Fall ohne Konsequenz (altes Binary lässt das Backend beim Laden fehlschlagen) — Windows/Linux-Rebuild vor nächstem Start zwingend, s. Build-Banner oben. Nur macOS getestet (beide Teilfixe), kein Verhaltensunterschied für Windows/Linux bei §59.1 erwartet, aber offen gegenzuprüfen.
 
+- Freier Test (Nutzer, vier Symptome in einer Nachricht): Datei-Dialog-Enter-Rename ✅ (§60.1, macOS-only Qt-Upstream-Verhalten, `EnterAcceptsFilter`, ABI-neutral), „Open Recent" beim ersten Öffnen leer ✅ (§60.2, Async-Race zwischen `aboutToShow` und Regel-2-konformem Rebuild, proaktiver Timer-Refresh in `wx/qt/queue.rkt`, reiner Racket-Fix, ~1%-Punkt CPU-Overhead gemessen), „Show Details"-Button-Label ✅ (§60.3, `button%`s `set-label` war reiner No-op-Stub, neuer Export `shim_button_set_label`, **ABI-Änderung**). Alle drei 2026-09-26, macOS, per sauberem Einzelprozess (`ps`-verifiziert) und `keystroke`-Tastatureingabe verifiziert (`key code`/`cliclick kp:` kamen im Datei-Dialog nicht an, s. §60-Methodik-Lehren). Smoke 3/3 grün.
+
 ### Reklassifiziert (kein Produktbefund)
 
 - Tools-Listbox-Klick (macOS) — reines AppleScript/AX-Automatisierungsartefakt, kein Bug (§51.2)
@@ -285,6 +302,10 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 - **Popup-Menü-Submenüs** (§59.1): `append` ruft nie `set-parent` auf ein Submenü innerhalb eines Popup-Menüs — dessen Items finden weder einen Frame noch den `on-popup`-Fallback. Für den gemeldeten Fall (kein Submenü) irrelevant, aber ein bekannter blinder Fleck.
 - **Popup-Menü-Fixe (§59.1 + §59.2) nur auf macOS verifiziert** — Windows/Linux-Gegenprüfung aussteht. §59.1 ist reiner Racket-Code (kein Verhaltensunterschied erwartet); §59.2 braucht dort zwingend einen Shim-Rebuild vor dem nächsten Start, s. Build-Banner.
 - **macOS: Nativ→Qt-Bildzwischenablage meldet Retina-Inhalte bei doppelter Pixelgröße** (`40×40` statt korrekt skaliertem `20×20`@Scale2) — `shim_clipboard_image_size`/`_get_image_argb` geben Cocoas 2×-Backing-Repräsentation ohne Skalierungskorrektur weiter, API-sichtbar falsch. Tritt nur in dieser Richtung auf (Qt schreibt selbst nur 1×). **Kein Qt-API-only-Fix möglich** (2026-09-25 (2)): `QImage::dotsPerMeterX/Y()` liefert `0`, DPI-/Skalierungsmetadaten gehen im Qt-Pasteboard-Lesepfad vollständig verloren — ein Fix bräuchte natives Pasteboard-API (Carbon `PasteboardRef` oder Objective-C++ `NSPasteboard`/`NSImage`). Details: §57.3.
+- **Choose-Language-Dialog „Collection Paths"-Buttons weiterhin teilweise verdeckt** (§60.4) — der `list-box%`-sizeHint-Deckel (6 Zeilen) behebt die „viele Zeilen"-Variante nachweislich (eigener Probe), aber im echten Dialog mit nur 1 Standard-Eintrag bleibt die Button-Reihe darunter abgeschnitten. Zweite Ursache vermutlich in `button-panel%`/`group-box-panel%`-Layoutberechnung (`button-panel%` hat bereits `stretchable-height #f`, dessen Minimum wird aber offenbar nicht durchgesetzt) — noch nicht gefunden.
+- **Choose-Language-Dialog Hintergrundfarbe links** (§60.5) — kein hartcodierter Hintergrund im Shim gefunden (`grep` nach `QPalette`/`setPalette`/`background` ergebnislos), aber auch kein belastbarer Vergleich mit nativem cocoa-DrRacket durchgeführt. Unbestätigt.
+- **Package Manager: Mehrspalten-Listen kaputt** (§60.6) — `list-box%` ist bewusst einspaltig (`QListWidget`, keine Header), Mehrspalten-Methoden sind No-ops mit Fake-Rückgabe (`get-column-size` → `(values 100 0 10000)`). Package Manager (installiertes `gui-pkg-manager-lib`) nutzt den regulären Mehrspalten-Vertrag. Substantielles Feature (Umbau auf `QTreeWidget` im Shim), vergleichbare Größenordnung wie §20/§21 — empfohlen als eigene künftige Session, kein Nebenfix.
+- **Stub-Inventar** (§60.7, mechanische Grep-Suche): `set-focus` ist auf praktisch jedem Basis-Widget (button/choice/radio-box/slider/list-box/tab-panel/check-box/message/group-panel) ein No-op, obwohl der Shim es kann (nur `canvas%` nutzt es echt) — größter Einzelfund. Weitere Kandidaten: `frame%`s `set-icon`, `message%`s `set-color`/`get-color`, `panel%`s `get/set-label-position` (immer `'horizontal`) und `adopt-child`. Keiner gefixt, alle haben nachweisbare Caller in `framework`/`mred`.
 
 ## Dokumentation
 

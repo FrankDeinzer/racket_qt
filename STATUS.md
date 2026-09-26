@@ -5,6 +5,72 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-26 (3, macOS) — Freier Test (4 Befunde): 3 gefixt+verifiziert, 1 teilweise, Package Manager + Stub-Inventar offen
+
+**Kontext:** kein Auftrag — Nutzer testete DrRacket unter `PLT_QT=1` frei und meldete
+in einer Nachricht vier Symptome: Datei-Dialog-Rename-auf-Enter, vier
+Choose-Language-Optikbugs, immer leeres „Open Recent", kaputte Package-Manager-Tabellen.
+Auftrag: prinzipielle Root-Causes finden, gründlich selbst testen, einen freien Test
+für künftige Sessions planen. Details, Verifikationsprotokolle und Methodik-Lehren
+(Display-Sleep, Prozess-Hygiene, `keystroke` vs. `key code`/`cliclick kp:`):
+`docs/HACKING.md` §60.
+
+- **§60.1 Datei-Dialog-Enter-Rename — gefixt, verifiziert.** Qt/macOS-Upstream-
+  Verhalten (`qabstractitemview.cpp`: Return/Enter ist `EditKeyPressed`-Trigger nur
+  unter `#ifdef Q_OS_MACOS`), kein racket-qt-Bug im engeren Sinn. Fix: `EnterAcceptsFilter`
+  auf den internen Datei-Views, ruft `QDialog::accept()` (enthält bereits die
+  Verzeichnis-navigieren-vs-Datei-öffnen-Logik). Macos-only, ABI-neutral. Verifiziert:
+  Datei öffnet, Verzeichnis navigiert hinein (kein Schließen).
+- **§60.2 „Open Recent" leer beim ersten Öffnen — gefixt, verifiziert (2/2, sauberer
+  Einzelprozess).** Async-Race zwischen Qts `aboutToShow` und dem Regel-2-konformen
+  `queue-event`-geposteten Demand-Callback-Rebuild — `constrained-reply`
+  (win32/gtk/cocoas Lösung dafür) ist hier nicht nutzbar (`call-as-nonatomic-retry-point`
+  wird in diesem Codebase nirgends aufgerufen). Fix: dieselbe Kaskade läuft zusätzlich
+  proaktiv alle ~2s für jedes offene Fenster (`wx/qt/queue.rkt`, reiner Racket-Fix).
+  Gemessener Overhead: ~1 Prozentpunkt CPU im Leerlauf, vernachlässigbar.
+- **§60.3 „Show Details"-Button ändert nie sein Label — gefixt, verifiziert.**
+  `button%`s `set-label` war ein reiner No-op-Stub. Neuer Export
+  `shim_button_set_label`. **ABI-Änderung, Windows/Linux-Rebuild vor nächstem Start
+  nötig** (Banner in `CLAUDE.md`).
+- **§60.4 Collection-Paths-Buttons verschwinden — teilweise gefixt.** `list-box%`s
+  `QListWidget::sizeHint()` wächst unbegrenzt mit der Zeilenzahl und wird zur
+  dauerhaften Mindesthöhe; Fix deckelt sie auf 6 Zeilen (`RacketListWidget`,
+  ABI-neutral). Behebt nachweislich die „viele Zeilen"-Variante (eigener Probe), **aber
+  im echten Dialog bleibt das Symptom im Default-Zustand (nur 1 Eintrag) bestehen** —
+  zweite, noch nicht gefundene Ursache vermutlich in der `button-panel%`/
+  `group-box-panel%`-Layoutberechnung. Künftige Session nötig.
+- **§60.5 Choose-Language-Hintergrundfarbe — offen, unbestätigt.** Kein
+  hartcodierter Hintergrund im Shim gefunden; kein belastbarer Vergleich mit nativem
+  cocoa-DrRacket in dieser Session durchgeführt.
+- **§60.6 Package Manager Mehrspalten-Listen kaputt — offen, kein Fix (substantielles
+  Feature).** `list-box%` ist bewusst einspaltig (`QListWidget`, keine Header);
+  Mehrspalten-Methoden sind No-ops mit Fake-Rückgabe. Package Manager (installiertes
+  `gui-pkg-manager-lib`, nicht im Submodul) nutzt den regulären Mehrspalten-Vertrag von
+  `list-box%`. Braucht einen `QTreeWidget`-Umbau im Shim — vergleichbare Größenordnung
+  wie frühere eigenständige Widget-Sessions (§20/§21), empfohlen als eigene künftige
+  Session.
+- **§60.7 Stub-Inventar (Grep-Suche auf Wunsch „warum prinzipiell"):** `set-focus` ist
+  auf praktisch jedem Basis-Widget (button/choice/radio-box/slider/list-box/tab-panel/
+  check-box/message/group-panel) ein No-op — nur `canvas%` setzt Fokus wirklich. Weitere
+  Kandidaten: `frame%`s `set-icon`, `message%`s `set-color`/`get-color`, `panel%`s
+  `get/set-label-position` und `adopt-child`. Keiner in dieser Session gefixt, als
+  Zielliste für künftige Sessions festgehalten (§60.7-Tabelle).
+- **Methodik:** `caffeinate -d -i -u -t <n>` vor jeder GUI-Automatisierungs-Session
+  starten (Display-Sleep hat mehrfach Ergebnisse verfälscht, teils unauffällig ohne
+  schwarzen Screenshot); `kill -9` statt `pkill -x racket` für Prozess-Hygiene, `ps aux`
+  vor/nach jedem Start verifizieren; `keystroke` statt `key code`/`cliclick kp:` für
+  Tastatureingaben in diesem speziellen Qt-Sheet.
+- `PLT_QT=1 raco test tests/smoke.rkt`: 3/3 grün nach allen Fixes.
+- Neue Probes: `examples/button-set-label-probe.rkt`, `examples/list-box-sizehint-probe.rkt`.
+- Nur macOS getestet — Windows/Linux-Rebuild+Gegenprüfung offen (§60.3-ABI-Änderung
+  zwingend, §60.1/§60.2/§60.4 sind ABI-neutral, aber wie üblich gegenprüfen statt
+  annehmen).
+- Freier-Test-Plan für eine künftige Session: siehe Ende von `docs/HACKING.md` §60
+  bzw. Handover-Notiz — Priorität: `set-focus`-Stub-Reichweite austesten, Package
+  Manager, native-vs-Qt-Farbvergleich für §60.5.
+
+---
+
 ## Session 2026-09-26 (2, macOS) — Popup-Menüs funktionslos + Absturz bei GC, gefixt
 
 **Kontext:** kein Auftrag — Nutzer testete DrRacket unter `PLT_QT=1` frei und meldete:

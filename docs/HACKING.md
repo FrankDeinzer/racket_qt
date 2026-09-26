@@ -7427,3 +7427,259 @@ bekannter blinder Fleck für ein Popup-Menü mit Untermenüs.
 | „Choose Language…" öffnet nie / jedes Popup-Menü-Item wirkungslos | `find-top-frame` liefert für standalone Popup-Menüs immer `#f`, `popup-callback`-Fallback verworfen | `on-popup`/`popup-callback`-Fallback verdrahtet | `wx/qt/menu.rkt` | Nein |
 | Absturz nach mehreren Versuchen (`terminated in atomic mode!`) | `QMenu::popup()` nicht-blockierend, nichts hielt das Menü-Objekt gegen GC | Ein-Slot-GC-Pin (`pinned-popup`) | `wx/qt/menu.rkt` | Nein |
 | Abbruch (Klick außerhalb) feuert kein `'menu-popdown-none` | Kein Qt-Signal dafür verdrahtet | `QMenu::aboutToHide` + `cancel-none-box` (order-unabhängig) | `qt-shim/src/shim.cpp` + `wx/qt/menu.rkt` | Ja (Windows/Linux offen) |
+
+## §60 — Freier Test (4 Befunde) + Stub-Inventar: zwei Fixes klar verifiziert, zwei teilweise/offen (2026-09-26)
+
+**Kontext:** kein Auftrag — Nutzer testete DrRacket unter `PLT_QT=1` frei und meldete vier
+unabhängige Symptome in einer Nachricht: (1) Enter im Datei-Öffnen-Dialog startet
+Inline-Rename statt zu öffnen; (2) „Choose Language…" hat vier optische/funktionale
+Probleme (Hintergrundfarbe, Collection-Paths-Buttons verschwinden, „Show Details"
+ändert sein Label nicht, Dialog insgesamt höher); (3) „Open Recent" ist immer leer;
+(4) Package Manager („Currently Installed"/„Available from Catalog") zeigt fast nur
+leere Spalten. Nutzer verlangte explizit: prinzipielle Root-Causes finden (nicht nur
+einzeln flicken), gründlich selbst testen, und einen eigenen „freien Test" für eine
+künftige Session planen.
+
+**Methodik-Lehren dieser Session (wichtig für künftige GUI-Automatisierung):**
+- **Anzeige-Sleep** (macOS' `displaysleep`, Default 5 min) hat mehrfach GUI-Automatisierung
+  scheitern lassen — mal offensichtlich (komplett schwarzer Screenshot), mal unauffällig
+  (`System Events`-Abfragen liefern leere/-1728-Fehler statt eines Fensters, obwohl der
+  Prozess quicklebendig ist). AppleScript-Synthetic-Events setzen den Idle-Timer nicht
+  zuverlässig zurück. Fix: `caffeinate -d -i -u -t <sekunden>` **vor** einer
+  Automatisierungs-Session starten (nicht nur `-u`, das reicht nicht).
+- **Prozess-Hygiene:** `pkill -x racket`/SIGTERM tötet einen laufenden DrRacket-Prozess
+  auf dieser Maschine **nicht zuverlässig** (Racket scheint SIGTERM in einen Break zu
+  übersetzen, den die GUI ignoriert) — mehrere Sessions blieben unbemerkt parallel am
+  Leben, `tell process "racket"` bindet dann nicht deterministisch an die zuletzt
+  gestartete. `kill -9 <pid>` + `ps aux | grep racket` **vor und nach** jedem Start
+  verifizieren, sonst sind Timing-Messungen (z. B. „reagiert der Fix jetzt schneller?")
+  wertlos, weil man versehentlich einen alten, längst warmgelaufenen Prozess testet.
+- **Tastatureingaben in einen Qt-Sheet/-Dialog:** `osascript … key code N` und
+  `cliclick kp:<key>` kamen in diesem Dialog wiederholt nicht an (weder Return noch
+  Pfeiltasten bewegten die Auswahl), obwohl `System Events` den Klick auf denselben
+  Prozess unmittelbar davor korrekt zustellte. `osascript … keystroke <taste>` (bzw.
+  `keystroke return`) hat zuverlässig funktioniert. Fokus-Diagnose: einen Buchstaben
+  tippen und prüfen, ob er (a) die Auswahl per Type-Ahead verschiebt (View hat Fokus)
+  oder (b) im Textfeld erscheint (Zeileneditor hat Fokus) — bevor man ein Ausbleiben
+  einer Reaktion als Produktbefund fehlinterpretiert.
+- **Klicks auf AX-Zeilen** (`click row N of outline …`) waren intermittierend
+  wirkungslos (keine sichtbare Auswahl); ein echter HID-Klick über `cliclick c:x,y`
+  (Koordinaten aus `position`/`size` der AX-Zeile berechnet, `screencapture`-Pixel
+  durch 2 für die Punkt-Koordinaten von `cliclick`/AppleScript) war durchgehend
+  zuverlässig.
+
+### §60.1 Datei-Dialog: Enter startet Inline-Rename statt zu öffnen (macOS-only)
+
+**Root Cause:** Qt-Upstream-Verhalten, kein racket-qt-Bug im engeren Sinn — in Qts
+eigenem Quellcode (`qabstractitemview.cpp`s `keyPressEvent`, lokal geprüft unter
+`~/Qt/6.11.0/Src/qtbase/src/widgets/itemviews/qabstractitemview.cpp:2561-2582`)
+behandelt **nur** der `#ifdef Q_OS_MACOS`-Zweig Return/Enter als `EditKeyPressed`-
+Trigger (macOS-Finder-Konvention: Enter benennt um, nicht F2). Der `#else`-Zweig
+(Windows/Linux) emittiert bei Return/Enter stattdessen `activated(currentIndex())`
+und behandelt F2 separat — dort bestand der Bug nie.
+
+**Fix (`qt-shim/src/shim.cpp`, `#ifdef Q_OS_MACOS`-gescoped, kein neuer Export, keine
+ABI-Änderung):** ein `EnterAcceptsFilter : public QObject` wird auf alle
+`QListView`/`QTreeView`-Kinder des `QFileDialog` installiert (`installEventFilter`),
+fängt `Key_Return`/`Key_Enter` **vor** der View ab und ruft `QDialog::accept()` direkt
+auf — dieselbe Methode, die der „Open"-Button auslöst, deren `QFileDialog::accept()`-
+Override (`qfiledialog.cpp:2720ff`) bereits die korrekte „ist es ein Verzeichnis? Dann
+hineinnavigieren statt schließen"-Logik enthält. F2 und die Kontextmenü-„Rename"-
+Aktion sind unberührt (kein Blanket-`setEditTriggers(NoEditTriggers)` — das hätte auch
+den F2-Rename-Weg für alle entfernt, den niemand als kaputt gemeldet hat).
+
+**Verifikation (macOS, sauberer Einzelprozess, `keystroke return` statt `key code`):**
+- Zeile mit einer echten Datei (`CLAUDE.md`) ausgewählt, Enter gedrückt →
+  Dialog schließt, `get-file` liefert den korrekten Pfad zurück (Öffnen-Fall).
+- Zeile mit einem Verzeichnis (`docs`) ausgewählt (per getipptem Buchstaben `d` via
+  Type-Ahead, Fokus-Check bestanden), Enter gedrückt → Dialog **navigiert hinein**
+  („Look in:" wechselt auf `.../docs`), schließt nicht (Verzeichnis-Fall, beweist dass
+  `accept()`s eingebaute Logik korrekt greift).
+- Kein Rebuild auf Windows/Linux nötig (macOS-only-Codepfad, kompiliert dort mit,
+  ändert aber nichts), aber wie üblich künftig gegenprüfen statt annehmen.
+
+### §60.2 „Open Recent" beim ersten Öffnen leer — Race zwischen `aboutToShow` und async Rebuild
+
+**Root Cause:** strukturelle Eigenschaft des Qt-Backend-Designs, kein Einzel-Bug.
+win32 (`WM_INITMENU`, blockierend), gtk (`GtkMenuItem`-„select"-Signal via
+`constrained-reply`, blockierend) und cocoa (Event-Suspend-Gate) lassen den
+Framework-Demand-Callback-Kaskade (`menu-bar%`s `on-demand`, das u. a.
+`framework/private/handler.rkt`s `install-recent-items` für „Open Recent" aufruft)
+**synchron** laufen, bevor das native Menü überhaupt sichtbar wird. Qt/wx-qt darf das
+nicht (Regel 2: FFI-Callbacks dürfen nur posten, nie synchron zurückrufen) —
+`wx/qt/menu.rkt`s `about-to-show-cb` postet die Kaskade nur per `queue-event`; Qt
+zeigt das (noch alte) Menü, sobald der atomare Callback zurückkehrt, unabhängig davon,
+ob der gepostete Thunk schon gelaufen ist.
+
+`install-recent-items`s eigener Kommentar („we run out of time during the callback
+and things go awry […] lets try to do it twice") zeigt, dass dieses Timing-Problem dem
+Framework selbst seit Langem bekannt ist — nur reicht sein Workaround (synchron +
+einmal nachgelagert) hier nicht, weil hier **beide** Aufrufe asynchron/verzögert sind.
+
+**Versuch widerlegt — `constrained-reply`/`try-atomic` (das gtk/win32/cocoa dafür
+nutzen) ist hier NICHT nutzbar:** dieser Mechanismus (`wx/common/freeze.rkt`) basiert
+auf `call-as-nonatomic-retry-point`, das in diesem Codebase nirgends aufgerufen wird —
+`can-try-atomic?` würde also immer `#f` liefern. Diese Backends registrieren ihre
+on-demand-Callbacks vermutlich als gewöhnliche (nicht `#:atomic?`) FFI-Callbacks, was
+für Qt laut Regel 2 bewusst ausgeschlossen ist. Ein Blockieren des nativen
+`aboutToShow`-Handlers in C++, bis der gepostete Racket-Thunk fertig ist, würde
+zudem denselben Aufruf-Stack blockieren, der den Thunk erst ausführen müsste
+(Deadlock-Risiko) — verworfen.
+
+**Fix (`wx/qt/queue.rkt`, reiner Racket-Code, kein Shim-/ABI-Wechsel):** statt zu
+versuchen, die Race am Anzeige-Zeitpunkt zu schließen, wird dieselbe (bereits
+Regel-2-sichere) `on-menu-click`-Kaskade **proaktiv** alle 40 Pump-Ticks (~2s) für
+jedes offene Top-Level-Fenster erneut angestoßen (`refresh-on-demand-menus!`,
+`get-top-level-windows`) — die Daten sind dadurch normalerweise schon fertig, bevor
+ein Nutzer überhaupt das Menü öffnet. Der reaktive `aboutToShow`-Pfad bleibt
+zusätzlich bestehen (redundant, aber harmlos).
+
+**Verifikation (sauberer Einzelprozess, per `ps` vor/nach jedem Start bestätigt):**
+- **Vorher (Baseline, ohne Fix):** frisches Fenster, „File" → „Open Recent" sofort
+  danach geöffnet → leere Liste (nur der Platzhalter). Zweites Öffnen (nach dem
+  ersten Schließen) → korrekt gefüllt. Bestätigt die Race, unabhängig vom Fix.
+- **Nachher (mit Fix), 2/2 Durchläufe:** frisches Fenster (Bereitschaft nach
+  ~400ms), „File" → „Open Recent" **sofort** danach (keine künstliche Verzögerung)
+  → bereits vollständig gefüllte, korrekte Liste (19 Einträge inkl. Sortierung).
+- **Overhead gemessen:** CPU-Zeit über 15s Leerlauf mit Fix 0,91s vs. ohne Fix
+  (Intervall testweise auf einen sehr hohen Wert gesetzt) 0,76s — rund 1
+  Prozentpunkt durchschnittliche CPU-Last, vernachlässigbar.
+  `menu-items-still-same?` (in `install-recent-items`) macht einen unveränderten
+  Rebuild günstig (reiner String-Vergleich, kein Datei-I/O in diesem Pfad).
+- `PLT_QT=1 raco test tests/smoke.rkt`: 3/3 grün.
+- Nur macOS getestet — reiner Racket-Fix, für Windows/Linux wird kein
+  Verhaltensunterschied erwartet, aber gegenprüfen statt annehmen.
+
+### §60.3 `button%`s `set-label` war ein reiner No-op-Stub
+
+**Root Cause:** trivial — `wx/qt/button.rkt`s `set-label` bestand aus
+`(when (string? lbl) (void))`, Kommentar „Qt label change not exposed in shim yet;
+spike only". Kein `shim_button_set_label` existierte. Erklärt exakt den gemeldeten
+Befund: „Show Details"-Button in „Choose Language…" ändert sein Label nie.
+
+**Fix:** neuer Export `shim_button_set_label(void* btn, const char* label)` →
+`QPushButton::setText()` (`qt-shim/src/shim.cpp`), `button.rkt`s `set-label` ruft ihn
+jetzt auf. **ABI-Änderung** (neuer Export, `utils.rkt` bindet ihn unbedingt per
+`get-ffi-obj`) — altes Shim-Binary lässt das Backend beim Laden fehlschlagen, s.
+Banner in `CLAUDE.md`.
+
+**Verifikation:** `examples/button-set-label-probe.rkt` (neu) togglet ein Button-Label
+bei jedem Klick — Screenshot vor/nach Klick zeigt „Show Details" → „Hide Details".
+Im echten „Choose Language…"-Dialog: „Hide Details (⌘D)" ↔ „Show Details (⌘D)"
+wechselt jetzt korrekt bei jedem Klick.
+
+### §60.4 `list-box%`s `sizeHint()` wächst unbegrenzt mit der Zeilenanzahl — teilweise gefixt
+
+**Root Cause:** `QListWidget::sizeHint()` bemisst sich an **allen** Zeilen (kein
+Deckel), anders als gtk/win32s native Listen-Controls, die eine kleine, konstante
+bevorzugte Höhe melden und Überlänge per eigener Scrollbar behandeln.
+`wx/qt/window.rkt`s `seed-size-from-native-hint` liest diesen Wert genau einmal nach
+dem Befüllen und macht ihn zur dauerhaften Mindesthöhe des Widgets — bei einer langen
+Liste (z. B. „Choose Language…"s „Collection Paths") kann dieses Minimum größer sein
+als der verfügbare Platz im umgebenden Panel, was Geschwister-Widgets (die
+Add/Remove/Raise/Lower-Buttons darunter) aus dem sichtbaren Bereich drängt statt dass
+die Liste eine Scrollbar bekommt.
+
+**Fix (`qt-shim/src/shim.cpp`, kein neuer Export, keine ABI-Änderung):** ein
+`RacketListWidget : public QListWidget` überschreibt `sizeHint()` und deckelt die
+Höhe auf `sizeHintForRow(0) * 6 + 2*frameWidth()` (6 Zeilen als plausibler, aber
+**nicht** von einer konkreten gtk/win32/cocoa-Konstante abgeleiteter Standardwert —
+noch gegenzuprüfen). `shim_list_box_create` instanziert jetzt diese Subklasse statt
+eines rohen `QListWidget` (weiterhin sicher als `QListWidget*` gecastet in allen
+anderen `shim_list_box_*`-Funktionen, single/non-virtual inheritance, gleiches Muster
+wie `RacketMenu`).
+
+**Verifikation:**
+- `examples/list-box-sizehint-probe.rkt` (neu, mirrort die Collection-Paths-Struktur:
+  20-Zeilen-Liste über einer Button-Reihe in einem 400×220-Fenster): Buttons bleiben
+  sichtbar, Liste bekommt eine Scrollbar statt sich aufzublähen — **vorher/nachher
+  nicht gegengetestet** (Fix war schon eingebaut, als der Probe geschrieben wurde;
+  Regression-Nachweis nur indirekt über den funktionierenden Endzustand).
+- **Im echten „Choose Language…"-Dialog bleibt das gemeldete Symptom im
+  Default-Zustand (nur 1 Eintrag „<<default collection paths>>") weiterhin
+  bestehen** — die Button-Reihe unter „Collection Paths" ist nach wie vor nur als
+  abgeschnittener oberer Rand sichtbar (Screenshot-Crop bestätigt), obwohl die Liste
+  hier gar nicht viele Zeilen hat. Das spricht dafür, dass dies **kein reines
+  sizeHint-Problem** ist, sondern eine zweite, noch nicht gefundene Ursache in der
+  umgebenden `group-box-panel%`/`button-panel%`-Layoutberechnung hat (laut
+  Recherche: `button-panel%` hat bereits `stretchable-height #f`, sein gemeldetes
+  Minimum wird trotzdem offenbar nicht durchgesetzt). **Nicht vollständig gefixt,
+  künftige Session nötig** — der hier gelandete Fix behebt nachweislich die
+  „viele Zeilen"-Variante des Symptoms, aber nicht die im Originalbefund gezeigte
+  Variante mit kurzer Liste.
+- `PLT_QT=1 raco test tests/smoke.rkt`: 3/3 grün, keine Regression an anderen
+  list-box%-Nutzern (Preferences etc. nicht einzeln gegengeprüft — der 6-Zeilen-
+  Deckel könnte dort sichtbare Listen mit mehr als 6 Einträgen betreffen, offen für
+  die künftige Session).
+
+### §60.5 Choose-Language-Dialog: Hintergrundfarbe links — unbestätigt, kein Fix
+
+Im Screenshot des echten Dialogs ist keine eindeutige Farbabweichung zwischen dem
+Dialog-Hintergrund und den weißen Hierlist-/Textvorschau-Boxen links erkennbar, die
+über das für verschachtelte Listen-/Text-Widgets in einem grauen Dialog übliche Maß
+hinausgeht — aber es gab in dieser Session **keinen** Seite-an-Seite-Vergleich mit
+echtem cocoa-DrRacket, der eine belastbare Aussage erlauben würde. `grep` nach
+`QPalette`/`setPalette`/`background` in `shim.cpp` bleibt ergebnislos (kein
+hartcodierter Hintergrund gefunden) — falls es einen echten Unterschied gibt, ist er
+nicht durch eine offensichtliche hartcodierte Konstante verursacht. **Offen für die
+künftige Session, mit nativem Vergleichsscreenshot.**
+
+### §60.6 Package Manager: Mehrspalten-Listen kaputt — offen, kein Fix (substantielles Feature)
+
+**Root Cause (bestätigt, kein Fix versucht):** `wx/qt/list-box.rkt` ist bewusst
+**einspaltig** (`QListWidget`, keine Header) — `set-column-order`/`set-column-label`/
+`set-column-size`/`delete-column`/`append-column` sind No-ops,
+`get-column-size` liefert einen Fake-Wert `(values 100 0 10000)`. Der Package Manager
+(`gui-pkg-manager-lib`, installiertes Paket, **nicht** im Submodul) nutzt für beide
+Tabs („Currently Installed", „Available from Catalog") `list-box%` im echten
+Mehrspalten-Modus (`columns`, `'column-headers`, `'clickable-headers`,
+`set-column-width`) — ein regulärer, dokumentierter Teil des `list-box%`-Vertrags
+(`gui-doc/scribblings/gui/list-box-class.scrbl`), kein Sonderfall des Package
+Managers. Jeder Mehrspalten-`set`/`set-string`-Aufruf landet auf derselben (einzigen)
+Spalte, überschreibt sich gegenseitig; Spalten-Header/-Sortierung feuern nie
+(`column-control-event%` bleibt tot).
+
+**Warum kein Fix in dieser Session:** substantielles Feature, vergleichbar mit
+früheren eigenständigen Widget-Implementierungen (§20/§21) — erfordert einen Wechsel
+von `QListWidget` auf `QTreeWidget` im Shim (Header-Labels, Zelle-pro-Spalte via
+`setText(col, …)`, `header()->sectionClicked` → `column-control-event%` per
+`queue-event`, Regel 2), plus Anpassung von `wx/qt/list-box.rkt`, die bereits
+ankommenden `columns`/`column-order`-Initargs tatsächlich zu nutzen statt sie zu
+ignorieren. Referenzimplementierung: `wx/gtk/list-box.rkt`s `GtkTreeView`-Anbindung.
+Empfohlen als eigenständige künftige Session/Milestone, nicht als Neben-Fix.
+
+### §60.7 Stub-Inventar (mechanische Grep-Suche, `wx/qt/*.rkt`)
+
+Auf Wunsch „warum funktioniert das prinzipiell nicht" — zwei der vier gemeldeten Bugs
+(§60.3, §60.6) waren stille No-op-Stubs. Eine grobe Grep-Suche nach `(void)`-Rümpfen
+mit auffindbaren echten Callern in `framework`/`mred` fand weitere Kandidaten, **keiner
+davon in dieser Session gefixt**, aber hier als Zielliste für künftige Sessions
+festgehalten:
+
+| Fund | Datei:Zeile | Einschätzung |
+|---|---|---|
+| `set-focus` No-op auf praktisch jedem Basis-Widget (button/choice/radio-box/slider/list-box/tab-panel/check-box/message/group-panel — nur `canvas%` überschreibt es echt über `shim_widget_set_focus`) | `window.rkt:212` (Default), diverse | **Größter Einzelfund.** `(send widget focus)` ist reguläre öffentliche `racket/gui`-API (`mrwindow.rkt:155`). Programmatisches Fokus-Setzen ist auf fast jedem Widget-Typ dieses Backends wirkungslos, obwohl der Shim es kann. |
+| `set-icon` No-op (`frame.rkt:183-187`) | `frame.rkt` | Dock/Taskbar-Icon eines Fensters lässt sich nie setzen; Caller u. a. `framework/splash.rkt`. |
+| `message%`s `set-color`/`get-color` (`message.rkt:46-47`) | `message.rkt` | `set-color` wirkungslos, `get-color` lügt mit hartem `#f`. |
+| `panel%`s `get/set-label-position` (`panel.rkt:20-21`, immer `'horizontal`) | `panel.rkt` | win32/gtk/cocoa führen echten Zustand; beeinflusst Label-Ausrichtung beschrifteter Controls (`wxlitem.rkt`, `wxtextfield.rkt` fragen es ab). |
+| `panel%`s `adopt-child` (`panel.rkt:19`) | `panel.rkt` | win32/gtk reparenten dort echt (`set-parent`); Qt macht nichts — betrifft Umhängen von Kind-Widgets zwischen Containern (`mrcontainer.rkt`). |
+
+Harmlose/erwartete No-ops (nicht weiter verfolgt): Canvas-Scroll-/Combo-Basisklassen-
+Defaults (echte Implementierung sitzt in Mixins/spezifischeren Klassen), `window.rkt`s
+`center`/`reset-cursor`/`screen-to-client`/`parent-enable`/u. a. (laut Code-Kommentar
+in diesem Backend unbenutzt), `menu.rkt`s „stubs required by glue"
+(`select`/`set-help-string`/`set-self-item`/`get-item`/`removing-item`), kosmetische
+`set-border`/`direct-show` auf mehreren Item-Widgets, `message%`s
+`set-preferred-size` (fällt sauber zurück).
+
+### §60.8 Zusammenfassung
+
+| Symptom | Root Cause | Status | Ort | Rebuild nötig |
+|---|---|---|---|---|
+| Enter im Datei-Dialog startet Rename | Qt/macOS-Upstream-Verhalten (`EditKeyPressed` nur unter `Q_OS_MACOS`) | ✅ gefixt, verifiziert (Datei + Verzeichnis) | `qt-shim/src/shim.cpp` (macOS-only) | Nein (ABI-neutral) |
+| „Open Recent" beim ersten Öffnen leer | Async-Race zwischen `aboutToShow` und Regel-2-konformem `queue-event` | ✅ gefixt, verifiziert (2/2, sauberer Prozess) | `wx/qt/queue.rkt` | Nein (reiner Racket-Fix) |
+| „Show Details"-Button ändert Label nie | reiner No-op-Stub, kein Shim-Export vorhanden | ✅ gefixt, verifiziert | `qt-shim/src/shim.cpp` + `button.rkt` | Ja (neuer Export) |
+| Collection-Paths-Buttons verschwinden | `list-box%`-sizeHint unbegrenzt (Teilursache) | 🟡 teilweise — „viele Zeilen"-Fall gefixt, „kurze Liste"-Fall im echten Dialog weiterhin reproduzierbar, zweite Ursache offen | `qt-shim/src/shim.cpp` | Nein (ABI-neutral), aber Fix unvollständig |
+| Choose-Language-Hintergrundfarbe | unbestätigt | ⚪ offen, kein belastbarer Befund ohne nativen Vergleich | — | — |
+| Package Manager Mehrspalten-Listen kaputt | `list-box%` bewusst einspaltig, Mehrspalten-API sind No-ops mit Fake-Werten | ⚪ offen, substantielles Feature (eigene Session) | `qt-shim/src/shim.cpp` + `wx/qt/list-box.rkt` | Ja (bei Umsetzung) |
+| `set-focus`/`set-icon`/`message%` Farbe/`panel%` Label-Position+Reparenting | stille No-op-Stubs (Stub-Inventar) | ⚪ nicht gefixt, als Zielliste dokumentiert | `wx/qt/*.rkt` | Ja (bei Umsetzung) |
