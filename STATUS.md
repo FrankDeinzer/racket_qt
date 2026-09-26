@@ -5,6 +5,44 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-26 (2, macOS) — Popup-Menüs funktionslos + Absturz bei GC, gefixt
+
+**Kontext:** kein Auftrag — Nutzer testete DrRacket unter `PLT_QT=1` frei und meldete:
+Klick auf „Determine language from source" → „Choose Language…" öffnet den
+Sprachauswahl-Dialog nicht; nach mehreren Versuchen Absturz
+(`invalid memory reference … terminated in atomic mode!`).
+
+- **Zwei unabhängige Bugs in `wx/qt/menu.rkt`, betreffen JEDES Popup-/Kontextmenü im
+  Backend, nicht nur die DrRacket-Sprachauswahl:**
+  1. Item-Klicks in einem *standalone* Popup-Menü (kein Menüleisten-Parent) fanden
+     nie ihr Ziel — `find-top-frame` liefert dort immer `#f`, und das dafür
+     vorgesehene `popup-callback`-Dispatch-Protokoll (`mred/private/mrpopup.rkt`)
+     wurde vom Konstruktor mit dem Kommentar „used by GTK popup menus; ignored
+     here" komplett verworfen.
+  2. `QMenu::popup()` ist nicht-blockierend (Regel 1) — nichts auf Racket-Seite hielt
+     das `popup-menu%`-Objekt (und seine `retained-callbacks`-Closures) am Leben,
+     während das native Menü offen war. Lief der GC dazwischen, hing die native
+     `QAction::triggered`-Bindung danach an einer freigegebenen Closure → Absturz
+     beim nächsten Klick. gtk pinnt genau dafür via `global-prevent-gc`; win32
+     braucht das nicht (`TrackPopupMenu` blockiert).
+- **Fix:** `popup-callback` in ein Feld übernehmen statt verwerfen; `popup` pinnt das
+  Menü-Objekt (Ein-Slot-Strategie) und merkt sich den `on-popup`-Callback; der
+  Item-Klick fällt auf `on-popup`/`popup-callback` zurück, wenn `find-top-frame`
+  scheitert (spiegelt gtks `do-selected`). **Reiner Racket-Fix, kein Shim-/
+  ABI-Wechsel, kein Rebuild nötig.**
+- **Verifikation:** minimales Repro-Skript mit `timer%`-erzwungenem GC reproduzierte
+  den Absturz vor dem Fix, lief danach 5× sauber durch. Echtes DrRacket: „Choose
+  Language…" öffnet jetzt zuverlässig den vollen Dialog, Cancel schließt sauber.
+  Smoke 3/3 grün. Nur macOS getestet — kein Verhaltensunterschied für
+  Windows/Linux erwartet (kein Shim-Bezug), aber noch gegenzuprüfen.
+- **Offen:** Abbruch-Pfad (Klick außerhalb) ruft `popup-release` nie auf, bräuchte
+  `QMenu::aboutToHide` als neuen Shim-Export (ABI-Änderung) — DrRacket ist davon
+  nicht betroffen (frisches Popup-Menü pro Klick), ein wiederverwendetes
+  Popup-Menü-Objekt könnte aber betroffen sein. Details: `docs/HACKING.md` §59.
+- Commit noch offen — siehe Frage an den Nutzer zum Zwei-Repo-Commit (Regel 6).
+
+---
+
 ## Session 2026-09-26 (macOS) — Freier manueller Test deckt Cmd/Ctrl-Vertauschung auf, zwei Fixes
 
 **Kontext:** kein Auftrag — Nutzer testete DrRacket unter `PLT_QT=1` frei und meldete:

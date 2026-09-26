@@ -7260,3 +7260,101 @@ Beide Fixes sind **macOS-spezifisch** (der `#ifdef __APPLE__`-Guard in §58.1;
 nächsten gebündelten Windows/Linux-Durchlauf als „kein Verhaltensunterschied
 erwartet" gegenprüfen). **Ergänzt Block C** (§55–§57), ist aber kein Teil davon —
 eigenständiger Fund aus freiem manuellem Test nach Abschluss des Blocks.
+
+## §59 — Popup-Menüs (Kontextmenüs, `popup-menu%`) funktionslos + Absturz bei GC (2026-09-26)
+
+**Kontext:** freier manueller Test, kein Auftrags-Prompt. Nutzer klickte in DrRacket
+unten in der Statuszeile auf „Determine language from source [custom]" → Popup mit
+„Choose Language…" öffnet sich → Klick auf „Choose Language…" → **nichts passiert**
+(der große Sprachauswahl-Dialog erscheint nicht). Nach mehreren Versuchen: Absturz,
+`invalid memory reference … internal-error: terminated in atomic mode!` — exakt dasselbe
+Absturzbild wie in mehreren früheren §-Einträgen (Regel 2: FFI-Callback mit
+`#:atomic? #t`, das gegen einen bereits freigegebenen Closure läuft).
+
+**Root Cause — zwei unabhängige Bugs in `wx/qt/menu.rkt`, beide betreffen JEDES
+Popup-Menü im gesamten Backend (Kontextmenüs, nicht nur DrRacket-Sprachauswahl):**
+
+1. **„Nichts passiert" — Dispatch-Lücke.** `menu%`s Item-Klick-Callback (in `append`)
+   routet ausschließlich über `find-top-frame`, das die `the-parent`-Kette
+   hochläuft. Diese Kette wird **nur** von `menu-bar.rkt`s `set-parent` gesetzt (beim
+   Einhängen in eine Menüleiste) — ein *standalone* Popup-Menü (`(new popup-menu%)`,
+   gezeigt via `window%.popup-menu`) hat nie einen Parent, `find-top-frame` liefert
+   `#f`, der Klick-Callback wird zum No-op. Das eigentlich dafür vorgesehene
+   Dispatch-Protokoll — `mred/private/mrpopup.rkt`s `popup-callback`, das per
+   `wx:id-to-menu-item`/`command` das echte `menu-item%`-Callback aufruft — wurde vom
+   Konstruktor zwar entgegengenommen, aber mit dem Kommentar „used by GTK popup
+   menus; ignored here" **komplett verworfen**. gtks `menu%` (`wx/gtk/menu.rkt`,
+   `do-selected`) macht exakt das, was hier fehlte: `get-top-parent` zuerst
+   versuchen, sonst auf den bei `popup` übergebenen `queue-cb`/`popup-callback`
+   zurückfallen.
+2. **Absturz — GC-Use-after-free.** `shim_menu_popup` ruft `QMenu::popup()` (Regel 1:
+   nicht-blockierend, kein `exec()`). `window%.popup-menu` (z. B. `wx/qt/window.rkt`)
+   kehrt also sofort zurück, während das native `QMenu` noch sichtbar auf einen Klick
+   wartet. DrRacket (wie jeder Aufrufer) hält das `popup-menu%`/`menu%`-Objekt nur als
+   lokale Variable in seinem `on-event`-Handler — nach dessen Rückkehr referenziert
+   **nichts** mehr das Objekt, insbesondere nicht `retained-callbacks` (die
+   `_callback_t`-Closures der `QAction`s). Läuft der Racket-GC in der Zeitspanne, in
+   der das Menü offen auf dem Bildschirm steht, wird das Objekt eingesammelt; ein
+   späterer Klick lässt die native `QAction::triggered`-Signal-Bindung in eine
+   freigegebene Closure springen → `invalid memory reference` im atomaren Callback.
+   Erklärt auch, warum schnelle Wiederholungsversuche (< 1s zwischen Öffnen und
+   Klick) nur „nichts passiert" zeigten (Bug 1, kein GC-Fenster), langsamere
+   Versuche aber abstürzten (Bug 1 *und* Bug 2). gtk pinnt genau dafür das
+   Menü-Objekt in `global-prevent-gc` (`wx/gtk/menu.rkt`s `popup`/`do-selected`);
+   win32 braucht das nicht, weil `TrackPopupMenu` blockiert (Regel 1 gilt dort nicht,
+   ist aber auch keine eigene Event-Loop, sondern OS-natives modales Tracking).
+
+**Fix — reiner Racket-Code, `wx/qt/menu.rkt`, kein Shim-/ABI-Wechsel, kein Rebuild
+nötig:**
+
+- `popup-callback` (Init-Arg) wird jetzt in ein Feld (`the-popup-callback`)
+  übernommen statt verworfen (Init-Args sind in Racket-Klassen nur im unmittelbaren
+  Klassenkörper sichtbar, nicht in Methoden-Closures — daher die Umbindung).
+- `popup` speichert den von `window%.popup-menu` übergebenen `cb` als Feld
+  `on-popup` und **pinnt** `this` in einer modulweiten Variable `pinned-popup`
+  (Ein-Slot-Strategie, keine Hash/Set: es ist praktisch nie mehr als ein Popup
+  gleichzeitig offen; ein abgebrochenes/nicht ausgewähltes Popup verliert seinen Pin
+  erst beim nächsten `popup`-Aufruf — begrenzt den Leak auf maximal ein Objekt statt
+  permanent zu pinnen).
+- Der Item-Klick-Callback in `append` versucht `find-top-frame` zuerst
+  (Menüleisten-Fall, unverändert), fällt sonst auf `on-popup`/`the-popup-callback`
+  zurück — spiegelt gtks `do-selected` exakt: konsumiert `on-popup` (verhindert
+  Doppel-Feuern), entfernt den Pin, und baut `popup-event%` (`set-menu-id id`) **im
+  nachgelagerten, über `on-popup` geposteten Thunk**, nicht im atomaren FFI-Callback
+  selbst (Regel 2: der native Callback postet nur, rechnet nicht).
+- **Nicht mitgefixt (bewusst außerhalb des Umfangs dieses Fixes):** der
+  Abbruch-Pfad (Klick außerhalb des Menüs) ruft `popup-release`/`'menu-popdown-none`
+  nie auf — dafür bräuchte es ein `QMenu::aboutToHide`-Signal, ein neuer Shim-Export
+  (ABI-Änderung, Drei-Maschinen-Rebuild). DrRacket erzeugt bei jedem Klick ein
+  frisches `popup-menu%`, ist davon nicht betroffen; ein **wiederverwendetes**
+  Popup-Menü-Objekt könnte nach einem Abbruch beim nächsten Öffnen verweigern
+  (`popup-grab` nie released) — als offener Befund unten vermerkt.
+  Submenüs *innerhalb* eines Popup-Menüs sind ebenfalls nicht abgedeckt (`append`
+  ruft nie `set-parent` auf ein Submenü) — für den gemeldeten Fall ohne Submenü
+  irrelevant, aber ein bekannter blinder Fleck.
+
+**Verifikation:**
+- Minimales Repro-Skript (`canvas%`, `on-event` erzeugt bei jedem Klick ein frisches
+  `popup-menu%` mit einem `menu-item%`, `timer%` erzwingt alle 200ms `(collect-garbage
+  'major)`): **vor** dem Fix reproduzierbar abgestürzt (identisches Fehlerbild,
+  `cliclick`-Automatisierung, Öffnen → 1–1.5s warten → Klick auf Item) — **nach** dem
+  Fix 5× in Folge (inkl. Abbruch-dann-Neuöffnen-Zyklus) sauber `ITEM CALLBACK FIRED`,
+  kein Absturz.
+- Echtes DrRacket (`PLT_QT=1`): „Determine language from source" → „Choose
+  Language…" öffnet jetzt zuverlässig den vollen Sprachauswahl-Dialog (hierarchische
+  Liste + Detail-Panel rechts), Cancel schließt sauber, Prozess bleibt stabil.
+- `PLT_QT=1 raco test tests/smoke.rkt`: 3/3 grün (keine Regression).
+- Nur macOS getestet in dieser Session — reiner Racket-Fix, für Windows/Linux wird
+  **kein** Verhaltensunterschied erwartet (identischer Code-Pfad, kein Shim-Bezug),
+  aber wie üblich gegenprüfen statt annehmen.
+
+**Offener Befund für eine künftige Session:** Abbruch-Pfad (`popup-release`/
+`'menu-popdown-none`) fehlt weiterhin, bräuchte `QMenu::aboutToHide` als neuen
+Shim-Export (ABI-Änderung, Drei-Maschinen-Banner). Vorsicht bei der Umsetzung:
+vermutlich feuert Qt `aboutToHide` bereits **vor** `triggered` bei einer echten
+Auswahl (unbestätigt, per Debug-Print zu verifizieren) — ein naives „`aboutToHide` ⇒
+sofort `'menu-popdown-none`" würde dann bei *jeder* echten Auswahl zuerst ein
+falsches „none" feuern. Ein `aboutToHide`-Handler müsste die Entscheidung
+„ausgewählt vs. abgebrochen" auf einen nachgelagerten Thunk verschieben, der erst
+nach einem eventuell schon eingetroffenen `triggered`-Callback entscheidet.
+Submenü-`set-parent` (siehe oben) ebenfalls offen.
