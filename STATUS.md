@@ -5,6 +5,111 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-26 (4, macOS) — Stub-Inventar (§60.7) verstetigt: `tests/stub-audit.rkt` + Allowlist
+
+**Kontext:** Nutzerfrage im Anschluss an §60.3 („Show Details"-Button war ein
+No-op-Stub): wie stellen wir sicher, dass wir Lücken dieser Form gezielt und
+wiederholbar finden, statt uns auf einmalige Ad-hoc-Greps zu verlassen? Kein
+Auftrag, den bestehenden Backlog zu fixen — nur das Werkzeug produktifizieren
+(Nutzerentscheidung explizit dafür).
+
+- Prototyp gebaut und zweimal gegen die Referenz-Backends (`gtk`/`cocoa`/`win32`)
+  überarbeitet, nachdem ein `advisor`-Review beide Zwischenstände widerlegte: ein
+  Python-Grep-basierter erster Versuch (FFI-Namenslisten wie `gtk_*`/`SendMessage`/
+  `tell`) hatte nachweisliche blinde Flecken (`get-color`/`adopt-child` verpasst,
+  `is-shown?` fälschlich als Stub markiert). Der erste Racket-Entwurf ersetzte das
+  durch strukturelle Klassifikation, unterdrückte einen Methodennamen aber
+  **namensglobal**, sobald irgendeine qt-Datei ihn irgendwo bereits echt
+  implementiert — das hätte `set-focus` **und** `set-label` (§60.3, den Bug, der
+  diese ganze Session ausgelöst hat) nie gefunden, weil `frame.rkt`/`canvas%` den
+  Namen jeweils an anderer Stelle bereits real haben. Per Recall-Regressionstest
+  gegen die historischen Vor-Fix-Commits (`git show <sha>:<pfad>` aus der
+  gui-Submodul-Historie in einen temporären Baum kopiert) nachgewiesen, dann durch
+  eine **dateibezogene** Vergleichsregel ersetzt (gleicher Dateiname im
+  Referenz-Backend, plus ein Spezialfall für `window.rkt` als gemeinsame
+  Basisklasse, plus Erkennung von Mixin-Overrides innerhalb derselben Datei).
+- Zwei weitere `advisor`-Reviews deckten danach vier weitere Lücken auf: (1) die
+  Allowlist war nur nach Methodenname geschlüsselt, obwohl die Erkennung
+  dateibezogen läuft -- ein Allowlist-Eintrag für `set-border` in `button.rkt`
+  hätte einen unabhängigen künftigen `set-border`-Stub in `check-box.rkt`
+  stillschweigend mit abgedeckt. Behoben: Allowlist-Einträge sind jetzt
+  `(name (datei ...) status "Begründung")`, ein Fund gilt nur bei exakter
+  Übereinstimmung von Name **und** Dateiset als triagiert -- **und** per
+  Regressionstest abgesichert (eine neue, in keinem Referenz-Backend
+  existierende Datei bekommt ein frisches `set-border`, muss trotz
+  bestehendem `set-border`/`button.rkt`-Eintrag als neuer Fund erscheinen; der
+  erste Fix-Versuch hatte nur einen Injektionstest mit einem noch nie
+  allowlisteten Namen, der auch eine namensbezogene Prüfung bestanden hätte).
+  (2) Die dateiinterne Mixin-Erkennung ignorierte die Zeilenreihenfolge -- ein
+  Platzhalter UNTER einer bereits existierenden echten Definition (der
+  dateiinterne Zwilling von §30s `is-shown? #t`) wäre fälschlich mit
+  unterdrückt worden. Behoben: nur ein Platzhalter, der eine *vorangehende*
+  echte Definition überschreibt, wird jetzt ausgenommen. (3) Die
+  Staleness-Prüfung galt nur für `backlog`-Einträge -- ein später tatsächlich
+  implementiertes, aktuell `needs-triage` markiertes `enforce-size` hätte den
+  Eintrag stumm veralten lassen und eine spätere Regression zurück auf
+  `(void)` wäre vom immer noch passenden Eintrag stillschweigend wieder
+  verschluckt worden. Behoben: gilt jetzt für alle Status, da die
+  Allowlist-Datei per Konvention ohnehin nur (aktuell) gefundene Namen enthält.
+  (4) Vier der als `harmless` eingetragenen Combo-Methoden
+  (`popup-combo`/`clear-combo-items`/`append-combo-item`/`set-combo-text`)
+  waren fehlklassifiziert -- §60.7 hatte sie pauschal in dieselbe „Mixin
+  deckt das ab"-Kategorie wie die (tatsächlich per Mixin abgedeckten)
+  Scroll-Methoden gesteckt, ohne einzeln nachzusehen. Ein Blick in
+  `canvas.rkt` zeigt: keine zweite, überschreibende Definition -- auf
+  `needs-triage` umgestuft, echtes Combo-Verhalten könnte unter Qt komplett
+  fehlen.
+- Sieben Testfälle (`raco test` meldet insgesamt 9, inkl. der beiden Gate-Checks am Ende)
+  sichern die Regel jetzt dauerhaft gegen erneuten Recall-Verlust
+  ab (zwei laufen gegen historische Commits `2f0755bd~1`/`1430d19a~1`, drei gegen
+  den aktuellen Baum, einer injiziert einen frischen Stub in eine Temp-Kopie von
+  `button.rkt` und prüft gezielt den Fall „Änderung an einer bestehenden
+  Widget-Klasse", einer prüft die dateibezogene statt nur namensbezogene
+  Allowlist-Zuordnung) — Details: `docs/HACKING.md` §60.9.
+- Ergebnis nach allen Überarbeitungen: 40 automatisch gefundene Kandidaten im
+  aktuellen Baum (nicht 44 wie in einer Zwischenfassung — u. a. verschwanden die
+  Scroll-Basisklassen-Defaults korrekt aus der automatischen Ausgabe, weil die
+  Reihenfolge-Fassung der Mixin-Regel sie jetzt selbst strukturell als abgedeckt
+  erkennt; die vier Combo-Methoden bleiben dagegen sichtbar, s. o.). Alle 40 in
+  `tests/stub-audit-allowlist.rktd` kategorisiert: 9 `harmless` (deckungsgleich
+  mit §60.7s bereits dokumentierter Klassifikation), 14 `backlog` (bekannte
+  offene Gaps aus §60.6/§60.7, inkl. `set-focus`, das jetzt automatisch statt
+  manuell erkannt wird), 17 `needs-triage` (neu gefunden, **nicht** einzeln
+  gegen die echte Anwendung verhaltensverifiziert — u. a. `enforce-size`, das
+  wie ein echter Gap wirkt, `refresh` mit einem dokumentierten Verdacht auf
+  einen Fehlalarm der Klassifikation selbst (gtks eigene Referenz läuft über
+  eine Indirektion, die die Klassifikation nicht auflöst), sowie die vier
+  Combo-Methoden). Sieben weitere, aus §60.7 bereits bekannte Fälle
+  (`set-modified`, `set-wait-cursor-mode`, `paint-children`, `show-children`,
+  `set-wheel-steps-mode`, `center`, `direct-show`) bleiben strukturell
+  unsichtbar für das Tool (Referenz-Backend implementiert dasselbe Konzept in
+  einer anderen Datei als qt) und stehen deshalb bewusst NICHT in der
+  Allowlist, sondern nur in der Prosa von `docs/HACKING.md` §60.9.
+  `raco test tests/stub-audit.rkt` schlägt künftig fehl bei einem neuen Fund
+  (Name + Dateiset stimmen mit keinem Allowlist-Eintrag überein) **oder** wenn
+  irgendein Allowlist-Eintrag plötzlich nicht mehr (in denselben Dateien)
+  gefunden wird. Details: `docs/HACKING.md` §60.9.
+- Checkliste „neue Widget-Klasse hinzufügen" (`docs/HACKING.md` §5) um einen
+  Schritt ergänzt. **Zusätzlich** (§5 greift nur bei neuen Klassen, §60.3 war
+  aber eine Änderung an einer bestehenden) in `CLAUDE.md`s
+  Run/Smoke-Test-Abschnitt aufgenommen: nach jeder Änderung an `wx/qt/*.rkt`,
+  vor dem Submodul-Commit, mit konkreten `raco`-Pfaden für alle drei Plattformen.
+  Enforcement ist bewusst konventionsbasiert (CLAUDE.md-Zeile), kein
+  Pre-Commit-Hook eingerichtet (unaufgefordert nicht sinnvoll).
+- Reine Textanalyse über `third_party/gui` als Referenzdaten — **kein
+  `wx/qt/`-Code geändert**, kein Submodul-Commit nötig. Alle neuen/geänderten
+  Dateien (`tests/stub-audit.rkt`, `tests/stub-audit-allowlist.rktd`,
+  `docs/HACKING.md`, `CLAUDE.md`, `STATUS.md`) liegen im Umbrella-Repo (`main`)
+  -- das braucht laut Regel 7 trotzdem einen Drei-Maschinen-Sync, sobald
+  committet/gepusht wird; das ist am Ende dieser Session noch nicht passiert
+  (nichts committet, siehe unten) und wird vor jedem Schritt einzeln erfragt.
+- Backlog-Fixes (`set-focus` u. a., 17 `needs-triage`-Einträge einzeln
+  triagieren, die sieben strukturell unsichtbaren Fälle ggf. per
+  Regel-Erweiterung sichtbar machen) bewusst nicht Teil dieser Session —
+  Nutzerentscheidung, siehe oben.
+
+---
+
 ## Session 2026-09-26 (3, macOS) — Freier Test (4 Befunde): 3 gefixt+verifiziert, 1 teilweise, Package Manager + Stub-Inventar offen
 
 **Kontext:** kein Auftrag — Nutzer testete DrRacket unter `PLT_QT=1` frei und meldete

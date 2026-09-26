@@ -172,6 +172,16 @@ resume-flush: broke its own contract
    und in der `platform-values`-Funktion an der richtigen Position platzieren.
 7. **Testen:** `PLT_QT=1 racket examples/hello.rkt` → erst Klassen-Komposition prüfen
    (Ladefehler), dann Laufzeitverhalten.
+8. **Stub-Audit laufen lassen:** `raco test tests/stub-audit.rkt` (kein `PLT_QT`, kein
+   Shim-Build nötig, reine Textanalyse; nicht nur bei diesem Schritt, sondern auch nach
+   jeder späteren Änderung an der Klasse, s. CLAUDE.md-Run/Smoke-Test-Abschnitt). Schlägt
+   fehl, wenn die neue oder geänderte Klasse eine Methode enthält, die strukturell nichts
+   tut (void/Literal-Rückgabe), während ein Referenz-Backend (gtk/cocoa/win32) sie echt
+   implementiert — der Fehler nennt Methodennamen und Datei. Zwei Reaktionen: entweder die
+   Methode wirklich implementieren, oder den Fund inkl. der genannten Dateiliste (der
+   Treffer ist an Name **und** Datei gebunden, s. §60.9) mit Begründung in
+   `tests/stub-audit-allowlist.rktd` eintragen (§60.9 erklärt Format `(name (datei ...)
+   status "Begründung")` und Kategorien `harmless`/`backlog`/`needs-triage`).
 
 ---
 
@@ -7664,8 +7674,10 @@ festgehalten:
 | `panel%`s `get/set-label-position` (`panel.rkt:20-21`, immer `'horizontal`) | `panel.rkt` | win32/gtk/cocoa führen echten Zustand; beeinflusst Label-Ausrichtung beschrifteter Controls (`wxlitem.rkt`, `wxtextfield.rkt` fragen es ab). |
 | `panel%`s `adopt-child` (`panel.rkt:19`) | `panel.rkt` | win32/gtk reparenten dort echt (`set-parent`); Qt macht nichts — betrifft Umhängen von Kind-Widgets zwischen Containern (`mrcontainer.rkt`). |
 
-Harmlose/erwartete No-ops (nicht weiter verfolgt): Canvas-Scroll-/Combo-Basisklassen-
-Defaults (echte Implementierung sitzt in Mixins/spezifischeren Klassen), `window.rkt`s
+Harmlose/erwartete No-ops (nicht weiter verfolgt): Canvas-Scroll-Basisklassen-Defaults
+(echte Implementierung sitzt in Mixins/spezifischeren Klassen — **Combo bewusst
+ausgenommen: §60.9 korrigiert diese Einordnung, die vier Combo-Methoden sind kein Mixin-
+Fall und wurden auf `needs-triage` umgestuft**), `window.rkt`s
 `center`/`reset-cursor`/`screen-to-client`/`parent-enable`/u. a. (laut Code-Kommentar
 in diesem Backend unbenutzt), `menu.rkt`s „stubs required by glue"
 (`select`/`set-help-string`/`set-self-item`/`get-item`/`removing-item`), kosmetische
@@ -7683,3 +7695,134 @@ in diesem Backend unbenutzt), `menu.rkt`s „stubs required by glue"
 | Choose-Language-Hintergrundfarbe | unbestätigt | ⚪ offen, kein belastbarer Befund ohne nativen Vergleich | — | — |
 | Package Manager Mehrspalten-Listen kaputt | `list-box%` bewusst einspaltig, Mehrspalten-API sind No-ops mit Fake-Werten | ⚪ offen, substantielles Feature (eigene Session) | `qt-shim/src/shim.cpp` + `wx/qt/list-box.rkt` | Ja (bei Umsetzung) |
 | `set-focus`/`set-icon`/`message%` Farbe/`panel%` Label-Position+Reparenting | stille No-op-Stubs (Stub-Inventar) | ⚪ nicht gefixt, als Zielliste dokumentiert | `wx/qt/*.rkt` | Ja (bei Umsetzung) |
+
+### §60.9 Stub-Inventar verstetigt: `tests/stub-audit.rkt` + Allowlist (2026-09-26)
+
+Anlass: §60.7s Grep nach `(void)`-Rümpfen hätte den älteren, bereits gefixten §30-Bug
+(`is-shown?` fest auf `#t`) und §60.6s `get-column-size` (`(values 100 0 10000)`)
+**nicht** gefunden — keiner der beiden Rümpfe enthält den Text `(void)`. Eine einmalige
+textbasierte Grep-Suche ist damit kein verlässliches Mittel, um diese Fundklasse künftig
+zu erkennen; sie wurde durch ein wiederholbares, strukturelles Werkzeug ersetzt.
+
+**Methode** (`tests/stub-audit.rkt`, reiner Racket-Reader, kein `#lang`-Expand, kein
+Shim/PLT_QT nötig): für jede `define/public`/`define/override`-Form in `wx/qt/*.rkt`
+wird der Methodenrumpf strukturell klassifiziert als „tut nichts" (`(void)`, ein reines
+Literal, `(values <Literale>...)`, oder `when`/`unless`/`case-lambda`-Hüllen darum) oder
+„substantiell" (alles andere, insbesondere jeder Bezug auf eine Variable/ein Feld oder
+ein Funktionsaufruf). Kein FFI-Funktionsnamen-Musterabgleich nötig (im Gegensatz zu einem
+verworfenen ersten Python-Prototyp) — das erkennt auch Fälle wie `adopt-child`
+(Referenz-Implementierung delegiert nur an `send child set-parent`, ruft keine native
+Funktion direkt auf), die eine Namensliste verfehlt hätte.
+
+Der Vergleich läuft **pro Datei**, nicht pro Methodenname global (ein erster Entwurf mit
+globaler Unterdrückung — „wenn irgendeine qt-Datei den Namen bereits echt hat, nicht
+flaggen" — hätte `set-focus` und `set-label` strukturell nie gefunden, siehe Diskussion
+unten). Ein Kandidat (Methode `M` in qt-Datei `F`) wird gemeldet, wenn `M` in `F` nichts
+tut UND eine der folgenden drei Bedingungen zutrifft:
+
+1. Ein Referenz-Backend hat eine Datei mit demselben Namen `F` (z. B. `gtk/button.rkt`
+   für `qt/button.rkt`), die `M` substantiell implementiert.
+2. `F` ist nicht `window.rkt`, und `window.rkt` (die gemeinsame Basisklasse) implementiert
+   `M` bereits substantiell — `F` überschreibt sie dann mit einem Platzhalter und verdeckt
+   die echte Basis-Logik für ihre Instanzen.
+3. `F` hat in **keinem** Referenz-Backend eine gleichnamige Datei (rein qt-spezifische
+   Dateien wie `platform.rkt`) — dann wird namensglobal über alle Referenz-Dateien
+   gesucht, weil ein Dateiname-Vergleich hier keinen Sinn ergibt.
+
+Zusätzlich: wenn dieselbe qt-**Datei** `M` an einer **weiter unten stehenden** Stelle
+(größere Zeilennummer) bereits substantiell definiert (typisches Muster: eine Basisklasse
+wie `base-canvas%` mit einem Platzhalter, ein Mixin weiter unten in derselben Datei wie
+`qt-canvas-scroll-mixin` mit der echten Implementierung — betrifft u. a.
+`show-scrollbars`, `get/set-scroll-*`), wird der Platzhalter **nicht** geflaggt. Die
+Reihenfolge zählt bewusst: ein Platzhalter, der eine *vorangehende* echte Definition
+überschreibt, ist der dateiinterne Zwilling von §30s `is-shown? #t` und wird weiterhin
+geflaggt, nicht verschluckt.
+
+**Sieben Testfälle (`raco test` meldet insgesamt 9, inklusive der beiden Gate-Checks am
+Ende) sichern die Vergleichsregel gegen Recall-Verlust ab** (`module+ test` in
+`tests/stub-audit.rkt`, laufen bei jedem `raco test`): `get-column-size` und `set-focus`
+(beide aktuell echte, unbehobene Bugs) müssen gefunden werden; `maximize`/`iconized?`/
+`is-maximized?`/`fullscreen`/`fullscreened?` dürfen **nicht** gefunden werden (`frame%`
+überschreibt `window%`s Platzhalter dort echt); zwei historische Bugs — `is-shown? #t`
+(§30, Commit `2f0755bd~1` im gui-Submodul) und `set-label` als reiner No-op (§60.3, Commit
+`1430d19a~1`) — werden über `git show <sha>:<pfad>` aus der Submodul-Historie in einen
+temporären Baum kopiert und müssten dort gefunden werden, wären sie heute noch da; ein
+weiterer Fall injiziert einen frischen, unallowlisteten No-op (`clicked` in `button.rkt`,
+eine Methode, die `gtk/button.rkt` substantiell hat und `qt/button.rkt` aktuell gar nicht
+kennt) in einen frischen Temp-Baum und prüft, dass die **Änderung an einer bestehenden**
+Widget-Klasse erkannt wird — genau der Fall, den die §5-Checkliste ("bei neuer
+Widget-Klasse") allein verfehlt hätte, weil §60.3 selbst eine Änderung an einer
+bestehenden Klasse war; und ein letzter Fall prüft, dass die Allowlist-Prüfung dateibezogen
+und nicht nur namensbezogen greift — eine neue, in keinem Referenz-Backend existierende
+Datei bekommt ein frisches `set-border`, und das muss trotz des bestehenden
+`set-border`/`button.rkt`-Allowlist-Eintrags als neuer Fund erscheinen (Regressionstest für
+einen zweiten `advisor`-Review-Fund, s. u.). Die beiden historischen Fälle waren nötig, weil eine frühere,
+inzwischen verworfene Version der Vergleichsregel (globale statt dateibezogene
+Unterdrückung) `set-focus` und `set-label` beide **nicht** gefunden hätte — `frame.rkt`
+(bzw. `canvas%`) implementiert den jeweiligen Namen an anderer Stelle bereits echt, und die
+alte Regel unterdrückte dann pauschal den ganzen Namen statt nur den betroffenen
+Platzhalter.
+
+**Bekannte, verbleibende Grenze:** wenn ein Referenz-Backend dasselbe Konzept in einer
+*anderen* Datei implementiert als qt (typisch: qt legt es gemeinsam in `window.rkt` ab,
+andere Backends direkt in `frame.rkt`/`panel.rkt`), sieht das Tool die Lücke nicht — weder
+Regel 1 (Dateiname stimmt nicht überein) noch Regel 2 (die Methode betrifft `window.rkt`
+selbst, nicht eine Unterklasse davon) greifen dann. Betroffene, **nicht** in der Allowlist
+eingetragene (weil vom Tool nie erzeugte) Fälle: `set-modified`/`set-wait-cursor-mode`
+(Referenz: `frame.rkt`), `paint-children`/`show-children` (Referenz:
+`panel.rkt`/`frame.rkt`/`canvas.rkt`), `set-wheel-steps-mode` (Referenz: `window.rkt` bei
+den anderen Backends, qt hat es nur in `canvas.rkt`), sowie die bereits aus §60.7
+bekannten `center`/`direct-show` — alle sieben bleiben nur hier in der Prosa dokumentiert,
+nicht in der Allowlist (ein Eintrag, der nie einen Treffer erzeugen kann, würde nur
+vortäuschen, aktiv geprüft zu werden). Ein tatsächlich gefundener Kandidat (`refresh`,
+`window.rkt`) hat zusätzlich einen eigenen Vorbehalt: gtks Referenz-Implementierung ruft
+selbst nur `(refresh-all-children)` auf, und `refresh-all-children` ist in
+`gtk/window.rkt` **selbst wieder** `(void)` — die strukturelle Klassifikation löst keine
+Aufrufindirektion auf, das könnte also ein Fehlalarm sein statt eines echten Gaps. Braucht
+Verhaltensvergleich, nicht mehr Code-Lesen.
+
+**Allowlist-Format:** `(name (datei ...) status "Begründung")` — ein Fund gilt nur als
+bereits triagiert, wenn **sowohl** der Methodenname **als auch** die exakte Menge
+betroffener qt-Dateien mit einem Eintrag übereinstimmt. Ein Eintrag für `set-border` in
+`button.rkt` deckt keinen unabhängigen künftigen `set-border`-Stub in `check-box.rkt` ab,
+selbst wenn beide denselben Methodennamen tragen — Namensgleichheit allein reicht nicht,
+weil die Erkennung dateibezogen arbeitet (s. o.); ein Regressionstest injiziert genau
+diesen Fall (neue Datei, alter Name) und prüft, dass er trotz bestehendem
+`set-border`-Eintrag als neuer Fund erscheint. Die Staleness-Prüfung (unten) gilt für
+**alle** Status, nicht nur `backlog`: die Allowlist-Datei enthält per Konvention
+ausschließlich Namen, die der aktuelle Lauf tatsächlich (in denselben Dateien) findet,
+daher ist ein Verschwinden bei jedem Status ein Signal. Eine frühere Fassung nahm
+`harmless`/`needs-triage` davon aus — das hätte z. B. ein später tatsächlich
+implementiertes `enforce-size` (aktuell `needs-triage`) den Eintrag stumm veralten lassen,
+und eine anschließende Regression zurück auf `(void)` wäre vom immer noch passenden
+Allowlist-Eintrag stillschweigend wieder verschluckt worden.
+
+**Ergebnis dieser Session:** 40 automatisch gefundene Kandidaten im aktuellen Baum. Alle
+40 in `tests/stub-audit-allowlist.rktd` eingetragen, mit Kategorie
+(`harmless`/`backlog`/`needs-triage`) und Begründung pro Eintrag — 9 `harmless`
+(deckungsgleich mit der bereits in §60.7 dokumentierten Klassifikation), 14 `backlog`
+(bereits bekannte offene Gaps aus §60.6/§60.7, plus `set-focus`, das jetzt automatisch
+statt manuell erkannt wird), 17 `needs-triage` (in dieser Session neu gefunden, **nicht**
+einzeln gegen die echte Anwendung verhaltensverifiziert — u. a. `enforce-size` (in
+`frame.rkt` `(void)`, wirkt wie ein echter Gap; `window.rkt` hat denselben Bug ebenfalls,
+ist dort aber vom Tool nicht separat sichtbar, s. Grenze oben), `drag-accept-files`,
+`get-dialog-level`, `refresh`, sowie vier Combo-Methoden (`popup-combo`,
+`clear-combo-items`, `append-combo-item`, `set-combo-text`), die §60.7 pauschal als
+„harmless, Implementierung sitzt im Mixin" eingeordnet hatte — ein direkter Blick in
+`canvas.rkt` zeigt aber keine zweite, überschreibende Definition wie bei den (tatsächlich
+per Mixin abgedeckten) Scroll-Methoden: §60.7 hatte hier offenbar nicht einzeln
+nachgesehen, sondern beide Gruppen in einen Topf geworfen. Echtes Combo-Verhalten könnte
+unter Qt komplett fehlen; Details/vollständige Liste mit Begründung je Eintrag:
+`tests/stub-audit-allowlist.rktd`).
+
+**`raco test tests/stub-audit.rkt`** schlägt fehl, wenn (a) ein neuer Fund auftaucht, dessen
+Methodenname **und** Dateiset nicht exakt einem Allowlist-Eintrag entsprechen, oder (b) ein
+Allowlist-Eintrag (gleich welchen Status) plötzlich **nicht mehr** (in denselben Dateien)
+gefunden wird (Signal: entweder wurde er gefixt — Eintrag entfernen — oder die
+Vergleichsregel hat einen Regressionsschaden, beides prüfenswert). Nächste Schritte (nicht
+Teil dieser Session, siehe Backlog-Triage-Präferenz): die 17 `needs-triage`-Einträge
+einzeln gegen die echte Anwendung prüfen und nach `harmless`/`backlog` umsortieren;
+ergänzend die sieben strukturell unsichtbaren Fälle aus dem Grenze-Absatz oben
+(`set-modified` u. a.) mit einer künftigen Regel-Erweiterung (Datei-zu-Datei-Zuordnung
+über die Basisklasse hinweg, z. B. „qt/window.rkt entspricht gtk/frame.rkt für diesen
+Methodennamen") sichtbar machen, statt sie nur in Prosa zu verwalten.

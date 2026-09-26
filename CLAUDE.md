@@ -159,6 +159,32 @@ cmake --build qt-shim/build/linux-x64
 
 ## Run / Smoke-Test
 
+**Stub-Audit (alle drei Plattformen — NACH jeder Änderung an `wx/qt/*.rkt`, bevor der
+Submodul-Commit entsteht; nicht nur bei neuen Widget-Klassen, s. §5-Checkliste, denn §60.3
+war selbst eine Änderung an einer bestehenden Klasse):**
+```bash
+# macOS:
+raco test tests/stub-audit.rkt
+# Linux (racket/raco nicht im PATH, s.u.):
+~/racket/bin/raco test tests/stub-audit.rkt
+```
+```powershell
+# Windows (Racket nicht im PATH, s.u.):
+& "C:\Program Files\Racket\raco.exe" test tests/stub-audit.rkt
+```
+Braucht kein `PLT_QT`, keinen gebauten Shim, keinen Qt-Pfad — reine Textanalyse plus `git`
+(für zwei der Testfälle: Recall-Regressionstests gegen historische Commits im
+gui-Submodul, s.u. — `git` muss auf PATH sein). Findet Kandidaten für stille No-op-Stubs
+(Methode tut strukturell nichts, obwohl ein Referenz-Backend sie substantiell
+implementiert) durch Vergleich gegen `gtk`/`cocoa`/`win32` — Hintergrund:
+`docs/HACKING.md` §60.9. Schlägt fehl bei einem neuen Fund (Methodenname + betroffene
+Dateien stimmen mit keinem Eintrag in `tests/stub-audit-allowlist.rktd` überein), oder
+wenn ein Allowlist-Eintrag plötzlich nicht mehr (in denselben Dateien) auftaucht. Ergänzt
+(ersetzt nicht) die `raco test tests/smoke.rkt`-Läufe unten. **Enforcement ist rein
+konventionsbasiert** (diese CLAUDE.md-Zeile), nicht mechanisch erzwungen — kein
+Pre-Commit-Hook im gui-Submodul vorhanden; bei Bedarf als eigener Schritt einrichten, nicht
+stillschweigend voraussetzen.
+
 **Windows:** `racket` liegt seit der 9.3-Migration (2026-09-11, §24.1) auf dieser
 Maschine **nicht** im Machine- oder User-PATH — immer vollen Pfad verwenden oder
 `$env:PATH` wie unten setzen.
@@ -305,7 +331,19 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 - **Choose-Language-Dialog „Collection Paths"-Buttons weiterhin teilweise verdeckt** (§60.4) — der `list-box%`-sizeHint-Deckel (6 Zeilen) behebt die „viele Zeilen"-Variante nachweislich (eigener Probe), aber im echten Dialog mit nur 1 Standard-Eintrag bleibt die Button-Reihe darunter abgeschnitten. Zweite Ursache vermutlich in `button-panel%`/`group-box-panel%`-Layoutberechnung (`button-panel%` hat bereits `stretchable-height #f`, dessen Minimum wird aber offenbar nicht durchgesetzt) — noch nicht gefunden.
 - **Choose-Language-Dialog Hintergrundfarbe links** (§60.5) — kein hartcodierter Hintergrund im Shim gefunden (`grep` nach `QPalette`/`setPalette`/`background` ergebnislos), aber auch kein belastbarer Vergleich mit nativem cocoa-DrRacket durchgeführt. Unbestätigt.
 - **Package Manager: Mehrspalten-Listen kaputt** (§60.6) — `list-box%` ist bewusst einspaltig (`QListWidget`, keine Header), Mehrspalten-Methoden sind No-ops mit Fake-Rückgabe (`get-column-size` → `(values 100 0 10000)`). Package Manager (installiertes `gui-pkg-manager-lib`) nutzt den regulären Mehrspalten-Vertrag. Substantielles Feature (Umbau auf `QTreeWidget` im Shim), vergleichbare Größenordnung wie §20/§21 — empfohlen als eigene künftige Session, kein Nebenfix.
-- **Stub-Inventar** (§60.7, mechanische Grep-Suche): `set-focus` ist auf praktisch jedem Basis-Widget (button/choice/radio-box/slider/list-box/tab-panel/check-box/message/group-panel) ein No-op, obwohl der Shim es kann (nur `canvas%` nutzt es echt) — größter Einzelfund. Weitere Kandidaten: `frame%`s `set-icon`, `message%`s `set-color`/`get-color`, `panel%`s `get/set-label-position` (immer `'horizontal`) und `adopt-child`. Keiner gefixt, alle haben nachweisbare Caller in `framework`/`mred`.
+- **Stub-Inventar** — nicht mehr per Ad-hoc-Grep, sondern per wiederholbarem Tool
+  (`tests/stub-audit.rkt` + `tests/stub-audit-allowlist.rktd`, §60.9): `set-focus` ist auf
+  praktisch jedem Basis-Widget (button/choice/radio-box/slider/list-box/tab-panel/
+  check-box/message/group-panel) ein No-op, obwohl der Shim es kann (nur `canvas%` nutzt
+  es echt) — größter Einzelfund, `backlog` in der Allowlist. Weitere `backlog`-Kandidaten:
+  `frame%`s `set-icon`, `message%`s `set-color`/`get-color`, `panel%`s
+  `get/set-label-position` (immer `'horizontal`) und `adopt-child`, sowie das komplette
+  Mehrspalten-`list-box%`-Feature (§60.6). 17 weitere `needs-triage`-Kandidaten, u. a.
+  `enforce-size` (Resize-Constraints nie durchgesetzt) und vier Combo-Methoden
+  (`popup-combo`/`clear-combo-items`/`append-combo-item`/`set-combo-text`) — §60.7 hatte
+  diese vier fälschlich als „harmless, Mixin deckt es ab" eingeordnet, §60.9 hat das
+  korrigiert (kein Mixin-Override gefunden, echtes Combo-Verhalten könnte unter Qt
+  komplett fehlen). Details/vollständige Liste: `tests/stub-audit-allowlist.rktd`, §60.9.
 
 ## Dokumentation
 
