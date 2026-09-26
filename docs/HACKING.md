@@ -5893,6 +5893,15 @@ eine zu beheben — bleibt bewusst so, betrifft potenziell jede Tastatur-Kurzbef
 Auswertung dieses Backends auf macOS gleichermaßen und ist ein eigenständiges,
 größeres Thema, keine Spezialität von `get-current-mouse-state`.
 
+**Nachtrag (2026-09-26, §58.1): das "eigenständige, größere Thema" wurde
+gefixt.** Ein freier manueller Test deckte die volle Wirkung auf: Cmd-basierte
+Menü-Shortcuts (Cmd+A/C/V/…) funktionierten in echtem DrRacket überhaupt
+nicht. Root Cause war exakt diese Vertauschung — Fix: `QCoreApplication::
+setAttribute(Qt::AA_MacDontSwapCtrlAndMeta)` in `shim_app_init`, global vor
+`QApplication`-Konstruktion, betrifft `encodeMods()`/`queryKeyboardModifiers()`
+gleichermaßen. Details, Verifikation, zweiter verwandter Fix (Menü-Shortcut-
+Anzeige): §58.
+
 Regressions-Gate: Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ ohne `PLT_QT`, nach dem
 Rebuild. **Nur auf macOS implementiert/getestet** — Linux braucht für diesen
 Teil ohnehin schon den ausstehenden Shim-Rebuild (Build-Banner), eine eigene
@@ -7134,3 +7143,120 @@ mögliches Fokus-Problem).
 macOS 10/10 PASS inkl. Akzeptanztest (§57) — plus zwei neue, über den ursprünglichen
 Block-C-Umfang hinausgehende macOS-Befunde (§57.3, §57.5), beide offen für eine
 künftige Session.
+
+## §58 — macOS: freier manueller Test deckt Cmd/Ctrl-Vertauschung + Menü-Shortcut-Anzeige auf, beide gefixt (2026-09-26)
+
+**Kontext:** kein Auftrags-Prompt, kein Audit — Nutzer bat um einen freien manuellen
+Test von DrRacket unter `PLT_QT=1` (nach Abschluss von Block C, §55–§57) und meldete:
+„Kein Cmd+A, Cmd+C, Cmd+V. Im Menü werden auch keine Shortcuts angezeigt." Beide
+Symptome hatten dieselbe Wurzel-Kategorie (Qt/macOS-Modifier-Handling), aber zwei
+unabhängige, separat gefixte Root Causes.
+
+### §58.1 Cmd/Ctrl-Vertauschung — funktionaler Fix, `qt-shim/`
+
+**Root Cause bereits bekannt, nicht neu:** §49.5 (2026-09-18) hatte die Vertauschung
+bereits für `get-current-mouse-state` root-gecauset und bewusst nicht gefixt, mit der
+Begründung, es sei „ein eigenständiges, größeres Thema … betrifft potenziell jede
+Tastatur-Kurzbefehl-Auswertung dieses Backends". Genau das ist jetzt eingetreten:
+physisches **Cmd** meldete sich Qt-intern als `Qt::ControlModifier` (nicht `Meta`),
+physisches **Ctrl** als `Qt::MetaModifier` — Qts dokumentierte Standard-Vertauschung
+für macOS (`AA_MacDontSwapCtrlAndMeta` war nirgends gesetzt), gedacht dafür, dass ein
+cross-plattform in Qt-Code geschriebenes `Qt::CTRL`-Shortcut auf dem Mac automatisch
+zu Cmd wird. Dieses Backend nutzt aber **nie** Qts eigenes Shortcut-Matching — jeder
+Menü-Kurzbefehl läuft ausschließlich über `mred/private/wxtop.rkt`s
+`handle-menu-key` + Rackets eigene `keymap%`-Infrastruktur (`mrmenu.rkt`s
+`key-binding`, `'cmd`-Präfix erwartet `get-meta-down`) —, sodass Qts Vertauschung
+nur gegen uns arbeitete: jeder Cmd-basierte Menü-Shortcut (Cmd+A/C/V/X/Z/F/…) war
+im ganzen Backend funktionslos.
+
+**Fix:** ein Einzeiler in `shim_app_init` (`qt-shim/src/shim.cpp`), **vor** der
+`QApplication`-Konstruktion (Pflicht laut Qt::ApplicationAttribute-Vertrag):
+
+```cpp
+#ifdef __APPLE__
+QCoreApplication::setAttribute(Qt::AA_MacDontSwapCtrlAndMeta);
+#endif
+```
+
+Wirkt global auf jede `QKeyEvent`/`QMouseEvent`/`QGuiApplication::
+queryKeyboardModifiers()`-Abfrage im ganzen Prozess — genau die Stellen, die
+`wx/qt/key-map.rkt`s `encodeMods()`/`qt-mods->control?`/`qt-mods->meta?` und
+`shim_get_mouse_state` bereits roh auslesen. Kein neuer Shim-Export, keine
+ABI-Änderung, kein Umbau nötig — nur die Bit-Bedeutung wird jetzt korrekt (nicht
+vertauscht) geliefert, exakt was `key-map.rkt` schon immer angenommen hatte.
+
+**Verifikation:**
+- `mouse-state-probe.rkt` (`cliclick kd:`/`ku:`): physisches Cmd → `(meta)`,
+  physisches Ctrl → `(control)` — keine Vertauschung mehr (vorher exakt umgekehrt,
+  §49.5).
+- **Funktionaler Test in echtem DrRacket:** Text getippt, Cmd+A (Select All) +
+  Cmd+C (Copy) + Cmd+V (Paste) über `osascript`/`System Events`-Tastatureingabe
+  (kein synthetisches Racket-Event, echte macOS-Keydown-Events) — Ergebnis: der
+  komplette Text wurde dupliziert, alle drei Shortcuts griffen. Screenshot-verifiziert.
+- Smoke 3/3 mit `PLT_QT=1`, 3/3 nativ, keine Regression.
+
+**Nebenbefund (positiv, nicht separat verifiziert):** da `wxme`/`framework` auf macOS
+zusätzlich Emacs-Stil-Kurzbefehle über den **literalen** Ctrl-Modifier anbieten
+(„Keybindings"-Untermenü im Edit-Menü), war vor diesem Fix vermutlich auch dieser
+Pfad kaputt (physisches Ctrl meldete sich als Meta, nicht Control) — durch denselben
+Fix mutmaßlich mitbehoben, nicht gezielt gegengetestet.
+
+**Commit:** Umbrella `bb84d22` (nur `qt-shim/src/shim.cpp`, kein Submodul-Anteil,
+kein neuer Shim-Export). Gepusht.
+
+### §58.2 Menü-Shortcut-Anzeige — kosmetischer Fix, reiner Racket-Code, `wx/qt/menu.rkt`
+
+**Root Cause, separat von §58.1:** `mred/private/mrmenu.rkt`s `calc-labels` hängt an
+jedes macOS-Menüitem mit Tastenkürzel einen `"\tCut=<Mod-Zeichen><Tastencode>"`-Suffix
+an das Label — eine wxWidgets-Ära-Kodierung, die **ausschließlich** für
+`wx/cocoa/menu-item.rkt`s eigenen Parser gedacht war (`set-menu-item-shortcut`:
+per Regexp zerlegt, in `NSMenuItem`s `keyEquivalent`/`keyEquivalentModifierMask`
+übersetzt). `wx/qt/menu.rkt` hatte dafür **keinen** Parser — der rohe Suffix
+(inkl. eines nicht druckbaren Steuerzeichens für die Modifier-Bits) ging unverändert
+in `shim_action_create`/`shim_action_set_label`, landete also wörtlich in
+`QAction::setText()`. Erklärt beide vom Nutzer gemeldeten Symptome zusammen mit §58.1:
+keine sinnvolle Shortcut-Anzeige im Menü (stattdessen Steuerzeichen-Müll oder gar
+nichts Sichtbares).
+
+**Fix:** neue Funktion `clean-macos-shortcut-label` in `wx/qt/menu.rkt`, spiegelt
+`wx/cocoa/menu-item.rkt`s Regexp/Bit-Dekodierung exakt, baut daraus aber einen
+lesbaren `"⌘C"`-artigen Hinweis in Apples eigener Modifier-Reihenfolge (⌃⌥⇧⌘) statt
+eines nativen `NSMenuItem`-Äquivalents. **Bewusst kein `QAction::setShortcut()`** —
+das reale Shortcut-Dispatch läuft bereits vollständig über Rackets eigene
+`keymap%`-Kette (§58.1), ein zusätzlicher, echter Qt-Shortcut hätte ein
+Doppel-Feuern desselben Tastendrucks riskieren können (einmal über Qts eigenes
+`QShortcutMap`, einmal über den bestehenden Racket-Dispatch) — ungetestetes,
+unbegrenztes Risiko für einen rein kosmetischen Fix. Ein Tab-suffigiertes Label ist
+exakt dieselbe Konvention, die gtk/win32 hier bereits nutzen (z. B. `"\tCtrl+C"`),
+die Qts `QMenu` bereits als rechtsbündige Hinweisspalte rendert, ganz ohne echte
+`QKeySequence` — dieser Fix bringt macOS nur auf dasselbe (bereits funktionierende)
+Verfahren, mit den richtigen Symbolen statt dem internen wx-cocoa-Drahtformat.
+
+**Kein Shim-/ABI-Wechsel** — reiner Racket-Fix, kein Rebuild nötig.
+
+**Verifikation:** isolierter Parser-Test (drei synthetische Suffixe + ein Label ohne
+Suffix) liefert exakt erwartete Strings (`"Copy\t⌘C"`, `"Select All\t⌘A"`,
+`"Save\t⇧⌘S"`, unverändertes Passthrough). Echtes DrRacket (`PLT_QT=1`), Edit-Menü
+geöffnet, Screenshot: **alle** Einträge zeigen korrekte, native Shortcut-Hinweise —
+`⌘Z`/`⇧⌘Z` (Undo/Redo), `⌘X`/`⌘C`/`⌘V`/`⇧⌘V` (Cut/Copy/Paste/Paste and Indent),
+`⌘F`/`⌥⌘F`/`⌘G`/`⇧⌘G` (Find-Familie), `⇧⌘R` (Show Replace), `⇧⌘F` (Find Case
+Sensitive), `⇧⌘N` (Skip to Next Misspelled Word), `⇧⌘K` (Suggest Spelling
+Corrections), `⌘/` (Complete Word) — kein Steuerzeichen-Müll, keine falsche
+Zuordnung. Smoke 3/3 beide Wege.
+
+**Commits:** gui-Submodul `2b84889c` (nur `wx/qt/menu.rkt`), Umbrella `d74f9d5`
+(Submodul-Pointer-Bump). Beide gepusht (Regel 8: Submodul zuerst, dann Pointer).
+
+### §58.3 Zusammenfassung
+
+| Symptom | Root Cause | Fix | Ort | Rebuild nötig |
+|---|---|---|---|---|
+| Cmd-Shortcuts (Cmd+A/C/V/…) funktionslos | Qt vertauscht Ctrl/Meta auf macOS (§49.5), Backend erwartet unvertauscht | `AA_MacDontSwapCtrlAndMeta` | `qt-shim/src/shim.cpp` | Ja (macOS) |
+| Keine/falsche Shortcut-Anzeige im Menü | wx-cocoa-internes `"\tCut=…"`-Drahtformat ungeparst an Qt durchgereicht | `clean-macos-shortcut-label` | `wx/qt/menu.rkt` | Nein (reiner Racket-Code) |
+
+Beide Fixes sind **macOS-spezifisch** (der `#ifdef __APPLE__`-Guard in §58.1;
+§58.2s Regexp matcht auf Linux/Windows nie, da deren Label-Format bereits
+`"\tCtrl+C"`-artig lesbar ist — kein Cross-Platform-Nachzug nötig, aber beim
+nächsten gebündelten Windows/Linux-Durchlauf als „kein Verhaltensunterschied
+erwartet" gegenprüfen). **Ergänzt Block C** (§55–§57), ist aber kein Teil davon —
+eigenständiger Fund aus freiem manuellem Test nach Abschluss des Blocks.

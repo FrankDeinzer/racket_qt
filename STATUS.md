@@ -5,6 +5,37 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-26 (macOS) — Freier manueller Test deckt Cmd/Ctrl-Vertauschung auf, zwei Fixes
+
+**Kontext:** kein Auftrag — Nutzer testete DrRacket unter `PLT_QT=1` frei und meldete:
+keine funktionierenden Cmd-Shortcuts (Cmd+A/C/V), keine Shortcut-Anzeige im Menü.
+
+- **Funktionaler Fix (§58.1):** Root Cause war die bereits in §49.5 (2026-09-18)
+  dokumentierte, damals bewusst nicht behobene Qt-Cmd/Ctrl-Vertauschung auf macOS —
+  jetzt in ihrer vollen Wirkung aufgetreten (jeder Cmd-Menü-Shortcut funktionslos).
+  Fix: `QCoreApplication::setAttribute(Qt::AA_MacDontSwapCtrlAndMeta)` in
+  `shim_app_init` (`qt-shim/src/shim.cpp`), vor `QApplication`-Konstruktion. Kein
+  neuer Export, aber **Shim-Rebuild nötig** auf Windows/Linux, damit der Fix dort
+  greift (kein ABI-Bruch, altes Binary lädt weiter, hat nur weiterhin den alten Bug).
+  Verifiziert: `mouse-state-probe.rkt` zeigt jetzt korrekte (nicht vertauschte)
+  Modifier, echtes DrRacket bestätigt Cmd+A/C/V funktional (Text dupliziert).
+  Commit: Umbrella `bb84d22`, gepusht.
+- **Kosmetischer Fix (§58.2):** separate Ursache — `wx/qt/menu.rkt` reichte
+  `mred/private/mrmenu.rkt`s macOS-spezifisches `"\tCut=…"`-Label-Suffix (nur für
+  `wx/cocoa/menu-item.rkt`s eigenen Parser gedacht) ungeparst an Qt durch, zeigte
+  daher Steuerzeichen-Müll statt einer Shortcut-Anzeige im Menü. Fix:
+  `clean-macos-shortcut-label` in `wx/qt/menu.rkt`, baut daraus einen lesbaren
+  `⌘C`-Hinweis (Apples Modifier-Reihenfolge ⌃⌥⇧⌘) — **kein** `QAction::
+  setShortcut()` (Doppel-Feuer-Risiko mit dem bestehenden Racket-Keymap-Dispatch
+  vermieden), reiner Racket-Fix, **kein Rebuild nötig**. Verifiziert per Screenshot:
+  Edit-Menü zeigt jetzt korrekt `⌘Z`/`⇧⌘Z`/`⌘X`/`⌘C`/`⌘V`/`⇧⌘V`/etc. Commits:
+  gui-Submodul `2b84889c`, Umbrella `d74f9d5` (Pointer-Bump). Beide gepusht.
+- Details: `docs/HACKING.md` §58 (§58.1/§58.2/§58.3-Tabelle).
+- **Noch offen:** Windows/Linux-Rebuild für §58.1 (kein Verhaltensunterschied für
+  §58.2 erwartet, da deren Label-Format dort bereits lesbar ist, aber gegenprüfen).
+
+---
+
 ## Session 2026-09-25 (2, macOS) — Fixversuch für die zwei Block-C-Nebenbefunde, beide geparkt
 
 **Kontext:** Nutzer fragte nach der vorigen Session, ob die zwei offenen macOS-Befunde
