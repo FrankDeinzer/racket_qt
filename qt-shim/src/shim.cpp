@@ -961,15 +961,31 @@ void shim_menubar_remove_at(void* menubar, int pos)
 // this file a void* known to hold a RacketMenu* is freely static_cast to
 // QMenu* (single, non-virtual inheritance, same established pattern as
 // RacketWindow/QWidget*).
+// aboutToHide fires whenever this QMenu closes -- both on a real selection
+// and on a plain dismiss (click outside, Escape). It's the Qt analog of
+// gtk's GtkMenu "deactivate" signal, used the same way on the Racket side
+// (wx/qt/menu.rkt): to detect the "dismissed without selecting anything"
+// case for a standalone popup-menu% (docs/HACKING.md §59's open item).
+// Per Qt's own activateAction() (qmenu.cpp), the menu is hidden -- emitting
+// aboutToHide -- *before* the chosen QAction::trigger() runs, i.e. before
+// shim_action_create's own `triggered` callback fires. wx/qt/menu.rkt does
+// not rely on that order, though: it defers the actual selected-vs-none
+// decision to a later, queued Racket thunk (mirroring gtk's cancel-none-box
+// pattern), which is robust regardless of which native signal fires first.
 class RacketMenu : public QMenu {
 public:
     shim_callback_t about_to_show_cb = nullptr;
     void* about_to_show_ud = nullptr;
+    shim_callback_t about_to_hide_cb = nullptr;
+    void* about_to_hide_ud = nullptr;
 
     explicit RacketMenu(const QString& title) : QMenu(title)
     {
         QObject::connect(this, &QMenu::aboutToShow, [this]() {
             if (about_to_show_cb) about_to_show_cb(about_to_show_ud);
+        });
+        QObject::connect(this, &QMenu::aboutToHide, [this]() {
+            if (about_to_hide_cb) about_to_hide_cb(about_to_hide_ud);
         });
     }
 };
@@ -987,6 +1003,16 @@ void shim_menu_set_about_to_show_cb(void* menu, shim_callback_t cb, void* ud)
     auto* rm = static_cast<RacketMenu*>(menu);
     rm->about_to_show_cb = cb;
     rm->about_to_show_ud = ud;
+}
+
+// Wires the native about-to-hide notification. Called once per menu%, same
+// lifetime pattern as shim_menu_set_about_to_show_cb above (docs/HACKING.md
+// §59).
+void shim_menu_set_about_to_hide_cb(void* menu, shim_callback_t cb, void* ud)
+{
+    auto* rm = static_cast<RacketMenu*>(menu);
+    rm->about_to_hide_cb = cb;
+    rm->about_to_hide_ud = ud;
 }
 
 void shim_menubar_add_menu(void* menubar, void* menu)

@@ -25,21 +25,35 @@ Sprachauswahl-Dialog nicht; nach mehreren Versuchen Absturz
      `QAction::triggered`-Bindung danach an einer freigegebenen Closure → Absturz
      beim nächsten Klick. gtk pinnt genau dafür via `global-prevent-gc`; win32
      braucht das nicht (`TrackPopupMenu` blockiert).
-- **Fix:** `popup-callback` in ein Feld übernehmen statt verwerfen; `popup` pinnt das
-  Menü-Objekt (Ein-Slot-Strategie) und merkt sich den `on-popup`-Callback; der
-  Item-Klick fällt auf `on-popup`/`popup-callback` zurück, wenn `find-top-frame`
+- **Fix (§59.1):** `popup-callback` in ein Feld übernehmen statt verwerfen; `popup`
+  pinnt das Menü-Objekt (Ein-Slot-Strategie) und merkt sich den `on-popup`-Callback;
+  der Item-Klick fällt auf `on-popup`/`popup-callback` zurück, wenn `find-top-frame`
   scheitert (spiegelt gtks `do-selected`). **Reiner Racket-Fix, kein Shim-/
   ABI-Wechsel, kein Rebuild nötig.**
+- **Fix (§59.2, gleiche Session, Folgeauftrag):** Abbruch-Pfad (Klick außerhalb des
+  Menüs) nachgerüstet — neuer Shim-Export `shim_menu_set_about_to_hide_cb`
+  (`QMenu::aboutToHide`, Gegenstück zu `shim_menu_set_about_to_show_cb`), plus ein
+  `cancel-none-box`-Feld in `wx/qt/menu.rkt`, das die Auswahl-vs-Abbruch-Entscheidung
+  in einen nachgelagerten Thunk verschiebt (spiegelt gtks `cancel-none-box`/
+  `do-no-selected` exakt) — dadurch unabhängig davon korrekt, ob Qt `aboutToHide`
+  vor oder nach `triggered` feuert. **ABI-Änderung, kein additiver Fall ohne
+  Konsequenz:** ein altes Shim-Binary ohne den neuen Export lässt das Backend beim
+  Laden fehlschlagen (nicht nur eine fehlende Einzelfunktion) — Windows/Linux
+  müssen vor dem nächsten Start neu bauen (Banner in `CLAUDE.md`).
 - **Verifikation:** minimales Repro-Skript mit `timer%`-erzwungenem GC reproduzierte
-  den Absturz vor dem Fix, lief danach 5× sauber durch. Echtes DrRacket: „Choose
-  Language…" öffnet jetzt zuverlässig den vollen Dialog, Cancel schließt sauber.
-  Smoke 3/3 grün. Nur macOS getestet — kein Verhaltensunterschied für
-  Windows/Linux erwartet (kein Shim-Bezug), aber noch gegenzuprüfen.
-- **Offen:** Abbruch-Pfad (Klick außerhalb) ruft `popup-release` nie auf, bräuchte
-  `QMenu::aboutToHide` als neuen Shim-Export (ABI-Änderung) — DrRacket ist davon
-  nicht betroffen (frisches Popup-Menü pro Klick), ein wiederverwendetes
-  Popup-Menü-Objekt könnte aber betroffen sein. Details: `docs/HACKING.md` §59.
-- Commit noch offen — siehe Frage an den Nutzer zum Zwei-Repo-Commit (Regel 6).
+  den §59.1-Absturz vor dem Fix, lief danach mehrfach (inkl. gemischter
+  Auswahl/Abbruch-Zyklen) sauber durch, korrekte `menu-popdown`/`menu-popdown-none`-
+  Events. Echtes DrRacket: „Choose Language…" öffnet jetzt zuverlässig den vollen
+  Dialog. Smoke 3/3 grün. Nur macOS getestet (§59.1 + §59.2) — für §59.1 kein
+  Verhaltensunterschied auf Windows/Linux erwartet (kein Shim-Bezug), §59.2
+  braucht dort zwingend einen Rebuild vor dem nächsten Start.
+- **Offen:** Submenü-`set-parent` (§59.1) bleibt ein bekannter blinder Fleck für
+  Popup-Menüs mit Untermenüs, für den gemeldeten Fall irrelevant. Details:
+  `docs/HACKING.md` §59 (§59.1/§59.2/§59.3-Tabelle).
+- Nebenbei: `bin/run_macos.sh` angelegt (startet echtes DrRacket unter `PLT_QT=1`
+  für freie manuelle Tests, optional mit Datei-Argument statt `-l drracket`).
+- Commits: gui-Submodul `995f46cd` (§59.1) + ein weiterer für §59.2 (siehe unten),
+  Umbrella `dff25c9` (§59.1-Pointer-Bump) + ein weiterer für §59.2.
 
 ---
 

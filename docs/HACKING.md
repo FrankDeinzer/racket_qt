@@ -7263,6 +7263,8 @@ eigenständiger Fund aus freiem manuellem Test nach Abschluss des Blocks.
 
 ## §59 — Popup-Menüs (Kontextmenüs, `popup-menu%`) funktionslos + Absturz bei GC (2026-09-26)
 
+### §59.1 Nichts passiert + Absturz — Dispatch-Lücke + GC-Use-after-free
+
 **Kontext:** freier manueller Test, kein Auftrags-Prompt. Nutzer klickte in DrRacket
 unten in der Statuszeile auf „Determine language from source [custom]" → Popup mit
 „Choose Language…" öffnet sich → Klick auf „Choose Language…" → **nichts passiert**
@@ -7322,14 +7324,10 @@ nötig:**
   Doppel-Feuern), entfernt den Pin, und baut `popup-event%` (`set-menu-id id`) **im
   nachgelagerten, über `on-popup` geposteten Thunk**, nicht im atomaren FFI-Callback
   selbst (Regel 2: der native Callback postet nur, rechnet nicht).
-- **Nicht mitgefixt (bewusst außerhalb des Umfangs dieses Fixes):** der
-  Abbruch-Pfad (Klick außerhalb des Menüs) ruft `popup-release`/`'menu-popdown-none`
-  nie auf — dafür bräuchte es ein `QMenu::aboutToHide`-Signal, ein neuer Shim-Export
-  (ABI-Änderung, Drei-Maschinen-Rebuild). DrRacket erzeugt bei jedem Klick ein
-  frisches `popup-menu%`, ist davon nicht betroffen; ein **wiederverwendetes**
-  Popup-Menü-Objekt könnte nach einem Abbruch beim nächsten Öffnen verweigern
-  (`popup-grab` nie released) — als offener Befund unten vermerkt.
-  Submenüs *innerhalb* eines Popup-Menüs sind ebenfalls nicht abgedeckt (`append`
+- **Nicht mitgefixt in diesem Schritt** (siehe §59.2 unten, mittlerweile behoben):
+  der Abbruch-Pfad (Klick außerhalb des Menüs) rief `popup-release`/
+  `'menu-popdown-none` nie auf.
+  Submenüs *innerhalb* eines Popup-Menüs sind weiterhin nicht abgedeckt (`append`
   ruft nie `set-parent` auf ein Submenü) — für den gemeldeten Fall ohne Submenü
   irrelevant, aber ein bekannter blinder Fleck.
 
@@ -7348,13 +7346,84 @@ nötig:**
   **kein** Verhaltensunterschied erwartet (identischer Code-Pfad, kein Shim-Bezug),
   aber wie üblich gegenprüfen statt annehmen.
 
-**Offener Befund für eine künftige Session:** Abbruch-Pfad (`popup-release`/
-`'menu-popdown-none`) fehlt weiterhin, bräuchte `QMenu::aboutToHide` als neuen
-Shim-Export (ABI-Änderung, Drei-Maschinen-Banner). Vorsicht bei der Umsetzung:
-vermutlich feuert Qt `aboutToHide` bereits **vor** `triggered` bei einer echten
-Auswahl (unbestätigt, per Debug-Print zu verifizieren) — ein naives „`aboutToHide` ⇒
-sofort `'menu-popdown-none`" würde dann bei *jeder* echten Auswahl zuerst ein
-falsches „none" feuern. Ein `aboutToHide`-Handler müsste die Entscheidung
-„ausgewählt vs. abgebrochen" auf einen nachgelagerten Thunk verschieben, der erst
-nach einem eventuell schon eingetroffenen `triggered`-Callback entscheidet.
-Submenü-`set-parent` (siehe oben) ebenfalls offen.
+Der zum Zeitpunkt von §59.1 offen gelassene Abbruch-Pfad ist mit §59.2 (unten)
+noch in derselben Session behoben worden. Submenü-`set-parent` (siehe oben) bleibt
+offen.
+
+### §59.2 Abbruch-Pfad (Klick außerhalb) — `QMenu::aboutToHide`, neuer Shim-Export
+
+**Kontext:** direkter Nutzerauftrag im selben Gespräch, direkt im Anschluss an
+§59.1: „mach jetzt auch den aboutToHide-Fix mit Shim-Export". §59.1 hatte den
+Abbruch-Pfad bewusst ausgeklammert, weil er einen neuen Shim-Export braucht
+(Drei-Maschinen-Rebuild) und die Auswahl-/Absturz-Bugs — der eigentlich gemeldete
+Befund — dafür nicht warten mussten.
+
+**Design — spiegelt gtks `cancel-none-box`-Muster exakt (`wx/gtk/menu.rkt`s
+`do-selected`/`do-no-selected`), Racket-seitig ordering-unabhängig:**
+
+Qt liefert kein direktes „Menü wurde abgebrochen"-Signal, nur `QMenu::aboutToHide`
+(feuert bei **jedem** Schließen — Auswahl *und* Abbruch gleichermaßen). Nach Qts
+eigener `activateAction()`-Logik (`qmenu.cpp`) wird das Menü **vor** dem
+`QAction::trigger()`-Aufruf versteckt — `aboutToHide` feuert also vor `triggered`
+bei einer echten Auswahl (per Kommentar in `shim.cpp` dokumentiert, nicht mit
+eigenem Debug-Print isoliert nachgewiesen, da das nachfolgende Racket-seitige
+Design ohnehin unabhängig von der genauen Reihenfolge korrekt ist). Ein naives
+„`aboutToHide` ⇒ sofort `'menu-popdown-none`" würde bei dieser Reihenfolge vor
+*jeder* echten Auswahl ein falsches „none" feuern.
+
+Fix dafür: ein Feld `cancel-none-box` (frische `(box #f)` bei jedem `popup`-Aufruf).
+Der Item-Klick-Callback (Auswahl-Pfad, `append`) flippt die Box synchron auf `#t`,
+**noch innerhalb des atomaren FFI-Callbacks** (reine Box-Mutation, kein Aufruf in
+Nutzercode — mit Regel 2 vereinbar). Der neue `about-to-hide-cb` entscheidet
+**nichts selbst**: er postet nur einen *vorläufigen* Thunk über den bestehenden
+`on-popup`-Mechanismus, der — wenn er später tatsächlich läuft — die Box prüft:
+ist sie noch `#f`, war es ein echter Abbruch (`'menu-popdown-none`); ist sie `#t`,
+ist zwischenzeitlich eine echte Auswahl passiert, der Thunk tut nichts. Das macht
+das Verhalten **korrekt unabhängig davon**, ob `aboutToHide` vor oder nach
+`triggered` feuert — die Entscheidung fällt beim späteren, nachgelagerten
+Queue-Abarbeiten, nicht beim Signal selbst.
+
+`pinned-popup` wird in `about-to-hide-cb`s synchronem Teil bewusst **nicht**
+freigegeben (anders als gtks `do-no-selected`, das sofort `hash-remove!` macht) —
+der Pin bleibt gesetzt, bis entweder der Auswahl-Pfad oder der spätere
+Abbruch-Thunk ihn tatsächlich löst. Grund: zwischen dem synchronen
+`aboutToHide`-Signal und dem synchronen `triggered`-Signal (falls es doch noch
+kommt) liegt sonst eine Lücke ohne Racket-seitigen GC-Root für das Objekt — siehe
+Kommentar bei `cancel-none-box`s Definition in `wx/qt/menu.rkt`.
+
+**Shim-Änderung (`qt-shim/src/shim.cpp`):** `RacketMenu` bekommt ein zweites
+Callback-Paar (`about_to_hide_cb`/`about_to_hide_ud`), verbunden mit
+`QMenu::aboutToHide` im Konstruktor — exakt dasselbe Muster wie das bestehende
+`about_to_show_cb`/`QMenu::aboutToShow` (§37). Neuer Export:
+`shim_menu_set_about_to_hide_cb(void* menu, shim_callback_t cb, void* ud)`.
+**Kein rein additiver Fall ohne Konsequenz:** `wx/qt/utils.rkt` bindet den neuen
+Namen unbedingt per `get-ffi-obj` — ein altes Shim-Binary ohne diesen Export lässt
+das gesamte Qt-Backend beim Laden fehlschlagen (Modul-Instantiierungsfehler, kein
+Fenster), nicht nur eine fehlende Einzelfunktion. Windows/Linux müssen daher vor
+dem nächsten `PLT_QT=1`-Start neu bauen (Banner in `CLAUDE.md`).
+
+**Verifikation (macOS, `nm -gU` bestätigt den Export):**
+- Repro-Skript aus §59.1 erweitert um einen `popdown-callback`, der
+  `(send e get-event-type)` loggt. Auswahl-Pfad: `ITEM CALLBACK FIRED` gefolgt von
+  `POPDOWN-CALLBACK event-type=menu-popdown` (kein falsches „none" davor). Abbruch-
+  Pfad (Klick außerhalb): `POPDOWN-CALLBACK event-type=menu-popdown-none`, kein
+  Absturz. Drei gemischte Auswahl/Abbruch-Zyklen in Folge: alle Events korrekt
+  zugeordnet, kein Crash, kein verwaister Prozess.
+- Echtes DrRacket: „Choose Language…" öffnet weiterhin zuverlässig, Cancel-Button
+  im Dialog selbst schließt sauber (unabhängig vom hier gefixten Popup-Menü-Pfad,
+  aber als Regressionscheck mitgelaufen).
+- `PLT_QT=1 raco test tests/smoke.rkt`: 3/3 grün.
+- Nur macOS getestet — Windows/Linux-Rebuild + Gegenprüfung offen (s. Banner in
+  `CLAUDE.md`).
+
+**Offener Befund für eine künftige Session:** Submenü-`set-parent` (§59.1) bleibt
+unabhängig von diesem Fix offen — für den gemeldeten Fall irrelevant, aber ein
+bekannter blinder Fleck für ein Popup-Menü mit Untermenüs.
+
+### §59.3 Zusammenfassung
+
+| Symptom | Root Cause | Fix | Ort | Rebuild nötig |
+|---|---|---|---|---|
+| „Choose Language…" öffnet nie / jedes Popup-Menü-Item wirkungslos | `find-top-frame` liefert für standalone Popup-Menüs immer `#f`, `popup-callback`-Fallback verworfen | `on-popup`/`popup-callback`-Fallback verdrahtet | `wx/qt/menu.rkt` | Nein |
+| Absturz nach mehreren Versuchen (`terminated in atomic mode!`) | `QMenu::popup()` nicht-blockierend, nichts hielt das Menü-Objekt gegen GC | Ein-Slot-GC-Pin (`pinned-popup`) | `wx/qt/menu.rkt` | Nein |
+| Abbruch (Klick außerhalb) feuert kein `'menu-popdown-none` | Kein Qt-Signal dafür verdrahtet | `QMenu::aboutToHide` + `cancel-none-box` (order-unabhängig) | `qt-shim/src/shim.cpp` + `wx/qt/menu.rkt` | Ja (Windows/Linux offen) |

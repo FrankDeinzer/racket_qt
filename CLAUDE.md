@@ -108,6 +108,21 @@ Aufgabe:
 > (`docs/2026-09-22_report-macos.md`, §57). Kein AppleClang-Äquivalent zum MSVC-Fix
 > nötig — Build lief sauber durch. Damit sind alle drei Maschinen auf demselben
 > Shim-ABI-Stand (gleiche Klasse wie §27/§52.1).
+>
+> **Shim-ABI-Stand seit 2026-09-26 (§59.2) — macOS gebaut+validiert, Windows/Linux
+> noch offen, Rebuild dort zwingend vor dem nächsten Start.** Ein neuer Export:
+> `shim_menu_set_about_to_hide_cb` (wired auf `QMenu::aboutToHide`, Gegenstück zu
+> `shim_menu_set_about_to_show_cb`) — behebt den Abbruch-Pfad für standalone
+> Popup-Menüs (Klick außerhalb schließt das Menü ohne Auswahl, bis dahin
+> unbehandelt, s. §59.1). **Das ist kein rein additiver Fall ohne Konsequenz für
+> ein altes Binary:** `wx/qt/utils.rkt` bindet `shim_menu_set_about_to_hide_cb`
+> unbedingt per `get-ffi-obj` beim Laden des Backends — ein altes Shim-Binary ohne
+> diesen Export lässt das Backend **beim Start fehlschlagen** (Modul-Instantiierung
+> bricht ab, kein DrRacket-Fenster, kein Absturz-Symptom wie bei §59.1, sondern ein
+> Sofort-Fehler beim Laden), nicht nur eine fehlende Einzelfunktion. Windows/Linux
+> **müssen den Shim neu bauen, bevor sie danach `PLT_QT=1` erneut starten** (der
+> `git pull` des Submoduls allein reicht nicht — erst rebuilden, dann starten).
+> Auf macOS/Clang kein Build-Fix nötig, `nm -gU` bestätigt den Export.
 
 **Windows:**
 ```powershell
@@ -161,6 +176,10 @@ PLT_QT=1 raco test tests/smoke.rkt
 # Echtes DrRacket:
 PLT_QT=1 racket -l drracket
 ```
+Kurzform für freie manuelle Tests: `bin/run_macos.sh` (kein Argument → echtes
+DrRacket unter `PLT_QT=1`; mit Argument → an `racket` durchgereicht, z. B.
+`bin/run_macos.sh examples/hello.rkt`).
+
 `raco pkg update --link third_party/gui/gui-lib` + `--link third_party/draw/draw-lib`
 (einmalig, kein `sudo` nötig — Homebrews `/Applications/Racket v9.3/share/pkgs/` ist
 user-owned, wie bei Linux und anders als Windows' `Program Files`). Gate-Test: DrRacket
@@ -246,7 +265,7 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 - Linux: stdout-Rauschen beim Laden (`qt-init!`/`qt-start-event-pump` ungevoidet) — ✅ 2026-09-19 (§52.4), rein kosmetisch, keine ABI-Änderung. Validiert Windows 2026-09-19(2) (§53)
 - `wx/common/clipboard.rkt`-Dead-Code-`if`-Bug (§55.6) — ✅ 2026-09-22 (Linux), Ein-Zeilen-Fix (`(has-x-selection?)` statt `has-x-selection?`), gui-Submodul `6bae83df`. Shared Code, betrifft alle vier Backends identisch, keine ABI-Änderung (reiner Racket-Code). Smoke getestet Linux Qt + nativ (gtk); **macOS erstmals empirisch validiert 2026-09-25** (§57.2, Fix wirkt sich dort — anders als auf gtk — tatsächlich aus, Risikofall strukturell ausgeschlossen); Windows noch offen.
 - macOS: Cmd/Ctrl in jedem Modifier-Keyboard/Maus-Event vertauscht (§49.5-Root-Cause, jetzt gefixt) — ✅ 2026-09-26 (§58.1), `QCoreApplication::setAttribute(Qt::AA_MacDontSwapCtrlAndMeta)` in `shim_app_init`, ABI-neutral (kein neuer Export). Machte jeden Cmd-Menü-Shortcut (Cmd+A/C/V/…) funktionslos — funktional in echtem DrRacket verifiziert (Select-All+Copy+Paste dupliziert Text korrekt). Zusammen mit einem zweiten, unabhängigen Fix (Menü-Shortcut-**Anzeige**, reiner Racket-Code in `wx/qt/menu.rkt`, kein Rebuild nötig, §58.2) aus einem freien manuellen Test nach Block C entdeckt.
-- Popup-/Kontextmenüs (`popup-menu%`) im gesamten Backend funktionslos + Absturz bei GC — ✅ 2026-09-26, macOS (§59), gefunden über DrRacket „Choose Language…" (Statuszeile → Sprachauswahl-Dialog öffnete sich nie, nach mehreren Versuchen Absturz `terminated in atomic mode!`). Root Cause zwei unabhängige Bugs in `wx/qt/menu.rkt`: (1) `find-top-frame` liefert für standalone Popup-Menüs immer `#f`, das dafür vorgesehene `popup-callback`-Dispatch-Protokoll wurde komplett verworfen; (2) `QMenu::popup()` ist nicht-blockierend, nichts hielt das Menü-Objekt am Leben, GC zwischen Öffnen und Klick führte zu Use-after-free im atomaren FFI-Callback. Fix: `popup-callback` als Fallback verdrahtet + Ein-Slot-GC-Pin (spiegelt gtks `do-selected`/`global-prevent-gc`), reiner Racket-Fix, kein Rebuild nötig. Verifiziert per Minimal-Repro (erzwungener GC-Timer) + echtem DrRacket, Smoke 3/3. Nur macOS getestet, kein Verhaltensunterschied für Windows/Linux erwartet, aber offen gegenzuprüfen. Abbruch-Pfad (`popup-release`/`aboutToHide`) bewusst nicht mitgefixt (ABI-Änderung nötig) — siehe Offene Befunde.
+- Popup-/Kontextmenüs (`popup-menu%`) im gesamten Backend funktionslos + Absturz bei GC — ✅ 2026-09-26, macOS (§59.1), gefunden über DrRacket „Choose Language…" (Statuszeile → Sprachauswahl-Dialog öffnete sich nie, nach mehreren Versuchen Absturz `terminated in atomic mode!`). Root Cause zwei unabhängige Bugs in `wx/qt/menu.rkt`: (1) `find-top-frame` liefert für standalone Popup-Menüs immer `#f`, das dafür vorgesehene `popup-callback`-Dispatch-Protokoll wurde komplett verworfen; (2) `QMenu::popup()` ist nicht-blockierend, nichts hielt das Menü-Objekt am Leben, GC zwischen Öffnen und Klick führte zu Use-after-free im atomaren FFI-Callback. Fix: `popup-callback` als Fallback verdrahtet + Ein-Slot-GC-Pin (spiegelt gtks `do-selected`/`global-prevent-gc`), reiner Racket-Fix, kein Rebuild nötig. Verifiziert per Minimal-Repro (erzwungener GC-Timer) + echtem DrRacket, Smoke 3/3. **Abbruch-Pfad (Klick außerhalb) direkt im Anschluss nachgerüstet** — ✅ 2026-09-26, macOS (§59.2): neuer Shim-Export `shim_menu_set_about_to_hide_cb` (`QMenu::aboutToHide`) + `cancel-none-box`-Muster (spiegelt gtks `cancel-none-box`/`do-no-selected`, order-unabhängig korrekt egal ob `aboutToHide` vor oder nach `triggered` feuert). ABI-Änderung, kein additiver Fall ohne Konsequenz (altes Binary lässt das Backend beim Laden fehlschlagen) — Windows/Linux-Rebuild vor nächstem Start zwingend, s. Build-Banner oben. Nur macOS getestet (beide Teilfixe), kein Verhaltensunterschied für Windows/Linux bei §59.1 erwartet, aber offen gegenzuprüfen.
 
 ### Reklassifiziert (kein Produktbefund)
 
@@ -263,8 +282,8 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 - Bild-Zwischenablage Cross-Toolkit (Qt→gtk) auf **Linux weiterhin ungeklärt fehlgeschlagen** (§2.7/§55.3, vermutete KDE-Klipper-Interferenz, nicht bestätigt) — auf Windows **und** macOS lief derselbe Test (Qt→nativ) sauber durch (§56.3/§57.3), stützt die Klipper-Hypothese 2:1, beweist sie aber nicht (andere Qt-Platform-Plugins auf Windows/macOS als auf Linux). Nur noch Linux offen.
 - `register-/unregister-collecting-blit` ist bewusst **nur für X11 implementiert** (§55.5) — Wayland/Windows/macOS bleiben ohne GC-Indikator-Sichtbarkeit (kein Regressionsschaden, aber auch kein neuer Fortschritt dort); ein echter macOS/Windows-Pfad wäre ein eigener künftiger Block. Auf macOS zusätzlich strukturell bestätigt: sauberer No-op auch bei installierter/laufender XQuartz (§57.4, Compile-Guard `#ifdef __linux__`).
 - **macOS: native Menüleiste kollabiert bei offenem `QFileDialog`** auf den reduzierten Drei-Menü-Zustand (`racket, File, Help`), bereits während der Dialog offen ist (nicht erst beim Schließen). **Zwei Fix-Hypothesen widerlegt** (2026-09-25 (2), Regel-4-Budget ausgeschöpft): weder das `shim_widget_set_enabled`-Deaktivieren des Parent-Fensters während des Dialogs (`filedialog.rkt:93/99`, testweise entfernt — Kollaps trat trotzdem ein) noch ein erzwungenes `activateWindow()`/`QMenuBar`-Hide-Show im C++-`finished`-Handler heilten den Zustand. `QFileDialog` läuft **nie** durch `frame%`/`dialog%`/`direct-show` (kein natives Panel — `DontUseNativeDialog` ist Default) — die ursprüngliche `shown-real-frames`-Hypothese war falsch. Vermutlich Qt-Cocoa-internes Key-Window-Menü-Tracking (welches `QMenuBar` beim Fokuswechsel als Systemmenü installiert wird), über Qts öffentliche `QWidget`-API nicht beeinflussbar — ein Fix bräuchte natives `NSApplication`/`NSMenu`-API (Objective-C++, neue Build-Komplexität). Details: §57.5.
-- **Popup-Menü-Abbruch-Pfad** (§59): Klick außerhalb eines offenen Popup-Menüs ruft `popup-release`/`'menu-popdown-none` nie auf — bräuchte `QMenu::aboutToHide` als neuen Shim-Export (ABI-Änderung, Drei-Maschinen-Rebuild). DrRacket erzeugt bei jedem Klick ein frisches `popup-menu%` und ist nicht betroffen; ein wiederverwendetes Popup-Menü-Objekt könnte nach einem Abbruch beim nächsten Öffnen verweigern. Vorsicht bei Umsetzung: Qt feuert vermutlich `aboutToHide` vor `triggered` bei echter Auswahl (unbestätigt) — ein naiver Handler würde dann bei jeder echten Auswahl zuerst ein falsches „none" melden. Submenüs innerhalb eines Popup-Menüs (kein `set-parent`) ebenfalls offen, aber irrelevant für den gemeldeten Fall.
-- **Popup-Menü-Fix (§59) nur auf macOS verifiziert** — Windows/Linux-Gegenprüfung aussteht; reiner Racket-Fix, kein Verhaltensunterschied erwartet, aber noch nicht bestätigt.
+- **Popup-Menü-Submenüs** (§59.1): `append` ruft nie `set-parent` auf ein Submenü innerhalb eines Popup-Menüs — dessen Items finden weder einen Frame noch den `on-popup`-Fallback. Für den gemeldeten Fall (kein Submenü) irrelevant, aber ein bekannter blinder Fleck.
+- **Popup-Menü-Fixe (§59.1 + §59.2) nur auf macOS verifiziert** — Windows/Linux-Gegenprüfung aussteht. §59.1 ist reiner Racket-Code (kein Verhaltensunterschied erwartet); §59.2 braucht dort zwingend einen Shim-Rebuild vor dem nächsten Start, s. Build-Banner.
 - **macOS: Nativ→Qt-Bildzwischenablage meldet Retina-Inhalte bei doppelter Pixelgröße** (`40×40` statt korrekt skaliertem `20×20`@Scale2) — `shim_clipboard_image_size`/`_get_image_argb` geben Cocoas 2×-Backing-Repräsentation ohne Skalierungskorrektur weiter, API-sichtbar falsch. Tritt nur in dieser Richtung auf (Qt schreibt selbst nur 1×). **Kein Qt-API-only-Fix möglich** (2026-09-25 (2)): `QImage::dotsPerMeterX/Y()` liefert `0`, DPI-/Skalierungsmetadaten gehen im Qt-Pasteboard-Lesepfad vollständig verloren — ein Fix bräuchte natives Pasteboard-API (Carbon `PasteboardRef` oder Objective-C++ `NSPasteboard`/`NSImage`). Details: §57.3.
 
 ## Dokumentation
