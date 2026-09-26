@@ -328,6 +328,22 @@ void shim_app_init(void)
     qputenv("QT_SCALE_FACTOR", "1");
     QApplication::setHighDpiScaleFactorRoundingPolicy(
         Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
+#ifdef __APPLE__
+    // Qt's default on macOS is to swap Ctrl and Cmd in every QKeyEvent/
+    // QMouseEvent/queryKeyboardModifiers() modifier mask (Qt::ControlModifier
+    // <-> physical Cmd, Qt::MetaModifier <-> physical Ctrl), so that a
+    // cross-platform Qt::CTRL shortcut "just works" as Cmd on the Mac. This
+    // backend never uses Qt's own shortcut matching (menu accelerators are
+    // handled entirely by wx/qt/key-map.rkt's raw-bit translation via
+    // encodeMods()/QGuiApplication::queryKeyboardModifiers(), docs/HACKING.md
+    // §49.5), which assumes the *unswapped*, literal mapping racket/gui's own
+    // convention expects (get-meta-down => Cmd, get-control-down => literal
+    // Ctrl on Mac) -- so Qt's swap only worked against us here, silently
+    // breaking every Cmd-based menu shortcut (Cmd+C/V/A/...) and the menu's
+    // visible shortcut-key hint. Must be set before QApplication is
+    // constructed (Qt::ApplicationAttribute contract).
+    QCoreApplication::setAttribute(Qt::AA_MacDontSwapCtrlAndMeta);
+#endif
     static char prog[] = "racket";
     static char* argv_arr[] = { prog, nullptr };
     s_argc = 1;
