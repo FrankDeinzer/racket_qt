@@ -42,8 +42,23 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
   (Regel 7/8) noch offen, wird am Ende der Session gebündelt erfragt.
 - Nur macOS getestet, keine ABI-Änderung -- Windows/Linux-Gegenprüfung empfohlen, aber
   nicht blockierend für den nächsten Start (kein Rebuild nötig).
-- **Weiter laufend:** §60.4/§60.5 (gemeinsamer nativer-vs-Qt-Vergleich) und §60.6
-  (QTreeWidget-Umbau) als nächste sequentielle Schritte.
+- **§60.4/§60.5 abgeschlossen (§61.1):** gemeinsamer nativer-vs-Qt-Vergleichstest zuerst
+  (bestätigt: Button-Zeilen-Clipping ist echte qt-Regression, nativ rendert korrekt).
+  Root Cause gefunden und gefixt: `group-panel%`s `get-client-size` (`wx/qt/group-panel.rkt`)
+  kollabiert den `QGroupBox`-Chrome-Overhead bei der ersten Layout-Abfrage auf 0 (vor
+  jedem echten `set-size`), starvt dadurch das gemeldete Minimum um die Titelleistenhöhe.
+  Fix: Chrome-only-Größe direkt nach Konstruktion seeden (mirrort win32). Verifiziert
+  numerisch (Probe-Zahlen vor/nach) und per echtem Qt-DrRacket-Screenshot (Button-Reihe
+  vollständig sichtbar). Reiner Racket-Fix, keine ABI-Änderung. §60.5 (Hintergrundfarbe)
+  ebenfalls per Pixel-Vergleich bestätigt: `QGroupBox`s Standardstyling vs. `NSBox`s
+  randlose Optik -- echter Unterschied, aber Styling statt Bug, kein Fix versucht.
+  Submodul-Commit `9b955ee0` (nur lokal). Neue Probes: `examples/collection-paths-clip-probe.rkt`,
+  `examples/collection-paths-clip-probe-dialog.rkt`. Nebenbefunde (nicht gefixt, notiert):
+  Qt-`frame%`/`dialog%`-400×300-Fallback ohne explizite Größe, `tab-panel%`s identisches
+  latentes 0-Höhe-Klemm-Muster. `raco test tests/stub-audit.rkt` 9/9, `PLT_QT=1 raco test
+  tests/smoke.rkt` 3/3 grün.
+- **Weiter laufend:** §60.6 (QTreeWidget-Umbau für Mehrspalten-`list-box%`) als letzter,
+  größter sequentieller Schritt.
 
 ---
 

@@ -7578,7 +7578,7 @@ bei jedem Klick — Screenshot vor/nach Klick zeigt „Show Details" → „Hide
 Im echten „Choose Language…"-Dialog: „Hide Details (⌘D)" ↔ „Show Details (⌘D)"
 wechselt jetzt korrekt bei jedem Klick.
 
-### §60.4 `list-box%`s `sizeHint()` wächst unbegrenzt mit der Zeilenanzahl — teilweise gefixt
+### §60.4 `list-box%`s `sizeHint()` wächst unbegrenzt mit der Zeilenanzahl — vollständig gefixt (zweite Ursache: §61.1)
 
 **Root Cause:** `QListWidget::sizeHint()` bemisst sich an **allen** Zeilen (kein
 Deckel), anders als gtk/win32s native Listen-Controls, die eine kleine, konstante
@@ -7605,34 +7605,95 @@ wie `RacketMenu`).
   sichtbar, Liste bekommt eine Scrollbar statt sich aufzublähen — **vorher/nachher
   nicht gegengetestet** (Fix war schon eingebaut, als der Probe geschrieben wurde;
   Regression-Nachweis nur indirekt über den funktionierenden Endzustand).
-- **Im echten „Choose Language…"-Dialog bleibt das gemeldete Symptom im
-  Default-Zustand (nur 1 Eintrag „<<default collection paths>>") weiterhin
-  bestehen** — die Button-Reihe unter „Collection Paths" ist nach wie vor nur als
+- **Im echten „Choose Language…"-Dialog blieb das gemeldete Symptom im
+  Default-Zustand (nur 1 Eintrag „<<default collection paths>>") zunächst
+  bestehen** — die Button-Reihe unter „Collection Paths" war nach wie vor nur als
   abgeschnittener oberer Rand sichtbar (Screenshot-Crop bestätigt), obwohl die Liste
-  hier gar nicht viele Zeilen hat. Das spricht dafür, dass dies **kein reines
-  sizeHint-Problem** ist, sondern eine zweite, noch nicht gefundene Ursache in der
-  umgebenden `group-box-panel%`/`button-panel%`-Layoutberechnung hat (laut
-  Recherche: `button-panel%` hat bereits `stretchable-height #f`, sein gemeldetes
-  Minimum wird trotzdem offenbar nicht durchgesetzt). **Nicht vollständig gefixt,
-  künftige Session nötig** — der hier gelandete Fix behebt nachweislich die
-  „viele Zeilen"-Variante des Symptoms, aber nicht die im Originalbefund gezeigte
-  Variante mit kurzer Liste.
+  hier gar nicht viele Zeilen hat. **Zweite Ursache in §61.1 gefunden und gefixt**
+  (s. u.) — damit ist dieser Befund vollständig geschlossen.
 - `PLT_QT=1 raco test tests/smoke.rkt`: 3/3 grün, keine Regression an anderen
   list-box%-Nutzern (Preferences etc. nicht einzeln gegengeprüft — der 6-Zeilen-
-  Deckel könnte dort sichtbare Listen mit mehr als 6 Einträgen betreffen, offen für
-  die künftige Session).
+  Deckel könnte dort sichtbare Listen mit mehr als 6 Einträgen betreffen).
 
-### §60.5 Choose-Language-Dialog: Hintergrundfarbe links — unbestätigt, kein Fix
+#### §61.1 Zweite Ursache: `group-panel%`s Chrome-Overhead kollabiert bei der ersten Layout-Abfrage auf 0 (2026-09-27, macOS)
 
-Im Screenshot des echten Dialogs ist keine eindeutige Farbabweichung zwischen dem
-Dialog-Hintergrund und den weißen Hierlist-/Textvorschau-Boxen links erkennbar, die
-über das für verschachtelte Listen-/Text-Widgets in einem grauen Dialog übliche Maß
-hinausgeht — aber es gab in dieser Session **keinen** Seite-an-Seite-Vergleich mit
-echtem cocoa-DrRacket, der eine belastbare Aussage erlauben würde. `grep` nach
-`QPalette`/`setPalette`/`background` in `shim.cpp` bleibt ergebnislos (kein
-hartcodierter Hintergrund gefunden) — falls es einen echten Unterschied gibt, ist er
-nicht durch eine offensichtliche hartcodierte Konstante verursacht. **Offen für die
-künftige Session, mit nativem Vergleichsscreenshot.**
+**Kontext:** Fortsetzung von §60.4 im Rahmen der §61-Session, kombiniert mit §60.5
+(gleicher Dialog, ein gemeinsamer nativer-vs-Qt-Vergleich als Referenz für beides).
+
+**Diskriminierender Test zuerst:** derselbe Dialog („Choose Language…" → „Show
+Details") einmal unter echtem nativem cocoa-DrRacket (kein `PLT_QT`) und einmal unter
+Qt-DrRacket geöffnet, sauberer Einzelprozess je Lauf. Nativ zeigt die volle
+Button-Reihe (Add/Add Default/Remove/Raise/Lower) mit ~35px Luft darunter — Qt clippt
+sie auf einen ~15px-Streifen abgerundeter Button-Oberkanten, die knapp über
+„Command-line arguments" herausragen. **Bestätigt: echte qt-spezifische Regression,
+kein vorbestehendes racket/gui-Verhalten.**
+
+**Root Cause:** `wx/qt/group-panel.rkt`s `get-client-size` berechnet den
+Chrome-Overhead (Titel-/Rahmenränder von `QGroupBox`) als `(get-height) - t - b`
+(analog für die Breite). Bei der allerersten `do-get-graphical-min-size`-Abfrage
+(`wxpanel.rkt`, geteilter, backend-unabhängiger Layout-Code) — die läuft, **bevor**
+je ein echter `set-size`-Aufruf stattgefunden hat — liefern `get-width`/`get-height`
+noch `0`. `get-client-size` klemmt dadurch ebenfalls auf `0`, und die generische
+Delta-Berechnung „`(get-height) - client-h`" kollabiert von der wahren `(t+b)`-Chrome
+(gemessen 25px im Probe) auf `0`. Das hungert `group-box-panel%`s eigenes gemeldetes
+Minimum genau um seine Titelleistenhöhe aus — exakt genug, um die nicht-stretchbare
+`button-panel` unterhalb der stretchbaren Liste aus dem sichtbaren Bereich zu drängen.
+gtk umgeht das strukturell anders (lebendes `GtkAllocation`-Signal statt einer
+`get-height`-Subtraktion), win32 vermeidet es durch einen direkten `set-size`-Aufruf
+im eigenen Konstruktor. Numerisch verifiziert über eine `PLT_QT_DEBUG`-gated
+Instrumentierung in `get-client-size` (bleibt im Code, spiegelt die bestehende
+Konvention aus `wx/qt/tab-panel.rkt`).
+
+**Fix (`wx/qt/group-panel.rkt`, ~22 Zeilen, reiner Racket-Code, keine ABI-Änderung):**
+direkt nach der Konstruktion wird per `set-size` eine Chrome-only-Größe (`l+r` ×
+`t+b`, null Content) gesetzt — spiegelt win32s Ansatz, aber generisch aus
+`content-margins` abgeleitet statt aus einer hartcodierten Label-Höhe.
+
+**Verifikation:**
+- `examples/collection-paths-clip-probe-dialog.rkt` (neu): mirrort die
+  Collection-Paths-Struktur 1:1 (ein Eintrag, 5 Buttons). Vorher: `cp-panel.h=144`
+  bei einer Kindersumme von 140 (nur 4px Luft — knapp am Clipping). Nachher:
+  `cp-panel.h=169` (29px Luft, passt zur wahren `t+b=25`-Chrome + Rahmen).
+- Echtes Qt-DrRacket: Screenshot zeigt die komplette Button-Reihe sauber sichtbar mit
+  komfortablem Abstand, kein Clipping mehr.
+- Eine Fix-Hypothese verworfen (dokumentiert, Triage-Regel 4): `ensurePolished()` vor
+  `sizeHint()` in `shim_widget_get_size_hint` (`shim.cpp`) getestet, keine messbare
+  Wirkung, wieder entfernt (`git diff` auf `shim.cpp` sauber).
+- `raco test tests/stub-audit.rkt` (9/9) und `PLT_QT=1 raco test tests/smoke.rkt`
+  (3/3) grün.
+- Nur macOS getestet, keine ABI-Änderung — Windows/Linux brauchen nur den
+  Submodul-Pull, keinen Rebuild, aber wie üblich gegenprüfen statt annehmen.
+
+**Nebenbefunde (nicht Ursache, nicht gefixt, nur notiert):**
+- Qt-`frame%`/`dialog%` ohne explizite Größe fällt auf hartcodiert `400×300` zurück
+  (`wx/qt/frame.rkt:91-92`) statt sich wie nativ am Inhalt zu orientieren. Betrifft
+  diesen Bug nicht (der reale Dialog wächst über `400×300` hinaus so oder so
+  korrekt), aber eine echte, separate Divergenz für einen künftigen Blick.
+- `tab-panel%`s `get-client-size` hat dasselbe latente 0-Höhe-Klemm-Muster wie
+  `group-panel%` vor diesem Fix — nicht gefixt (außerhalb des Scopes, kein
+  gemeldetes Symptom), nur geflaggt.
+
+### §60.5 Choose-Language-Dialog: Hintergrundfarbe links — bestätigt, kein Fix (Styling, kein Bug)
+
+**Diskriminierender Vergleich (§61.1, 2026-09-27, macOS):** Pixel-Sampling auf
+Screenshots von nativem cocoa- und Qt-DrRacket (identischer Dialog, „Show Details"
+offen). Native flache Bereiche (z. B. „Dynamic Properties", „Collection Paths") sind
+reines Weiß (255,255,255) — Cocoas `NSBox` rendert solche einfachen Gruppierungen auf
+dieser macOS-Version offenbar randlos/ohne eigene Füllung (konsistent mit modernem
+macOS-HIG-Stil für flache Abschnitts-Header). Qt rendert **jeden** dieser Bereiche als
+echte `QGroupBox` mit sichtbarem Rahmen und deutlich grauerer Füllung (gemessen
+229–236 von 255, konsistent über mehrere unabhängige Sample-Punkte). Selbst natives
+einziges „vertieftes" Well („Output Style") liegt mit 247,247,247 noch spürbar heller
+als Qts 229–236 für dieselbe konzeptuelle Region. Listen-/Textfeld-Innenräume sind in
+beiden Fällen weiß (255,255,255) — dort kein Unterschied.
+
+**Verdikt: echter, sichtbarer, systematischer Unterschied — aber Styling, kein
+hartcodierter-Farbe-Bug.** Root Cause ist `QGroupBox`s Standard-macOS-Styling
+(sichtbarer Rahmen + gefüllter Hintergrund), das nicht `NSBox`s nahezu unsichtbarem
+modernem Erscheinungsbild entspricht. Ein Fix bräuchte ein eigenes
+`QGroupBox`-Stylesheet (größerer, macOS-natives-Styling-Fix) — außerhalb des Scopes
+dieser Session, nicht versucht. **Offen für eine künftige Session, falls das visuell
+störend genug ist, um den Aufwand zu rechtfertigen.**
 
 ### §60.6 Package Manager: Mehrspalten-Listen kaputt — offen, kein Fix (substantielles Feature)
 
@@ -7691,8 +7752,8 @@ in diesem Backend unbenutzt), `menu.rkt`s „stubs required by glue"
 | Enter im Datei-Dialog startet Rename | Qt/macOS-Upstream-Verhalten (`EditKeyPressed` nur unter `Q_OS_MACOS`) | ✅ gefixt, verifiziert (Datei + Verzeichnis) | `qt-shim/src/shim.cpp` (macOS-only) | Nein (ABI-neutral) |
 | „Open Recent" beim ersten Öffnen leer | Async-Race zwischen `aboutToShow` und Regel-2-konformem `queue-event` | ✅ gefixt, verifiziert (2/2, sauberer Prozess) | `wx/qt/queue.rkt` | Nein (reiner Racket-Fix) |
 | „Show Details"-Button ändert Label nie | reiner No-op-Stub, kein Shim-Export vorhanden | ✅ gefixt, verifiziert | `qt-shim/src/shim.cpp` + `button.rkt` | Ja (neuer Export) |
-| Collection-Paths-Buttons verschwinden | `list-box%`-sizeHint unbegrenzt (Teilursache) | 🟡 teilweise — „viele Zeilen"-Fall gefixt, „kurze Liste"-Fall im echten Dialog weiterhin reproduzierbar, zweite Ursache offen | `qt-shim/src/shim.cpp` | Nein (ABI-neutral), aber Fix unvollständig |
-| Choose-Language-Hintergrundfarbe | unbestätigt | ⚪ offen, kein belastbarer Befund ohne nativen Vergleich | — | — |
+| Collection-Paths-Buttons verschwinden | `list-box%`-sizeHint unbegrenzt (Teilursache) + `group-panel%`-Chrome kollabiert bei erster Layout-Abfrage (zweite Ursache, §61.1) | ✅ vollständig gefixt, verifiziert | `qt-shim/src/shim.cpp` + `wx/qt/group-panel.rkt` | Nein (beide ABI-neutral) |
+| Choose-Language-Hintergrundfarbe | `QGroupBox`-Standardstyling (Rahmen+Füllung) vs. `NSBox`s randlose moderne Optik | ✅ bestätigt (§61.1, nativer-vs-Qt-Pixelvergleich) — Styling-Divergenz, kein Bug, kein Fix versucht (Stylesheet-Umbau nötig) | — | — |
 | Package Manager Mehrspalten-Listen kaputt | `list-box%` bewusst einspaltig, Mehrspalten-API sind No-ops mit Fake-Werten | ⚪ offen, substantielles Feature (eigene Session) | `qt-shim/src/shim.cpp` + `wx/qt/list-box.rkt` | Ja (bei Umsetzung) |
 | `set-focus`/`set-icon`/`message%` Farbe/`panel%` Label-Position+Reparenting | stille No-op-Stubs (Stub-Inventar) | ⚪ nicht gefixt, als Zielliste dokumentiert | `wx/qt/*.rkt` | Ja (bei Umsetzung) |
 
