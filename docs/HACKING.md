@@ -7663,6 +7663,16 @@ direkt nach der Konstruktion wird per `set-size` eine Chrome-only-Größe (`l+r`
   (3/3) grün.
 - Nur macOS getestet, keine ABI-Änderung — Windows/Linux brauchen nur den
   Submodul-Pull, keinen Rebuild, aber wie üblich gegenprüfen statt annehmen.
+- **Blinder-Fleck-Nachtest (Koordinator, im Anschluss an §61.2):** der
+  `group-panel%`-Chrome-Seed-Fix macht potenziell **jedes** `group-box-panel%`
+  einen Tick höher als vorher — nur „Choose Language…" war geprüft. Echtes
+  DrRacket → Preferences (Edit-Menü) → alle Tabs mit `group-box-panel%`-lastigem
+  Layout durchgesehen: **Editing**-Tab (4 nebeneinander liegende
+  `group-box-panel%` mit je einer Liste + Add/Remove-Button-Zeile — strukturell
+  am nächsten an Collection Paths) zeigt alle Buttons vollständig sichtbar, kein
+  Clipping. **General**- und **Colors**-Tab ebenfalls unauffällig (Colors nutzt
+  primär Scroll-Panels, weniger `group-box-panel%`-lastig). Keine Regression
+  gefunden.
 
 **Nebenbefunde (nicht Ursache, nicht gefixt, nur notiert):**
 - Qt-`frame%`/`dialog%` ohne explizite Größe fällt auf hartcodiert `400×300` zurück

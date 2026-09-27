@@ -57,8 +57,33 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
   Qt-`frame%`/`dialog%`-400×300-Fallback ohne explizite Größe, `tab-panel%`s identisches
   latentes 0-Höhe-Klemm-Muster. `raco test tests/stub-audit.rkt` 9/9, `PLT_QT=1 raco test
   tests/smoke.rkt` 3/3 grün.
-- **Weiter laufend:** §60.6 (QTreeWidget-Umbau für Mehrspalten-`list-box%`) als letzter,
-  größter sequentieller Schritt.
+- **§60.6 abgeschlossen (§61.2):** Mehrspalten-`list-box%` für den Package Manager
+  fertig implementiert. Additiver Dual-Path: neue `RacketTreeWidget`-Klasse + 24 neue
+  `shim_list_tree_*`-Exporte (`qt-shim/src/shim.cpp`), Dispatch in `wx/qt/list-box.rkt`
+  per `(or (> (length columns) 1) (memq 'column-headers style))` — bestehender
+  einspaltiger `RacketListWidget`/`shim_list_box_*`-Pfad (inkl. §60.4-Fix) bleibt
+  byte-für-byte unverändert. Voller Vertrag real implementiert: Spalten-Reihenfolge/
+  -Größe/-Label, Mehrspalten-`set`, `set-string` auf beliebiger Spalte,
+  Header-Klick-Sortierung, `append-column`/`delete-column` (kein realer Aufrufer
+  gefunden, trotzdem echt gebaut statt weiter zu faken). Ein Bug (Spalten-Breite
+  verschob sich nach `delete-column` nicht mit dem Text mit) im Selbst-Review des
+  Umsetzers gefunden und gefixt, vom Koordinator unabhängig nachgerechnet
+  (Breiten-Zahlen stimmen). Verifiziert gegen den **echten Racket Package Manager**
+  (217 installierte Pakete, 5 Spalten + Header-Klick-Sortierung funktional) sowie
+  Einzelspalten-Regressionsproben (unabhängig vom Koordinator nochmal ausgeführt).
+  `raco test tests/stub-audit.rkt` 9/9 (7 Spalten-Backlog-Einträge entfernt, echt
+  implementiert), `PLT_QT=1 raco test tests/smoke.rkt` 3/3. Submodul-Commit
+  `c986ba6a`, Umbrella-Commit `896e5ab` (beide nur lokal). **Dritte** offene
+  Windows/Linux-Rebuild-Pflicht (neben §59.2/§60.3, s. Build-Banner in CLAUDE.md).
+  Nur macOS gebaut+getestet.
+- **Blinder-Fleck-Nachtest (§61.1):** echtes DrRacket-Preferences (Editing/General/
+  Colors-Tabs, `group-box-panel%`-lastig) durchgesehen — keine Regression durch den
+  `group-panel%`-Chrome-Seed-Fix gefunden.
+- **Damit sind alle in dieser Session beauftragten Punkte (§61-Stub-Triage inkl. 2
+  Fixes, §60.4/§60.5, §60.6) abgeschlossen.** Drei-Maschinen-Sync (Regel 7/8) steht
+  noch aus: Umbrella `main` ist mehrere Commits vor `origin/main`, Submodul
+  `qt-backend` mehrere Commits vor `origin/qt-backend` -- vor dem Pushen wird der
+  Nutzer gefragt.
 
 ---
 
