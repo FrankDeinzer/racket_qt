@@ -65,13 +65,6 @@
  (get-label-position ("panel.rkt") backlog "panel.rkt: immer 'horizontal, win32/gtk/cocoa führen echten Zustand (§60.7).")
  (set-label-position ("panel.rkt") backlog "panel.rkt: wirkungslos, win32/gtk/cocoa führen echten Zustand (§60.7).")
  (adopt-child ("panel.rkt") backlog "panel.rkt: reparented nie wirklich, win32/gtk tun es über set-parent (§60.7).")
- (get-column-order ("list-box.rkt") backlog "list-box.rkt: Teil des bewusst einspaltigen Mehrspalten-Stubs, Umbau auf QTreeWidget vorgesehen (§60.6).")
- (set-column-order ("list-box.rkt") backlog "list-box.rkt: s.o. (§60.6).")
- (get-column-size ("list-box.rkt") backlog "list-box.rkt: gibt (values 100 0 10000) statt echter Spaltenbreite zurück (§60.6).")
- (set-column-size ("list-box.rkt") backlog "list-box.rkt: s.o. (§60.6).")
- (set-column-label ("list-box.rkt") backlog "list-box.rkt: s.o. (§60.6).")
- (append-column ("list-box.rkt") backlog "list-box.rkt: s.o. (§60.6).")
- (delete-column ("list-box.rkt") backlog "list-box.rkt: s.o. (§60.6).")
 
  ;; ---- backlog: §61-Triage der 17 needs-triage-Kandidaten (Session 2026-09-27) ----
  (do-canvas-backing-flush ("canvas.rkt") backlog "canvas.rkt: periodisches Safety-Net-Flush (schedule-periodic-backing-flush) fehlt unter qt komplett, obwohl der Mechanismus strukturell auf allen 4 Backends identisch aktiv ist (gtk/win32 planen ihn ebenfalls über canvas-mixin.rkt, nicht Windows-exklusiv trotz Kommentar). Kein beobachtetes Symptom in der gesamten Redraw-/Resize-Fix-Historie (§16/§32/§33/§34) -- qts eager primärer queue-backing-flush-Pfad läuft zuverlässig genug, dass das Safety-Net bislang nie gebraucht wurde. Echte Lücke, unklarer/vermutlich niedriger Impact (§61).")

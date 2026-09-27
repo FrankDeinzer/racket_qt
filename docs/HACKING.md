@@ -7695,7 +7695,7 @@ modernem Erscheinungsbild entspricht. Ein Fix bräuchte ein eigenes
 dieser Session, nicht versucht. **Offen für eine künftige Session, falls das visuell
 störend genug ist, um den Aufwand zu rechtfertigen.**
 
-### §60.6 Package Manager: Mehrspalten-Listen kaputt — offen, kein Fix (substantielles Feature)
+### §60.6 Package Manager: Mehrspalten-Listen kaputt — vollständig gefixt (§61.2)
 
 **Root Cause (bestätigt, kein Fix versucht):** `wx/qt/list-box.rkt` ist bewusst
 **einspaltig** (`QListWidget`, keine Header) — `set-column-order`/`set-column-label`/
@@ -7710,14 +7710,103 @@ Managers. Jeder Mehrspalten-`set`/`set-string`-Aufruf landet auf derselben (einz
 Spalte, überschreibt sich gegenseitig; Spalten-Header/-Sortierung feuern nie
 (`column-control-event%` bleibt tot).
 
-**Warum kein Fix in dieser Session:** substantielles Feature, vergleichbar mit
-früheren eigenständigen Widget-Implementierungen (§20/§21) — erfordert einen Wechsel
-von `QListWidget` auf `QTreeWidget` im Shim (Header-Labels, Zelle-pro-Spalte via
-`setText(col, …)`, `header()->sectionClicked` → `column-control-event%` per
-`queue-event`, Regel 2), plus Anpassung von `wx/qt/list-box.rkt`, die bereits
-ankommenden `columns`/`column-order`-Initargs tatsächlich zu nutzen statt sie zu
-ignorieren. Referenzimplementierung: `wx/gtk/list-box.rkt`s `GtkTreeView`-Anbindung.
-Empfohlen als eigenständige künftige Session/Milestone, nicht als Neben-Fix.
+**Damals: substantielles Feature, vergleichbar mit früheren eigenständigen
+Widget-Implementierungen (§20/§21) — als eigenständige künftige Session/Milestone
+empfohlen, nicht als Neben-Fix.** In §61.2 (2026-09-27, macOS) umgesetzt.
+
+#### §61.2 Fix: additiver `QTreeWidget`-Pfad, bestehender einspaltiger Pfad unangetastet
+
+**Architektur-Entscheidung:** Dual-Path statt Umbau. Der gerade erst gefixte
+`RacketListWidget`-sizeHint-Deckel (§60.4) und alle bestehenden einspaltigen
+`list-box%`-Nutzer (Preferences, Collection-Paths-Dialog) sollten durch diese
+Änderung kein Risiko tragen. Deshalb: eine komplett separate Shim-Klasse
+`RacketTreeWidget : public QTreeWidget` (`qt-shim/src/shim.cpp`) mit einer eigenen
+Export-Familie (`shim_list_tree_*`, 24 neue Funktionen) — die bestehenden
+`shim_list_box_*`-Funktionen (`RacketListWidget`, einspaltiger Pfad) bleiben
+**byte-für-byte unverändert**, keine Arity-/Signaturänderung.
+
+Dispatch auf Racket-Ebene (`wx/qt/list-box.rkt`, nicht C++):
+`(or (> (length columns) 1) (memq 'column-headers style))` — `columns` kommt laut
+mred-Glue-Schicht (`wxlitem.rkt`) immer mit mindestens einem Label an, auch im
+einspaltigen Standardfall, daher NICHT nur `(> (length columns) 1)` prüfen (ein
+einspaltiger Header-Wunsch würde sonst übersehen).
+
+**Vollständig real implementiert (vorher No-op oder Fake-Rückgabe):**
+`get/set-column-order` (`QHeaderView::moveSection`/`visualIndex`/`logicalIndex`,
+inkrementeller Algorithmus wie gtks `gtk_tree_view_move_column_after`-Schleife),
+`get/set-column-size` (echte Werte — `RacketTreeWidget` trackt eigenes
+Spalten-Min/Max in `QVector<int> colMinW/colMaxW`, da `QHeaderView` das nativ nicht
+pro Spalte kann, nur global über `minimumSectionSize`), `set-column-label`,
+`set choices . more-choices` (mehrere Spalten-Listen gleichzeitig — der genaue
+Aufrufer-Shape aus `by-list.rkt`/`by-installed.rkt`s `sort-pkg-list!`/`sort-by!`,
+8 Spalten auf einmal), `set-string i s [col]` auf beliebiger Spalte,
+Spalten-Header-Klick → `column-control-event%` per `QHeaderView::sectionClicked`
+(nur bei `'clickable-headers`, Regel-2-konform: Callback postet nur via
+`queue-event`, rechnet nie synchron), `'reorderable-headers` via
+`setSectionsMovable`. `append-column`/`delete-column` ebenfalls real (echte
+Spaltenzahl-Änderung inkl. Datenreflow) — obwohl eine Grep-Suche über
+`/Applications/Racket v9.3/share/pkgs/` (`gui-pkg-manager-lib`, `framework`,
+`drracket-core-lib`) **keinen einzigen echten Aufrufer** fand (nur öffentliche
+API-Fläche/Typstubs/Doku referenzieren sie) — bewusst trotzdem echt gebaut statt
+weiter zu lügen, sobald der Vertrag einen `QTreeWidget`-Pfad verspricht.
+`RacketTreeWidget` bekommt denselben 6-Zeilen-sizeHint-Deckel wie
+`RacketListWidget` (§60.4) — verhindert, dass eine lange Package-Manager-Liste zur
+dauerhaften Panel-Mindesthöhe wird.
+
+**Ein Bug im ersten Implementierungsversuch gefunden und gefixt (Selbst-Review
+durch den Umsetzer, nicht erst in der Koordinator-Verifikation):**
+`shim_list_tree_delete_column` verschob Zell-/Header-**Text** um eine Spalte nach
+links, aber nicht die on-screen Section-**Breite** (`QHeaderView::resizeSection`
+ist pro logischem Index, `setColumnCount(ncols-1)` verwirft nur den State des
+gelöschten Slots, verschiebt aber keine der übrigen). Ergebnis: Spalte c zeigte den
+richtigen Text, aber die alte Breite von Spalte c (statt c+1s Breite). Fix: alle
+`sectionSize()`-Werte vor dem Reflow einsammeln, nach `setColumnCount` passend
+verschoben wieder anwenden.
+
+**Verifikation:**
+- `raco test tests/stub-audit.rkt`: 9/9. Alle 7 vorher `backlog` markierten
+  Spalten-Methoden (`get/set-column-order`, `get/set-column-size`,
+  `set-column-label`, `append-column`, `delete-column`) aus
+  `tests/stub-audit-allowlist.rktd` entfernt (echt implementiert, kein Fund mehr).
+  `tests/stub-audit.rkt`s alter „`get-column-size` wird im aktuellen Baum gefunden"-
+  Test durch einen historischen Recall-Test gegen den Pre-Fix-Commit `9b955ee0`
+  ersetzt (gleiche Konvention wie die bestehenden `is-shown?`/`set-label`-Tests) —
+  der Bug ist per Definition weg, aber das Tool muss ihn an dieser historischen
+  Stelle weiterhin erkennen können.
+- `PLT_QT=1 raco test tests/smoke.rkt`: 3/3.
+- **Regressionstest einspaltiger Pfad:** `examples/list-box-sizehint-probe.rkt`
+  (§60.4-Deckel wirkt weiterhin, Buttons bleiben sichtbar) und
+  `examples/collection-paths-clip-probe-dialog.rkt` (§61.1-Fix weiterhin intakt)
+  — beide vom Koordinator nach Erhalt des Berichts **unabhängig erneut** ausgeführt
+  und screenshotverifiziert, nicht nur den Subagenten-Bericht übernommen.
+- **Neue Multi-Column-Probe** (`examples/multi-column-list-box-probe.rkt`, 4
+  Spalten, `'(multiple column-headers clickable-headers variable-columns)`):
+  `append-column`/`delete-column` explizit über unterschiedliche, eindeutige
+  Spaltenbreiten pro Spalte verifiziert (nicht nur Label-Änderung) — nach
+  `delete-column 1` zeigt die verbleibende Spalte 1 die Breite `222` (der alten
+  Spalte 2), **nicht** `111` (der gelöschten Spalte) — bestätigt den oben
+  beschriebenen Bugfix numerisch. Vom Koordinator eigenständig nachgerechnet und
+  screenshotverifiziert (Werte identisch zum Subagenten-Bericht).
+- **Echter Racket Package Manager** (`pkg/gui.rkt`, `(module+ main ...)`,
+  `PLT_QT=1 racket -l- pkg/gui`): „Currently Installed"-Tab mit 217 echten
+  installierten Paketen zeigt 5 reale Spalten mit Headern (✓/Scope/Name/
+  Checksum/Source); Klick auf den „Name"-Header sortiert sichtbar um (bestätigt
+  `sort-by!`/`sort-pkg-list!`/`get-column-width`-Round-Trip in echtem
+  Produktionscode, inkl. `by-installed.rkt:121-123`s `(max 100 (get-column-width
+  ...))`-Aufruf, leeres stderr). „Available from Catalog" (`by-list.rkt`, der
+  8-Spalten-`set`-Fall) **nicht** live gegen echte Katalogdaten geprüft (bräuchte
+  Netzwerk-Fetch) — nur über die synthetische Probe abgedeckt.
+- Nur macOS gebaut+getestet — **dritte offene Windows/Linux-Rebuild-Pflicht**
+  (neben §59.2/§60.3), ABI-Änderung (24 neue additive Exporte, keine
+  Signaturänderung an Bestehendem — ein altes Shim-Binary lässt das Backend beim
+  Laden fehlschlagen, kein Crash zur Laufzeit).
+
+**Bekannte, bewusst nicht verfolgte Lücken:** `'reorderable-headers`-Drag-Reorder
+persistiert nicht über die Session hinaus (deckt sich mit gtks eigenem Scope — auch
+dort keine Persistenz). Kein öffentlicher `list-box%`-Lesezugriff auf beliebigen
+Zell-Text (nur `set-string`, kein `get-string(col)`) — Text-Reflow nach
+`delete-column` daher über Breiten/Reihenfolge statt einer dritten unabhängigen
+Racket-Lesebestätigung verifiziert (plus Screenshot).
 
 ### §60.7 Stub-Inventar (mechanische Grep-Suche, `wx/qt/*.rkt`)
 
@@ -7754,7 +7843,7 @@ in diesem Backend unbenutzt), `menu.rkt`s „stubs required by glue"
 | „Show Details"-Button ändert Label nie | reiner No-op-Stub, kein Shim-Export vorhanden | ✅ gefixt, verifiziert | `qt-shim/src/shim.cpp` + `button.rkt` | Ja (neuer Export) |
 | Collection-Paths-Buttons verschwinden | `list-box%`-sizeHint unbegrenzt (Teilursache) + `group-panel%`-Chrome kollabiert bei erster Layout-Abfrage (zweite Ursache, §61.1) | ✅ vollständig gefixt, verifiziert | `qt-shim/src/shim.cpp` + `wx/qt/group-panel.rkt` | Nein (beide ABI-neutral) |
 | Choose-Language-Hintergrundfarbe | `QGroupBox`-Standardstyling (Rahmen+Füllung) vs. `NSBox`s randlose moderne Optik | ✅ bestätigt (§61.1, nativer-vs-Qt-Pixelvergleich) — Styling-Divergenz, kein Bug, kein Fix versucht (Stylesheet-Umbau nötig) | — | — |
-| Package Manager Mehrspalten-Listen kaputt | `list-box%` bewusst einspaltig, Mehrspalten-API sind No-ops mit Fake-Werten | ⚪ offen, substantielles Feature (eigene Session) | `qt-shim/src/shim.cpp` + `wx/qt/list-box.rkt` | Ja (bei Umsetzung) |
+| Package Manager Mehrspalten-Listen kaputt | `list-box%` bewusst einspaltig, Mehrspalten-API sind No-ops mit Fake-Werten | ✅ vollständig gefixt, verifiziert (§61.2, additiver `QTreeWidget`-Dual-Path) | `qt-shim/src/shim.cpp` + `wx/qt/list-box.rkt` | Ja (24 neue additive Exporte) |
 | `set-focus`/`set-icon`/`message%` Farbe/`panel%` Label-Position+Reparenting | stille No-op-Stubs (Stub-Inventar) | ⚪ nicht gefixt, als Zielliste dokumentiert | `wx/qt/*.rkt` | Ja (bei Umsetzung) |
 
 ### §60.9 Stub-Inventar verstetigt: `tests/stub-audit.rkt` + Allowlist (2026-09-26)

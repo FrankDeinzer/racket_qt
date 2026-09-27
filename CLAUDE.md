@@ -138,6 +138,28 @@ Aufgabe:
 > `shim_file_dialog_create` (Enter im Datei-Dialog startet nicht mehr Inline-Rename,
 > macOS-only via `#ifdef Q_OS_MACOS`) und `shim_list_box_create` (sizeHint auf 6 Zeilen
 > gedeckelt, `RacketListWidget`). Details/Verifikation: `docs/HACKING.md` §60.
+>
+> **Shim-ABI-Stand seit 2026-09-27 (§60.6) — nur macOS gebaut+validiert, Windows/Linux
+> noch offen, Rebuild dort zwingend vor dem nächsten Start (dritte offene
+> Rebuild-Pflicht neben §59.2/§60.3 oben — alle drei bitte in einem Aufwasch
+> nachziehen).** 24 neue Exporte für `list-box%`s Mehrspalten-/`QTreeWidget`-Pfad:
+> `shim_list_tree_create`, `_set_headers_visible`, `_set_sections_movable`,
+> `_set_header_clicked_cb`, `_set_column_label`, `_set_column_width`,
+> `_get_column_width`, `_move_column`, `_column_at_visual_pos`, `_append_row`,
+> `_set_cell`, `_clear`, `_delete_row`, `_count`, `_is_selected`, `_select`,
+> `_set_current`, `_selected_count`, `_selected_at`, `_scroll_to`, `_first_visible`,
+> `_visible_count`, `_append_column`, `_delete_column`. Rein additiv, **kein additiver Fall ohne Konsequenz für
+> ein altes Binary:** `wx/qt/utils.rkt` bindet alle `shim_list_tree_*`-Funktionen
+> unbedingt per `get-ffi-obj` — ein altes Shim-Binary ohne diese Exporte lässt das
+> Backend beim Laden fehlschlagen (Modul-Instantiierungsfehler, kein Fenster), nicht
+> nur eine fehlende Einzelfunktion. Windows/Linux müssen den Shim neu bauen, bevor sie
+> danach `PLT_QT=1` erneut starten. Bestehende `shim_list_box_*`-Funktionen
+> (einspaltiger Pfad, `RacketListWidget`) sind byte-für-byte unverändert — reine
+> Ergänzung, keine Arity-/Signaturänderung an etwas Bestehendem. Verifiziert auf
+> macOS per `nm -gU` (alle 24 vorhanden) + Laufzeittest gegen den echten Racket
+> Package Manager (`pkg/gui`, 217 installierte Pakete, Mehrspalten-Anzeige +
+> Spalten-Header-Klick-Sortierung beide funktional bestätigt). Details:
+> `docs/HACKING.md` §60.6.
 
 **Windows:**
 ```powershell
@@ -297,6 +319,37 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 - `printer-dc%` (Raster-Bridge, kein Vektor-Pfad) — ✅ 2026-09-17, Windows (§43), 11 neue Exporte, Dialoge non-modal (Regel 1). PDF-Pfad auf allen 3 Plattformen grün (§52.2). macOS: eigener Teardown-Crash im Dialog-Pfad gefunden **und gefixt** (§49.4→§50, `shim_app_quit` fehlte als `exit`-Hook, Plumber-Fix, keine ABI-Änderung). Windows `QPrintDialog`-Automatisierung offen, s. u.
 - Block-C-Vertrags-Audit (elf Prompt-Kandidaten geprüft, drei davon kein Befund, ein neuer Fund) — ✅ 2026-09-22, Linux (§55), zehn Fixes: Control-Font-Metrik (höchste Wirkung), `find-graphical-system-path` (neuer Fund, maskierte `.gracketrc`-Fallback), `bell`, `get-double-click-time`, `flush-display` (Regel-1-Fall, `shim_pump(0)`), `has-x-selection?` + X11-Selection-Mode-Threading, Bild-Zwischenablage, `location->window`, `make-stub-class`-Aufräumen, `register-/unregister-collecting-blit` (DrRacket-GC-Indikator, Port von gtks rohem Xlib-GC-Callback-Protokoll auf Qt6.11, GC-Sicherheit live verifiziert). Elf neue Shim-Exporte + eine Arity-Änderung an drei bestehenden. Gate PASS (Suite A + neue Suite C + Akzeptanztest). **Windows nachgebaut+validiert 2026-09-22** (`docs/2026-09-22_report-win.md`, §56): 9/10 Fixes vollständig PASS, ein Windows-spezifischer MSVC-Build-Fix nötig (`min`/`max`-Makro-Kollision, Commit `2e91ee3`), Bild-Zwischenablage-Cross-Toolkit-Test **pixelgenau PASS** (stützt die Linux-Klipper-Hypothese: Windows hat kein Klipper-Äquivalent und läuft sauber durch, wo Linux 3× scheiterte). **Akzeptanztest `test-dock-size` auf Windows nicht abgeschlossen** — reiner Automatisierungsblocker (Klick-Automatisierung traf den Run-Knopf in echtem DrRacket wiederholt nicht, RCA nicht isoliert, Empfehlung: dediziertes/unbeobachtetes Desktop für einen Nachtest), kein Produktbefund. **macOS nachgebaut+validiert 2026-09-25** (`docs/2026-09-22_report-macos.md`, §57): alle zehn Fixes PASS, inkl. Akzeptanztest (0/3 Crash, Run per Menü-Äquivalent — Toolbar-Button ohne AX-Repräsentation). Bild-Zwischenablage-Tie-Breaker (Qt→nativ) läuft auch auf macOS sauber durch, stützt die Klipper-Hypothese weiter (2:1 gegen einen racket-qt-Bug, Linux bleibt ungeklärt). Zusätzlich erstmals validiert: §55.6 (Clipboard-`eq?`-Fix, auf gtk No-op, auf macOS/win32 tatsächlich wirksam, Risikofall strukturell ausgeschlossen). **Zwei neue, offene macOS-Befunde** (Fixversuch unternommen, beide Regel-4-Budgets ausgeschöpft, geparkt — Details §57.3/§57.5): native Menüleiste kollabiert bei offenem `QFileDialog` (kein natives Panel — `DontUseNativeDialog` ist Default —, läuft nie durch `frame%`/`dialog%`; zwei Fix-Hypothesen widerlegt, vermutlich Qt-Cocoa-internes Key-Window-Menü-Tracking, bräuchte natives `NSApplication`-API — Websuche stützt Einordnung als bekannte, wiederkehrende Qt/Cocoa-Schwachstelle statt racket-qt-Regression, kein exakter QTBUG-Treffer, s. §57.5); Nativ→Qt-Bildzwischenablage meldet Retina-Inhalte bei doppelter Pixelgröße (`40×40` statt `20×20`@Scale2 — DPI-Metadaten gehen im Qt-Pasteboard-Lesepfad vollständig verloren, `dotsPerMeterX/Y()`=0, bräuchte natives Pasteboard-API). **Block C damit auf allen drei Plattformen abgeschlossen**, die beiden Zusatzbefunde bleiben offen für eine künftige Session mit Cocoa/Objective-C++-Erweiterung des Shims.
 
+- `list-box%` Mehrspalten-/`QTreeWidget`-Pfad (§60.6, Package Manager) — ✅ 2026-09-27,
+  macOS. Dual-Path additiv: neue `RacketTreeWidget`-Klasse + 24 neue
+  `shim_list_tree_*`-Exporte in `qt-shim/src/shim.cpp`, dispatcht in
+  `wx/qt/list-box.rkt` per `tree?` (`(or (> (length columns) 1) (memq
+  'column-headers style))`) — der bestehende einspaltige `RacketListWidget`/
+  `shim_list_box_*`-Pfad (inkl. §60.4-sizeHint-Deckel) bleibt byte-für-byte
+  unverändert. Voller Vertrag real implementiert: `get/set-column-order`
+  (`QHeaderView::moveSection`/`visualIndex`/`logicalIndex`), `get/set-column-size`
+  (echte Werte, RacketTreeWidget trackt eigenes Spalten-Min/Max, da `QHeaderView`
+  das nativ nicht kann), `set-column-label`, `append-column`/`delete-column` (echte
+  Spaltenzahl-Änderung inkl. Datenreflow, obwohl kein Aufrufer in `/Applications/
+  Racket v9.3/share/pkgs/` gefunden — Grep über `gui-pkg-manager-lib`/`framework`/
+  `drracket-core-lib` ergebnislos, nur öffentliche API-Fläche/Typstubs/Doku
+  referenzieren sie), `set` mit mehreren Spalten-Listen gleichzeitig, `set-string`
+  auf beliebiger Spalte, Header-Klick → `column-control-event%` per
+  `QHeaderView::sectionClicked` (nur bei `'clickable-headers`, Regel-2-konform nur
+  `queue-event`), `'reorderable-headers` via `setSectionsMovable`. `tests/stub-audit.rkt`:
+  alle 7 zuvor als `backlog` markierten Spalten-Stubs (`get-column-order`,
+  `set-column-order`, `get-column-size`, `set-column-size`, `set-column-label`,
+  `append-column`, `delete-column`) sind aus der Allowlist entfernt, ein
+  historischer Recall-Regressionstest (gegen `9b955ee0`) ersetzt den alten
+  "aktuell unbehoben"-Test. Verifiziert: `raco test tests/stub-audit.rkt` 9/9,
+  `PLT_QT=1 raco test tests/smoke.rkt` 3/3 (keine Regression), Einzelspalten-Pfad
+  gegengeprüft (`examples/list-box-sizehint-probe.rkt`, §60.4-Deckel weiterhin
+  aktiv), neuer `examples/multi-column-list-box-probe.rkt`, und **Ende-zu-Ende
+  gegen den echten Package Manager** (`racket -l- pkg/gui`, „Currently Installed"
+  mit 217 echten installierten Paketen: 5 Spalten mit Headern sichtbar, Klick auf
+  „Name"-Header sortiert die Liste sichtbar um — bestätigt `sort-by!`/
+  `sort-pkg-list!` laufen tatsächlich). Nur macOS gebaut+validiert, Windows/Linux-
+  Rebuild aussteht (Build-Banner oben, dritte offene Rebuild-Pflicht).
+
 ### Weitere Bugfixes
 
 - Linux Crash B (Teardown, „invalid memory reference" nach `QFileDialog`) — ✅ 2026-09-16 (§39), fehlender Pump-Zyklus vor `exit`, keine ABI-Änderung. Validiert Windows + macOS 2026-09-17/18(2) (§45.5)
@@ -333,7 +386,6 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 - **macOS: Nativ→Qt-Bildzwischenablage meldet Retina-Inhalte bei doppelter Pixelgröße** (`40×40` statt korrekt skaliertem `20×20`@Scale2) — `shim_clipboard_image_size`/`_get_image_argb` geben Cocoas 2×-Backing-Repräsentation ohne Skalierungskorrektur weiter, API-sichtbar falsch. Tritt nur in dieser Richtung auf (Qt schreibt selbst nur 1×). **Kein Qt-API-only-Fix möglich** (2026-09-25 (2)): `QImage::dotsPerMeterX/Y()` liefert `0`, DPI-/Skalierungsmetadaten gehen im Qt-Pasteboard-Lesepfad vollständig verloren — ein Fix bräuchte natives Pasteboard-API (Carbon `PasteboardRef` oder Objective-C++ `NSPasteboard`/`NSImage`). Details: §57.3.
 - **Qt-`frame%`/`dialog%` ohne explizite Größe: hartcodierter `400×300`-Fallback** (Nebenbefund aus §61.1) — `wx/qt/frame.rkt:91-92`, statt sich wie nativ am Inhalt zu orientieren. Kein bekannter aktueller Symptomfall (der einzige beobachtete Dialog wächst ohnehin über `400×300` hinaus korrekt), aber eine echte, separate Divergenz.
 - **`tab-panel%`s `get-client-size`** hat dasselbe latente 0-Höhe-Klemm-Muster, das `group-panel%` vor §61.1 hatte — nicht gefixt (kein gemeldetes Symptom), nur geflaggt.
-- **Package Manager: Mehrspalten-Listen kaputt** (§60.6) — `list-box%` ist bewusst einspaltig (`QListWidget`, keine Header), Mehrspalten-Methoden sind No-ops mit Fake-Rückgabe (`get-column-size` → `(values 100 0 10000)`). Package Manager (installiertes `gui-pkg-manager-lib`) nutzt den regulären Mehrspalten-Vertrag. Substantielles Feature (Umbau auf `QTreeWidget` im Shim), vergleichbare Größenordnung wie §20/§21 — empfohlen als eigene künftige Session, kein Nebenfix.
 - **Stub-Inventar** — nicht mehr per Ad-hoc-Grep, sondern per wiederholbarem Tool
   (`tests/stub-audit.rkt` + `tests/stub-audit-allowlist.rktd`, §60.9). Alle 17 aus §60.9
   offen gelassenen `needs-triage`-Kandidaten sind seit §61 (2026-09-27) einzeln triagiert:
@@ -344,12 +396,17 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
   `set-icon`, `message%`s `set-color`/`get-color`, `panel%`s `get/set-label-position`
   (immer `'horizontal`) und `adopt-child`, `drag-accept-files`/`enforce-size` (beide
   brauchen neue Shim-Exporte), `refresh`/`register-child` (zusammengehöriges Paar),
-  `do-canvas-backing-flush`, sowie das komplette Mehrspalten-`list-box%`-Feature (§60.6)
-  und die vier Combo-Methoden (`popup-combo`/`clear-combo-items`/`append-combo-item`/
-  `set-combo-text` — §61 bestätigt: `combo-field%` ist entgegen §60.7s Annahme kein
-  totes Feature, DrRackets Multi-File-Search nutzt es real, daher Prioritäts-Hochstufung
-  innerhalb `backlog`, vergleichbare Größenordnung wie §60.6). Details/vollständige
-  Liste: `tests/stub-audit-allowlist.rktd`, `docs/HACKING.md` §60.9/§61.
+  `do-canvas-backing-flush`, und die vier Combo-Methoden (`popup-combo`/
+  `clear-combo-items`/`append-combo-item`/`set-combo-text` — §61 bestätigt:
+  `combo-field%` ist entgegen §60.7s Annahme kein totes Feature, DrRackets
+  Multi-File-Search nutzt es real, daher Prioritäts-Hochstufung innerhalb `backlog`,
+  vergleichbare Größenordnung wie §60.6 war). Details/vollständige Liste:
+  `tests/stub-audit-allowlist.rktd`, `docs/HACKING.md` §60.9/§61. Das komplette
+  Mehrspalten-`list-box%`-Feature (§60.6, Package Manager) ist seit 2026-09-27
+  implementiert (echter `QTreeWidget`-Pfad, `get-column-order`/`set-column-order`/
+  `get-column-size`/`set-column-size`/`set-column-label`/`append-column`/
+  `delete-column` alle real, nicht mehr in der Allowlist) — s. Build-Banner + Bugfix-
+  Eintrag oben, nur macOS gebaut+validiert, Windows/Linux-Rebuild aussteht.
 
 ## Dokumentation
 

@@ -295,8 +295,18 @@
   ;; Änderung an der Vergleichsregel weiter bestehen, sonst kann eine
   ;; "Verbesserung" der Regel wieder Recall verlieren, ohne dass es auffällt. ----
 
-  (test-case "get-column-size (§60.6, aktuell unbehobener Bug): wird gefunden"
-    (check-true (and (memq 'get-column-size (map gap-name (find-stub-gaps))) #t)))
+  (test-case "get-column-size (historischer §60.6-Bug, 9b955ee0, vor der Tree-Implementierung): wäre gefunden worden"
+    ;; §60.6 selbst wurde in dieser Session behoben (echter QTreeWidget-Pfad,
+    ;; list-box.rkt dispatcht jetzt per `if` statt einen Literal-Rückgabewert
+    ;; zurückzugeben) -- der ursprüngliche "wird im aktuellen Baum gefunden"-Test
+    ;; ist damit per Definition obsolet (der Bug ist weg). Wie is-shown?/
+    ;; set-label oben: gegen den letzten Commit VOR dem Fix prüfen, damit der
+    ;; Recall-Test seinen Sinn (dieser Klasse von Bug wird erkannt) dauerhaft
+    ;; behält, statt beim Fixen einfach gelöscht zu werden.
+    (define tmp (make-historical-qt-tree
+                 (list (list "list-box.rkt" "9b955ee0" "gui-lib/mred/private/wx/qt/list-box.rkt"))))
+    (check-true (and (memq 'get-column-size (map gap-name (find-stub-gaps tmp))) #t))
+    (delete-directory/files tmp))
 
   (test-case "set-focus (§60.7, aktuell unbehobener Bug): wird trotz canvas%'s echter Implementierung gefunden"
     (check-true (and (memq 'set-focus (map gap-name (find-stub-gaps))) #t)))

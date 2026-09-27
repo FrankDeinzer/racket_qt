@@ -24,6 +24,9 @@
 #include <QFileDialog>
 #include <QListView>
 #include <QTreeView>
+#include <QTreeWidget>
+#include <QHeaderView>
+#include <QVector>
 #include <QImage>
 #include <QPainter>
 #include <QPrinter>
@@ -106,6 +109,11 @@ typedef void (*shim_resize_cb_t)(void* ud, int w, int h);
 // File dialog result: ud, path (UTF-8 C string, NULL if the user canceled).
 typedef void (*shim_file_dialog_cb_t)(void* ud, const char* path);
 typedef void (*shim_printer_dialog_cb_t)(void* ud, int accepted);
+// Column header click (QHeaderView::sectionClicked): ud, logical column
+// index. Used only by the multi-column list-box% tree path (§60.6) --
+// posts a column-control-event%, mirroring the plain selection-fn callback's
+// discipline (queue only, never call back synchronously, Regel 2).
+typedef void (*shim_header_click_cb_t)(void* ud, int column);
 
 static int    s_argc = 0;
 static char** s_argv = nullptr;
@@ -1327,6 +1335,278 @@ int shim_list_box_visible_count(void* lb_ptr)
     if (rowH <= 0) return lb->count();
     int h = lb->viewport()->height();
     return (std::max)(1, h / rowH);
+}
+
+// ---- list-tree (list-box%'s multi-column path) ---------------------------
+// §60.6: a completely separate class + export family from the single-column
+// RacketListWidget/shim_list_box_* above -- those are byte-for-byte
+// untouched. wx/qt/list-box.rkt's `tree?` dispatch picks this path only for
+// >1 column or an explicit 'column-headers style (see its header comment).
+//
+// QHeaderView has no native per-column min/max width (only a single global
+// QHeaderView::minimumSectionSize) -- RacketTreeWidget tracks its own so
+// get-column-size's contract (real values, not gtk/win32-incompatible
+// literals) can be honored, mirroring GtkTreeViewColumn's min/max semantics.
+
+class RacketTreeWidget : public QTreeWidget {
+public:
+    explicit RacketTreeWidget(QWidget* parent) : QTreeWidget(parent) {}
+    QSize sizeHint() const override
+    {
+        // Same 6-visible-row cap as RacketListWidget (§60.4) -- a long
+        // Package Manager result list must not become the panel's permanent
+        // minimum height either.
+        QSize hint = QTreeWidget::sizeHint();
+        int rowH = sizeHintForRow(0);
+        if (rowH > 0) {
+            static const int kMaxVisibleRows = 6;
+            int capped = rowH * kMaxVisibleRows + 2 * frameWidth();
+            if (hint.height() > capped) hint.setHeight(capped);
+        }
+        return hint;
+    }
+    QVector<int> colMinW;
+    QVector<int> colMaxW;
+};
+
+void* shim_list_tree_create(void*           parent_widget,
+                            int             kind, // 0=single 1=multiple 2=extended
+                            int             ncols,
+                            shim_callback_t sel_cb,
+                            void*           ud)
+{
+    auto* parent = static_cast<QWidget*>(parent_widget);
+    auto* tw = new RacketTreeWidget(parent);
+    tw->setColumnCount(ncols);
+    tw->setRootIsDecorated(false);   // flat list, never a real tree (no children)
+    tw->setAllColumnsShowFocus(true);
+    tw->setSortingEnabled(false);    // caller (e.g. by-list.rkt) sorts itself
+    tw->colMinW.fill(0, ncols);
+    tw->colMaxW.fill(10000, ncols);
+    QAbstractItemView::SelectionMode mode;
+    switch (kind) {
+        case 1:  mode = QAbstractItemView::MultiSelection;    break;
+        case 2:  mode = QAbstractItemView::ExtendedSelection; break;
+        default: mode = QAbstractItemView::SingleSelection;   break;
+    }
+    tw->setSelectionMode(mode);
+    if (sel_cb) {
+        QObject::connect(tw, &QTreeWidget::itemSelectionChanged,
+                         [sel_cb, ud]() { sel_cb(ud); });
+    }
+    return tw;
+}
+
+void shim_list_tree_set_headers_visible(void* tree_ptr, int visible)
+{
+    static_cast<QTreeWidget*>(tree_ptr)->setHeaderHidden(visible == 0);
+}
+
+void shim_list_tree_set_sections_movable(void* tree_ptr, int movable)
+{
+    static_cast<QTreeWidget*>(tree_ptr)->header()->setSectionsMovable(movable != 0);
+}
+
+void shim_list_tree_set_header_clicked_cb(void* tree_ptr, shim_header_click_cb_t cb, void* ud)
+{
+    auto* tree = static_cast<QTreeWidget*>(tree_ptr);
+    QHeaderView* header = tree->header();
+    header->setSectionsClickable(true);
+    QObject::connect(header, &QHeaderView::sectionClicked,
+                     [cb, ud](int logicalIndex) { if (cb) cb(ud, logicalIndex); });
+}
+
+void shim_list_tree_set_column_label(void* tree_ptr, int col, const char* label)
+{
+    auto* tree = static_cast<QTreeWidget*>(tree_ptr);
+    if (auto* hdr = tree->headerItem())
+        hdr->setText(col, QString::fromUtf8(label));
+}
+
+void shim_list_tree_set_column_width(void* tree_ptr, int col, int w, int mn, int mx)
+{
+    auto* tree = static_cast<RacketTreeWidget*>(tree_ptr);
+    if (col < 0 || col >= tree->colMinW.size()) return;
+    tree->colMinW[col] = mn;
+    tree->colMaxW[col] = mx;
+    int clamped = w;
+    if (clamped < mn) clamped = mn;
+    if (clamped > mx) clamped = mx;
+    tree->header()->resizeSection(col, clamped);
+}
+
+void shim_list_tree_get_column_width(void* tree_ptr, int col, int* out_w, int* out_mn, int* out_mx)
+{
+    auto* tree = static_cast<RacketTreeWidget*>(tree_ptr);
+    *out_w  = tree->header()->sectionSize(col);
+    *out_mn = (col >= 0 && col < tree->colMinW.size()) ? tree->colMinW[col] : 0;
+    *out_mx = (col >= 0 && col < tree->colMaxW.size()) ? tree->colMaxW[col] : 10000;
+}
+
+// Moves the column with logical index `logical` to visual position `pos`.
+// wx/qt/list-box.rkt's set-column-order calls this once per position, from
+// pos=0 upward -- same incremental algorithm as wx/gtk's
+// gtk_tree_view_move_column_after loop in its own set-column-order.
+void shim_list_tree_move_column(void* tree_ptr, int logical, int pos)
+{
+    auto* header = static_cast<QTreeWidget*>(tree_ptr)->header();
+    int cur = header->visualIndex(logical);
+    if (cur >= 0) header->moveSection(cur, pos);
+}
+
+int shim_list_tree_column_at_visual_pos(void* tree_ptr, int pos)
+{
+    return static_cast<QTreeWidget*>(tree_ptr)->header()->logicalIndex(pos);
+}
+
+void shim_list_tree_append_row(void* tree_ptr, const char* col0_text)
+{
+    auto* tree = static_cast<QTreeWidget*>(tree_ptr);
+    auto* item = new QTreeWidgetItem(tree);
+    item->setText(0, QString::fromUtf8(col0_text));
+    tree->addTopLevelItem(item);
+}
+
+void shim_list_tree_set_cell(void* tree_ptr, int row, int col, const char* text)
+{
+    auto* tree = static_cast<QTreeWidget*>(tree_ptr);
+    if (auto* item = tree->topLevelItem(row))
+        item->setText(col, QString::fromUtf8(text));
+}
+
+void shim_list_tree_clear(void* tree_ptr)
+{
+    static_cast<QTreeWidget*>(tree_ptr)->clear();
+}
+
+void shim_list_tree_delete_row(void* tree_ptr, int row)
+{
+    auto* tree = static_cast<QTreeWidget*>(tree_ptr);
+    delete tree->takeTopLevelItem(row);
+}
+
+int shim_list_tree_count(void* tree_ptr)
+{
+    return static_cast<QTreeWidget*>(tree_ptr)->topLevelItemCount();
+}
+
+int shim_list_tree_is_selected(void* tree_ptr, int row)
+{
+    auto* tree = static_cast<QTreeWidget*>(tree_ptr);
+    auto* item = tree->topLevelItem(row);
+    return (item && item->isSelected()) ? 1 : 0;
+}
+
+void shim_list_tree_select(void* tree_ptr, int row, int on)
+{
+    auto* tree = static_cast<QTreeWidget*>(tree_ptr);
+    QSignalBlocker blocker(tree);
+    if (auto* item = tree->topLevelItem(row))
+        item->setSelected(on != 0);
+}
+
+void shim_list_tree_set_current(void* tree_ptr, int row)
+{
+    auto* tree = static_cast<QTreeWidget*>(tree_ptr);
+    QSignalBlocker blocker(tree);
+    if (auto* item = tree->topLevelItem(row))
+        tree->setCurrentItem(item);
+}
+
+int shim_list_tree_selected_count(void* tree_ptr)
+{
+    return static_cast<QTreeWidget*>(tree_ptr)->selectedItems().size();
+}
+
+// Same determinism rationale as shim_list_box_selected_at: QTreeWidget's
+// selectedItems() order is unspecified, so sort by row before indexing.
+int shim_list_tree_selected_at(void* tree_ptr, int idx)
+{
+    auto* tree = static_cast<QTreeWidget*>(tree_ptr);
+    QList<int> rows;
+    for (auto* item : tree->selectedItems())
+        rows.append(tree->indexOfTopLevelItem(item));
+    std::sort(rows.begin(), rows.end());
+    if (idx >= 0 && idx < rows.size())
+        return rows[idx];
+    return -1;
+}
+
+void shim_list_tree_scroll_to(void* tree_ptr, int row)
+{
+    auto* tree = static_cast<QTreeWidget*>(tree_ptr);
+    if (auto* item = tree->topLevelItem(row))
+        tree->scrollToItem(item);
+}
+
+int shim_list_tree_first_visible(void* tree_ptr)
+{
+    auto* tree = static_cast<QTreeWidget*>(tree_ptr);
+    QModelIndex idx = tree->indexAt(QPoint(0, 0));
+    return idx.isValid() ? idx.row() : 0;
+}
+
+int shim_list_tree_visible_count(void* tree_ptr)
+{
+    auto* tree = static_cast<QTreeWidget*>(tree_ptr);
+    if (tree->topLevelItemCount() == 0) return 0;
+    int rowH = tree->sizeHintForRow(0);
+    if (rowH <= 0) return tree->topLevelItemCount();
+    int h = tree->viewport()->height();
+    return (std::max)(1, h / rowH);
+}
+
+// append-column/delete-column: no real caller found in any installed
+// package (grep across /Applications/Racket v9.3/share/pkgs/, including
+// gui-pkg-manager-lib/framework/drracket-core-lib -- only the public
+// list-box%/type-stub/doc surface references them). Implemented anyway
+// (real column-count change + data reflow, not a fake no-op) since the
+// cost is low and the wx contract must not lie once it advertises a
+// tree-backed multi-column widget.
+void shim_list_tree_append_column(void* tree_ptr, const char* label)
+{
+    auto* tree = static_cast<RacketTreeWidget*>(tree_ptr);
+    int newCol = tree->columnCount();
+    tree->setColumnCount(newCol + 1);
+    if (auto* hdr = tree->headerItem())
+        hdr->setText(newCol, QString::fromUtf8(label));
+    tree->colMinW.append(0);
+    tree->colMaxW.append(10000);
+}
+
+void shim_list_tree_delete_column(void* tree_ptr, int col)
+{
+    auto* tree = static_cast<RacketTreeWidget*>(tree_ptr);
+    int ncols = tree->columnCount();
+    if (col < 0 || col >= ncols) return;
+    // Capture each remaining column's current on-screen width before
+    // reflowing -- QHeaderView::resizeSection is per logical index, and
+    // setColumnCount(ncols - 1) below only drops the section state for the
+    // removed slot, it does not shift the others (a first version of this
+    // function forgot this and column c silently kept its OLD width after
+    // inheriting c+1's label/data, i.e. width and content went out of sync).
+    QHeaderView* header = tree->header();
+    QVector<int> widths(ncols);
+    for (int c = 0; c < ncols; ++c) widths[c] = header->sectionSize(c);
+    for (int r = 0; r < tree->topLevelItemCount(); ++r) {
+        auto* item = tree->topLevelItem(r);
+        for (int c = col; c < ncols - 1; ++c)
+            item->setText(c, item->text(c + 1));
+    }
+    if (auto* hdr = tree->headerItem()) {
+        for (int c = col; c < ncols - 1; ++c)
+            hdr->setText(c, hdr->text(c + 1));
+    }
+    for (int c = col; c < ncols - 1; ++c) {
+        if (c + 1 < tree->colMinW.size()) tree->colMinW[c] = tree->colMinW[c + 1];
+        if (c + 1 < tree->colMaxW.size()) tree->colMaxW[c] = tree->colMaxW[c + 1];
+        widths[c] = widths[c + 1];
+    }
+    if (!tree->colMinW.isEmpty()) tree->colMinW.removeLast();
+    if (!tree->colMaxW.isEmpty()) tree->colMaxW.removeLast();
+    tree->setColumnCount(ncols - 1);
+    for (int c = col; c < ncols - 1; ++c)
+        header->resizeSection(c, widths[c]);
 }
 
 // ---- slider (slider%) -----------------------------------------------------
