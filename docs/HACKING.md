@@ -7826,3 +7826,105 @@ ergänzend die sieben strukturell unsichtbaren Fälle aus dem Grenze-Absatz oben
 (`set-modified` u. a.) mit einer künftigen Regel-Erweiterung (Datei-zu-Datei-Zuordnung
 über die Basisklasse hinweg, z. B. „qt/window.rkt entspricht gtk/frame.rkt für diesen
 Methodennamen") sichtbar machen, statt sie nur in Prosa zu verwalten.
+
+### §61 Triage der 17 `needs-triage`-Kandidaten aus §60.9 (2026-09-27, macOS)
+
+**Auftrag:** die 17 in §60.9/`tests/stub-audit-allowlist.rktd` als `needs-triage`
+eingetragenen Stub-Kandidaten einzeln gegen echte Aufrufer-Evidenz (`mred`/`framework`)
+und, wo nötig, gegen echte GUI-Interaktion prüfen; nach `harmless`/`backlog`/`fix-now`
+sortieren. Zwei parallele Read-Only-Subagenten (Canvas/Combo-Cluster in `canvas.rkt`,
+Rest in `window.rkt`/`frame.rkt`/`panel.rkt`), danach zwei konkrete Fixes umgesetzt und
+per echter GUI-Interaktion verifiziert.
+
+**Ergebnis der Triage (vollständige Begründungen: `tests/stub-audit-allowlist.rktd`):**
+
+| Methode | Datei | Verdikt |
+|---|---|---|
+| `get-canvas-background-for-backing` | `canvas.rkt` | **gefixt** |
+| `get-dialog-level` | `window.rkt` | **gefixt** |
+| `gets-focus?` | `window.rkt` | harmless (Konventionsunterschied zu gtk, kein Gap) |
+| `skip-enter-leave-events` | `window.rkt` | harmless (nie an ein qt-Widget gerichtet, das Enter/Leave erzeugt) |
+| `set-event-positions-wrt` | `window.rkt` | harmless (Companion zu vorigem, gleicher Grund) |
+| `request-canvas-flush-delay` | `canvas.rkt` | harmless (Qts Offscreen-Blit-Architektur macht den Mechanismus gegenstandslos) |
+| `cancel-canvas-flush-delay` | `canvas.rkt` | harmless (Gegenstück) |
+| `skip-pre-paint?` | `canvas.rkt` | harmless (gtk/win32 identisch, nur cocoas GL-Zweig unterscheidet sich, qt hat kein GL) |
+| `do-canvas-backing-flush` | `canvas.rkt` | backlog (echte Lücke im periodischen Safety-Net-Flush, kein beobachtetes Symptom) |
+| `popup-combo` / `clear-combo-items` / `append-combo-item` / `set-combo-text` | `canvas.rkt` | backlog, **Prioritäts-Hochstufung** (s. u.) |
+| `drag-accept-files` | `window.rkt` | backlog (ABI-Änderung nötig) |
+| `enforce-size` | `frame.rkt` | backlog (ABI-Änderung nötig) |
+| `refresh` | `window.rkt` | backlog (öffentlicher API-Wrapper betroffen, kein aktueller interner Aufrufer) |
+| `register-child` | `panel.rkt` | backlog (hängt mit `refresh` zusammen) |
+
+**Korrektur einer Fehleinschätzung aus §60.7:** die vier Combo-Methoden
+(`popup-combo`/`clear-combo-items`/`append-combo-item`/`set-combo-text`) wurden dort
+pauschal als „harmless, Implementierung sitzt im Mixin" eingeordnet (wie die tatsächlich
+per Mixin abgedeckten Scroll-Methoden). §61 stellt fest: `combo-field%` ist **kein**
+totes Feature — es wird real von DrRackets Multi-File-Search (Edit/Find,
+`drracket/private/multi-file-search.rkt`) sowie optional von `get-file`/`put-file`
+mit Style `'common` (Preference `framework:file-dialogs`, Default `'std`, also nicht
+default-aktiv) benutzt. Klick auf den Combo-Pfeil tut unter qt nichts — kein Crash,
+aber totes Dropdown. Fix braucht einen neuen Popup-/Positionierungsmechanismus
+(vergleichbare Größenordnung wie §60.6) — bleibt deshalb `backlog`, aber mit höherer
+Priorität als zuvor angenommen.
+
+**Neuer Folgefund durch den `get-dialog-level`-Fix:** nachdem `window.rkt`s
+`get-dialog-level` jetzt an `parent` delegiert, meldet `tests/stub-audit.rkt` `frame.rkt`s
+eigenen `(define/override (get-dialog-level) 0)` als neuen Gap (Basisklassen-Spezialfall:
+das Tool vergleicht `frame.rkt` jetzt gegen qts eigenes, jetzt substantielles
+`window.rkt`). Geprüft und als **Tool-Fehlalarm, kein Bug** eingeordnet: gtk/frame.rkt:330,
+win32/frame.rkt:507 und cocoa/frame.rkt:369 haben alle identisch
+`(define/override (get-dialog-level) 0)` — ein Frame terminiert die Delegationskette
+immer bei 0, sein eigener Dialog-Level läuft (falls er zugleich `dialog%` ist) separat
+über `common/dialog.rkt`s eigenen Override. Als `harmless` in die Allowlist eingetragen.
+
+**Fix 1 — `get-canvas-background-for-backing`** (`wx/qt/canvas.rkt`, kein ABI-Änderung):
+war hartcodiert `#f` statt `(and clear-bg? bg-col)` wie gtk/cocoa/win32. Der reguläre
+Auto-Repaint-Pfad (`canvas-mixin.rkt`s `do-on-paint`, läuft für **jedes** `canvas%`)
+nutzt diese Methode, um die Backing-Bitmap vor dem User-`on-paint` zu füllen —
+`set-canvas-background` war dadurch für den Auto-Clear wirkungslos, maskiert bei
+`editor-canvas%`/Voll-Repaint-Canvases (die selbst über `get-canvas-background` füllen),
+sichtbar bei einem rohen `canvas%` mit nicht-flächendeckendem Paint-Callback. Fix:
+`(and (not (memq 'transparent the-style)) (not (memq 'no-autoclear the-style)) bg-col)`.
+
+**Fix 2 — `get-dialog-level`** (`wx/qt/window.rkt`, kein ABI-Änderung): war für **jedes**
+Nicht-Frame-Widget hartcodiert `0` statt an `parent` zu delegieren (gtk/window.rkt:735,
+win32/window.rkt:855 delegieren beide). `wx/common/queue.rkt`s `other-modal?` nutzt den
+Wert, um zu entscheiden, ob ein Event an ein Widget dispatcht oder verschluckt wird
+(`qt/window.rkt`s `dispatch-on-char`/`dispatch-on-event`) — ein `canvas%`/`editor-canvas%`
+innerhalb eines offenen modalen `dialog%` sah `dl=0` statt des Levels des umgebenden
+Dialogs, seine Tastatur-/Mausevents wurden verschluckt. Button-/List-Box-Klicks in
+bestehenden modalen Dialogen (z. B. „Choose Language…", §60.3/§51.2) sind **kein
+Gegenbeweis** — die laufen über native Qt-Klick-Signale, die den ganzen
+`dispatch-on-*`-Pfad umgehen. Fix: `(if (and parent (object? parent)) (send parent
+get-dialog-level) 0)`.
+
+**Verifikation (macOS, echte GUI-Interaktion, Screenshots):**
+- `examples/canvas-background-backing-probe.rkt` (neu): rotes `set-canvas-background`,
+  Paint-Callback malt nur ein kleines blaues Quadrat oben links. **PASS** — Rest des
+  Canvas ist durchgängig rot (vor dem Fix wäre er weiß/transparent gewesen).
+- `examples/dialog-level-probe.rkt` (neu): modaler `dialog%` mit `canvas%`-Kind, das
+  Klicks/Tastendrücke live zählt. **PASS** — 3 Klicks + 3 Tastendrücke im offenen
+  modalen Dialog lassen die Zähler auf `clicks: 3 keys: 6` steigen (Tastenzähler
+  verdoppelt sich durch Press+Release, kein Bug); vor dem Fix wären beide Zähler bei
+  `0 0` stehengeblieben.
+- Vorher-Zustand (Revert) nicht gegengetestet (wäre eine zusätzliche Code-Änderung
+  außerhalb des engeren Verifikationsauftrags gewesen) — beide Nachher-Screenshots
+  zeigen aber eindeutig das erwartete, nicht-triviale Verhalten.
+- `raco test tests/stub-audit.rkt`: 9/9 grün nach vollständiger Reklassifizierung aller
+  17 Kandidaten + dem neuen `frame.rkt`-Folgefund.
+- `PLT_QT=1 raco test tests/smoke.rkt`: 3/3 grün.
+- Nur macOS getestet, keine ABI-Änderung, kein Windows/Linux-Rebuild nötig — aber wie
+  üblich gegenprüfen statt annehmen.
+
+**Offen für künftige Sessions** (Details/Begründung: `tests/stub-audit-allowlist.rktd`):
+- Combo-Popup-Mechanismus für `popup-combo`/`clear-combo-items`/`append-combo-item`/
+  `set-combo-text` (betrifft DrRackets Multi-File-Search) — vergleichbare Größenordnung
+  wie §60.6, eigene Session.
+- `drag-accept-files` (Datei-Drop aufs Fenster) und `enforce-size` (Fenster-Resize-
+  Min/Max-Constraints) — beide brauchen neue Shim-Exporte (ABI-Änderung, Drei-Maschinen-
+  Rebuild).
+- `refresh`/`register-child` (zusammengehöriges Paar, öffentlicher `window<%>`-API-Pfad
+  ohne aktuellen internen Aufrufer) — reiner Racket-Fix möglich, aber kein akuter
+  Nutzer-Impact beobachtet.
+- `do-canvas-backing-flush` (periodisches Safety-Net-Flush) — echte Lücke, unklarer/
+  niedriger Impact.

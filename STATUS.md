@@ -5,6 +5,48 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-27 (macOS, laufend) — §61: Triage der 17 needs-triage-Stubs, zwei Fixes verifiziert
+
+**Kontext:** Fortsetzung der offenen Punkte aus §60/§60.9 — Nutzerauftrag: die 17
+`needs-triage`-Kandidaten aus der letzten Session sowie die inhaltlich offenen §60-Befunde
+(§60.4/§60.5/§60.6) abarbeiten, Subagenten in sinnvoller Reihenfolge sequentiell einsetzen.
+
+- Zwei parallele Read-Only-Triage-Agenten (Canvas/Combo-Cluster vs. window/frame/panel-
+  Cluster) haben alle 17 Kandidaten gegen echte Aufrufer-Evidenz geprüft. Ergebnis:
+  6× `harmless`, 9× `backlog` (u. a. Prioritäts-Hochstufung der vier Combo-Methoden —
+  `combo-field%` ist entgegen §60.7s Annahme kein totes Feature, DrRackets Multi-File-
+  Search nutzt es real), 2× `fix-now`. Vollständige Tabelle + Begründungen:
+  `docs/HACKING.md` §61, `tests/stub-audit-allowlist.rktd`.
+- **Zwei Fixes umgesetzt und per echter GUI-Interaktion verifiziert (Screenshots),
+  beide reiner Racket-Code, keine ABI-Änderung:**
+  - `get-canvas-background-for-backing` (`wx/qt/canvas.rkt`): war hartcodiert `#f`,
+    `set-canvas-background` hatte dadurch keinen Effekt auf den regulären
+    Auto-Repaint-Backing-Fill. Jetzt `(and clear-bg? bg-col)` wie gtk/cocoa/win32.
+  - `get-dialog-level` (`wx/qt/window.rkt`): war für jedes Nicht-Frame-Widget hartcodiert
+    `0` statt an `parent` zu delegieren -- Tastatur-/Mausevents an `canvas%`-Kindern
+    innerhalb eines offenen modalen `dialog%` wurden verschluckt (`other-modal?` in
+    `wx/common/queue.rkt`). Jetzt Delegation an `parent`, `frame%`s eigener Terminator
+    (hartcodiert `0`) bleibt unverändert (identisch zu gtk/win32/cocoa).
+  - Neuer Probe-Fund dabei: der `get-dialog-level`-Fix macht `frame.rkt`s eigenen
+    Override im Stub-Audit-Tool sichtbar (Basisklassen-Spezialfall) -- geprüft,
+    Tool-Fehlalarm, kein Bug (alle 3 Referenz-Backends haben denselben Override).
+  - Neue Probes: `examples/canvas-background-backing-probe.rkt`,
+    `examples/dialog-level-probe.rkt`.
+- `tests/stub-audit-allowlist.rktd`: alle 17 vorigen `needs-triage`-Einträge reklassifiziert
+  oder entfernt (bei den beiden gefixten), ein neuer `harmless`-Eintrag (`frame.rkt`s
+  `get-dialog-level`). `raco test tests/stub-audit.rkt`: 9/9 grün. `PLT_QT=1 raco test
+  tests/smoke.rkt`: 3/3 grün.
+- Submodul-Commit `29f3f3a4` (nur lokal, noch nicht gepusht). Umbrella-Änderungen
+  (`tests/stub-audit-allowlist.rktd`, `docs/HACKING.md`, zwei neue `examples/*.rkt`,
+  dieser STATUS-Eintrag) ebenfalls noch nicht committet/gepusht -- Drei-Maschinen-Sync
+  (Regel 7/8) noch offen, wird am Ende der Session gebündelt erfragt.
+- Nur macOS getestet, keine ABI-Änderung -- Windows/Linux-Gegenprüfung empfohlen, aber
+  nicht blockierend für den nächsten Start (kein Rebuild nötig).
+- **Weiter laufend:** §60.4/§60.5 (gemeinsamer nativer-vs-Qt-Vergleich) und §60.6
+  (QTreeWidget-Umbau) als nächste sequentielle Schritte.
+
+---
+
 ## Session 2026-09-26 (4, macOS) — Stub-Inventar (§60.7) verstetigt: `tests/stub-audit.rkt` + Allowlist
 
 **Kontext:** Nutzerfrage im Anschluss an §60.3 („Show Details"-Button war ein
