@@ -8173,3 +8173,89 @@ get-dialog-level) 0)`.
   Nutzer-Impact beobachtet.
 - `do-canvas-backing-flush` (periodisches Safety-Net-Flush) — echte Lücke, unklarer/
   niedriger Impact.
+
+## §62 Windows: Shim-Rebuild + Validierung §59.1/§59.2/§60.3/§60.4/§61.1/§60.6 (2026-09-28)
+
+**Auftrag:** die drei seit §59.2/§60.3/§60.6 offenen Windows-Rebuild-Pflichten
+(Build-Banner in `CLAUDE.md`) nachziehen und die bisher nur auf macOS validierten
+Fixes auf Windows gegenprüfen. Interaktive Session (kein `/loop`, keine Subagenten) —
+Nutzer hat live über die Schulter mitgeschaut.
+
+### §62.1 Shim-Rebuild
+
+`cmake --build qt-shim/build/windows-x64 --config Debug` — saubere Kompilierung, keine
+Fehler. `racketqtshim.dll`: 381 KB → 434 KB (Timestamp 2026-09-22 → 2026-09-28).
+`dumpbin /exports` bestätigt alle stichprobenartig geprüften neuen Symbole:
+`shim_button_set_label`, `shim_menu_set_about_to_hide_cb`, sowie `shim_list_tree_create`/
+`_append_column`/`_delete_column`/`_move_column`/`_scroll_to`/`_set_headers_visible`
+(exemplarisch aus den 24 §60.6-Exporten). Gate: `raco test tests/stub-audit.rkt` 9/9,
+`PLT_QT=1 raco test tests/smoke.rkt` 3/3 — beide grün, keine Regression.
+
+### §62.2 Validierung gegen echtes DrRacket
+
+- **§59.1/§59.2 (Popup-Menü):** Rechtsklick-Kontextmenü im Editor öffnet korrekt
+  (Undo/Redo/Copy/Cut/Paste/Delete/Select All), Klick außerhalb schließt es ohne
+  Auswahl und ohne Absturz (`Get-Process DrRacket` bestätigt Prozess lebt weiter).
+- **§60.3 (`button%` `set-label`):** „Choose Language…"-Dialog, Klick auf
+  „Hide Details (Ctrl+D)" kollabiert den Dialog korrekt auf die kompakte Größe
+  (807×876 → 318×582 logisch); erneut sichtbar gemacht zeigt der Button jetzt
+  „Show Details (Ctrl+D)" — Label-Toggle funktioniert.
+- **§60.4/§61.1 (Collection-Paths-Buttons/`group-panel%`-Chrome):** alle fünf Buttons
+  (Add/Add Default/Remove/Raise/Lower) im „Choose Language…"-Dialog vollständig
+  sichtbar, kein Clipping.
+- **§60.6 (Mehrspalten-`list-box%`):** Package Manager → „Currently Installed" zeigt
+  5 Spalten (✓/Scope/Name/Checksum/Source) mit Headern, 219/219 installierte Pakete.
+  Klick auf den „Name"-Header sortiert die Liste sichtbar alphabetisch um (2d, 2d-doc,
+  2d-lib, algol60, … vor dem Klick; nach dem Klick alphabetisch durchgängig ab „2d").
+
+Kein Absturz, keine Regression über die gesamte Session. Alle vier geprüften Fixe
+funktionieren auf Windows identisch zur macOS-Validierung.
+
+### §62.3 Methodik-Befund: synthetische Maus-/Tastatureingabe auf dieser Windows-Maschine
+
+Zwei neue, für künftige Windows-GUI-Automatisierungssessions relevante Befunde
+(reine Automatisierungs-Artefakte, kein `racket-qt`-Bug):
+
+1. **`SetCursorPos`/`mouse_event`-Koordinaten sind je Fenstertyp unterschiedlich
+   skaliert.** Für das maximierte `frame%`-Hauptfenster gilt Skala ≈1,0 (Screenshot-
+   Pixel = `SetCursorPos`-Eingabe). Für jedes sekundäre Top-Level-Fenster (Dialoge,
+   Menü-Popups, Package-Manager-Fenster — jeweils eigene Qt-Top-Level-Window-Instanz)
+   gilt eine Skala ≈1,22–1,25 (`SetCursorPos`-Eingabe = Screenshot-Zielposition ÷
+   Skala). Root Cause nicht abschließend geklärt (vermutlich DPI-Virtualisierung für
+   den nicht-DPI-aware PowerShell-Prozess, pro-Fenster uneinheitlich angewendet je
+   nachdem ob das Fenster maximiert ist oder nicht) — nicht weiter verfolgt, da die
+   empirische Kalibrierung pro Fenster (`GetWindowRect` + Verhältnis aus einer
+   bekannten Referenzposition) zuverlässig funktioniert hat. Zuverlässigste Methode:
+   nach jedem Klick per Screenshot verifizieren statt Koordinaten blind verketten;
+   Hover-Bewegung (`SetCursorPos` ohne Klick) erzeugt **kein** `WM_MOUSEMOVE` und
+   damit **kein** Hover-Highlight in Qt-Menüs — als Kalibrierungssignal ungeeignet,
+   nur tatsächliche Klicks liefern verlässliche Ergebnisse.
+2. **Synthetische `Ctrl+<Taste>`-Kombinationen erreichen das Qt-Fenster nicht** —
+   weder über `System.Windows.Forms.SendKeys` (`"^l"`) noch über rohes
+   `keybd_event(VK_CONTROL,…)` + `keybd_event(VK_L,…)`. Reine Zeichen-Eingabe ohne
+   Modifier (`SendKeys.SendWait("text")`) kommt zuverlässig an (verifiziert: Text
+   erscheint im Editor). Betroffen: `Ctrl+L` (Choose Language), `Ctrl+A` (Select All),
+   `Ctrl+Z` (Undo) — alle drei ignoriert. Workaround dieser Session: alle Menü-/
+   Dialog-Navigation über Maus-Koordinaten statt Tastatur-Shortcuts. Ursache nicht
+   untersucht (evtl. Qt-eigene Modifier-Zustandsverfolgung erwartet echte
+   Hardware-Scancodes statt synthetischer `keybd_event`-Injektion) — für eine
+   künftige Session mit Tastatur-lastiger Automatisierung relevant.
+
+**Kein Rebuild/Fix nötig aus diesem Abschnitt** — reine Methodik-Dokumentation.
+Nur Windows betroffen (nie auf macOS/Linux mit dieser Methode getestet).
+
+### §62.4 Zusammenfassung
+
+| Prüfpunkt | Ergebnis |
+|---|---|
+| Shim-Rebuild (Windows) | ✅ 434 KB, alle geprüften Exporte vorhanden |
+| `stub-audit.rkt` | ✅ 9/9 |
+| `smoke.rkt` (`PLT_QT=1`) | ✅ 3/3 |
+| §59.1/§59.2 Popup-Menü | ✅ verifiziert |
+| §60.3 `button%` `set-label` | ✅ verifiziert |
+| §60.4/§61.1 Collection-Paths-Buttons | ✅ verifiziert |
+| §60.6 Mehrspalten-`list-box%` | ✅ verifiziert |
+| Linux-Rebuild | offen (vierte Maschine, nicht Teil dieser Session) |
+
+Damit sind alle drei Build-Banner-Rebuild-Pflichten (§59.2/§60.3/§60.6) auf Windows
+abgeschlossen. Linux bleibt die einzige noch ausstehende Maschine.

@@ -5,6 +5,36 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-28 (Windows) — §62: Shim-Rebuild + Validierung §59.1/§59.2/§60.3/§60.4/§61.1/§60.6
+
+**Kontext:** Windows war seit 2026-09-22 nicht mehr neu gebaut; drei ABI-relevante
+Shim-Änderungen aus der macOS-lastigen §59–§61-Serie waren aufgelaufen (Build-Banner
+in `CLAUDE.md`). Interaktive Session, Nutzer hat live mitgeschaut.
+
+- Shim neu gebaut (`racketqtshim.dll` 381 KB → 434 KB), `dumpbin /exports` bestätigt
+  alle stichprobenartig geprüften neuen Symbole (`shim_button_set_label`,
+  `shim_menu_set_about_to_hide_cb`, `shim_list_tree_*`). Gate: `stub-audit.rkt` 9/9,
+  `smoke.rkt` (`PLT_QT=1`) 3/3, beide grün.
+- Vier bisher nur auf macOS validierte Fixes gegen echtes DrRacket auf Windows
+  verifiziert, alle PASS: §59.1/§59.2 (Popup-Kontextmenü öffnet + schließt bei
+  Außenklick ohne Absturz), §60.3 (`button%`s `set-label`, „Hide Details"/„Show
+  Details"-Toggle im Choose-Language-Dialog), §60.4/§61.1 (Collection-Paths-Buttons
+  vollständig sichtbar), §60.6 (Package Manager, 5-Spalten-Ansicht mit 219 Paketen,
+  Header-Klick-Sortierung funktional). Details: `docs/2026-09-28_report-win.md`,
+  `docs/HACKING.md` §62.
+- Zwei Windows-spezifische Automatisierungs-Methodik-Befunde dokumentiert (kein
+  `racket-qt`-Bug): `SetCursorPos`-Koordinaten sind je nach Fenstertyp unterschiedlich
+  skaliert (maximiertes Hauptfenster ≈1,0, sekundäre Top-Level-Fenster ≈1,22–1,25);
+  synthetische `Ctrl+<Taste>`-Kombinationen (`SendKeys` und rohes `keybd_event`)
+  erreichen das Qt-Fenster nicht, nur reine Zeicheneingabe funktioniert. Details:
+  `docs/HACKING.md` §62.3.
+- Alle drei offenen Windows-Rebuild-Pflichten (§59.2/§60.3/§60.6) damit abgeschlossen.
+  **Linux bleibt die einzige noch ausstehende Maschine.**
+- Keine Code-Änderungen diese Session (reine Rebuild+Validierung), nur Dokumentation
+  aktualisiert (`CLAUDE.md`, `docs/HACKING.md`, dieser Eintrag, neuer Report).
+
+---
+
 ## Session 2026-09-27 (macOS, laufend) — §61: Triage der 17 needs-triage-Stubs, zwei Fixes verifiziert
 
 **Kontext:** Fortsetzung der offenen Punkte aus §60/§60.9 — Nutzerauftrag: die 17
