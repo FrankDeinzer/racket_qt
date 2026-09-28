@@ -5,6 +5,37 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-28 (Linux) — §63: Shim-Rebuild + Validierung §59.1/§59.2/§60.3/§60.4/§61.1/§60.6
+
+**Kontext:** Letzte der drei Maschinen für diese Serie (nach macOS 2026-09-27 und
+Windows 2026-09-28 am selben Tag). Submodul-Checkout hing 7 Commits hinter
+`origin/qt-backend` zurück, obwohl der Umbrella-Zeiger bereits auf `c986ba6a` stand —
+nur ein rückständiges Checkout, kein lokaler Diff. Vor dem Fast-Forward-Pull Nutzer
+gefragt (Regel 7).
+
+- Submodul-Pull `6bae83df` → `c986ba6a` (reiner Fast-Forward, kein neuer Commit).
+  Shim neu gebaut (Ninja, sauber, kein Linux-spezifischer Build-Fix nötig). `nm -D`
+  bestätigt alle neuen Symbole (`shim_button_set_label`, `shim_menu_set_about_to_hide_cb`,
+  alle 24 `shim_list_tree_*`). Gate: `stub-audit.rkt` 9/9, `smoke.rkt` (`PLT_QT=1`) 3/3,
+  `smoke.rkt` ohne `PLT_QT` 3/3 (Gate-Test nativer gtk-Start) — alle grün.
+- Vier Fixes gegen echtes DrRacket verifiziert (delegiert an Sonnet-Subagent, da
+  GUI-Automatisierung Urteilsvermögen braucht), alle PASS: §59.1/§59.2 (Popup-
+  Kontextmenü öffnet + schließt bei Außenklick ohne Absturz), §60.3 (`button%`s
+  `set-label`-Toggle im Choose-Language-Dialog), §60.4/§61.1 (Collection-Paths-Buttons
+  vollständig sichtbar), §60.6 (Package Manager, 5-Spalten-Ansicht mit 213 Paketen,
+  Header-Klick-Sortierung funktional). Details: `docs/2026-09-28_report-linux.md`,
+  `docs/HACKING.md` §63.
+- Ein Linux-Methodik-Befund dokumentiert (kein `racket-qt`-Bug, §63.3): vergessener
+  Skalierungsfaktor beim Ablesen von Pixelkoordinaten aus einer skaliert angezeigten
+  Bildvorschau führte zu einem folgenlosen Fehlklick.
+- **Alle drei seit §59.2/§60.3/§60.6 offenen Rebuild-Pflichten damit auf allen drei
+  Maschinen (macOS, Windows, Linux) abgeschlossen.** Kein neuer racket-qt-Befund.
+- Keine Code-Änderungen diese Session (reine Rebuild+Validierung), nur Dokumentation
+  aktualisiert (`CLAUDE.md`, `docs/HACKING.md`, dieser Eintrag, neuer Report). Push
+  noch offen, s. Rückfrage an den Nutzer.
+
+---
+
 ## Session 2026-09-28 (Windows) — §62: Shim-Rebuild + Validierung §59.1/§59.2/§60.3/§60.4/§61.1/§60.6
 
 **Kontext:** Windows war seit 2026-09-22 nicht mehr neu gebaut; drei ABI-relevante

@@ -8244,6 +8244,68 @@ Zwei neue, für künftige Windows-GUI-Automatisierungssessions relevante Befunde
 **Kein Rebuild/Fix nötig aus diesem Abschnitt** — reine Methodik-Dokumentation.
 Nur Windows betroffen (nie auf macOS/Linux mit dieser Methode getestet).
 
+## §63 Linux: Shim-Rebuild + Validierung §59.1/§59.2/§60.3/§60.4/§61.1/§60.6 (2026-09-28)
+
+**Auftrag:** dieselben drei seit §59.2/§60.3/§60.6 offenen Rebuild-Pflichten wie zuvor
+auf macOS (§57) und Windows (§62) nachziehen — Linux war die letzte ausstehende
+Maschine. Submodul-Checkout hing 7 Commits hinter `origin/qt-backend` zurück
+(`6bae83df` → `c986ba6a`), obwohl der Umbrella-Zeiger bereits auf `c986ba6a` stand —
+`git status` zeigte deshalb `M third_party/gui` im Umbrella, was sich bei genauerem
+Hinsehen als rückständiges Checkout und nicht als lokaler Diff herausstellte. Vor dem
+Fast-Forward-Pull Nutzer gefragt (Regel 7). Details: `docs/2026-09-28_report-linux.md`.
+
+### §63.1 Shim-Rebuild
+
+`cmake --build qt-shim/build/linux-x64` — sauberer Ninja-Durchlauf, kein
+Linux-spezifischer Build-Fix nötig (anders als Windows' `min`/`max`-Kollision in §56,
+trat hier nicht auf). `nm -D libracketqtshim.so` bestätigt `shim_menu_set_about_to_hide_cb`,
+`shim_button_set_label` und alle 24 `shim_list_tree_*`-Exporte (per `grep -c` gezählt
+und Namen mit dem Build-Banner in `CLAUDE.md` abgeglichen). Gate: `raco test
+tests/stub-audit.rkt` 9/9, `PLT_QT=1 raco test tests/smoke.rkt` 3/3, zusätzlich `raco
+test tests/smoke.rkt` **ohne** `PLT_QT` 3/3 (Gate-Test nativer gtk-Start) — alle drei
+grün, keine Regression.
+
+### §63.2 Validierung gegen echtes DrRacket
+
+Durchgeführt von einem delegierten Sonnet-Subagenten (`xdotool` + `spectacle`,
+fenster-relative Koordinaten), da GUI-Automatisierung Urteilsvermögen braucht (s.
+`CLAUDE.md`s Subagent-Modellwahl-Regel).
+
+- **§59.1/§59.2 (Popup-Menü):** Rechtsklick-Kontextmenü im Editor öffnet korrekt,
+  „Select All" wirkt sichtbar (Statuszeile-Selektionsbereich), erneutes Öffnen +
+  Klick außerhalb schließt ohne Auswahl, kein Absturz (`ps` bestätigt Prozess lebt
+  weiter).
+- **§60.3 (`button%` `set-label`):** „Choose Language…"-Dialog, Klick auf „Hide
+  Details (Ctrl+D)" kollabiert den Dialog (880×767 → 380×630) UND das Label wechselt
+  sichtbar zu „Show Details (Ctrl+D)"; erneuter Klick kehrt beides um.
+- **§60.4/§61.1 (Collection-Paths-Buttons):** alle fünf Buttons (Add/Add
+  Default/Remove/Raise/Lower) vollständig sichtbar, kein Clipping.
+- **§60.6 (Mehrspalten-`list-box%`):** Package Manager → „Currently Installed" zeigt
+  5 Spalten mit Headern, 213/213 installierte Pakete (macOS 217, Windows 219 —
+  erwartete Differenz durch unterschiedliche Paketinstallationen). Klick auf den
+  „Name"-Header sortiert die Liste sichtbar alphabetisch um.
+
+Alle vier PASS, identisch zur macOS- und Windows-Validierung. Damit sind alle drei seit
+§59.2/§60.3/§60.6 offenen Rebuild-Pflichten jetzt auf **allen drei Maschinen**
+abgeschlossen.
+
+### §63.3 Methodik-Befund: xdotool-Koordinatenumrechnung (kein `racket-qt`-Bug)
+
+`xdotool getdisplaygeometry` liefert auf dieser Maschine exakt die native
+Screenshot-Auflösung (2478×1481, Skala 1:1) — anders als Windows' fenstertyp-abhängige
+≈1,22–1,25-Skalierung (§62.3). Trotzdem führte ein vergessener Umrechnungsschritt beim
+manuellen Ablesen von Pixelkoordinaten aus einer *skaliert angezeigten* Bildvorschau
+(2000×1195 statt 2478×1481, Faktor ~1,239) zu einem Fehlklick auf „Print Definitions…"
+statt „Package Manager…" im File-Menü — sauber per Cancel abgebrochen, keine Datei
+erzeugt (`git status` verifiziert), kein Bug. Lehre: Menü-Item-Positionen vorab per
+Hover-Screenshot verifizieren statt blind auf berechnete Koordinaten zu vertrauen;
+fenster-relative Koordinaten (`xdotool mousemove --window <id> <relx> <rely>`) statt
+absoluter Bildschirmkoordinaten bevorzugen, da sie die screenshot→real-Umrechnung pro
+Klick vermeiden. Keine der aus früheren Sessions bekannten Linux-Fallstricke
+(Ctrl+A-Emacs-Bug, unzuverlässige Menü-Klicks) wurde in dieser Session zum Problem.
+
+**Kein Rebuild/Fix nötig aus diesem Abschnitt** — reine Methodik-Dokumentation.
+
 ### §62.4 Zusammenfassung
 
 | Prüfpunkt | Ergebnis |
