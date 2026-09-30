@@ -192,11 +192,24 @@ public:
     shim_wheel_cb_t wheel_cb  = nullptr;
     void*           wheel_ud  = nullptr;
 
+    // Tab / Shift+Tab must reach Racket as ordinary key events (editor
+    // indentation; racket/gui's own handle-traverse-key decides whether to
+    // move focus, docs/HACKING.md §12).  Left to Qt, the focus chain eats Tab
+    // before keyPressEvent whenever any other widget is focusable -- i.e. in
+    // every real DrRacket window (Block D, input matrix `tab-reindent`).
+    bool focusNextPrevChild(bool next) override {
+        if (key_cb) return false;
+        return QWidget::focusNextPrevChild(next);
+    }
+
     RacketCanvas(QWidget* parent, shim_callback_t cb, void* ud)
         : QWidget(parent), expose_cb(cb), expose_ud(ud)
     {
         setMinimumSize(1, 1);
-        setFocusPolicy(Qt::StrongFocus);
+        // ClickFocus, not StrongFocus: canvases stay out of Qt's Tab chain (gtk:
+        // canvas% is not tab-focusable unless accept-tab-focus); Racket's own
+        // traversal (gets-focus? = tab-focus) handles Tab from inside a canvas.
+        setFocusPolicy(Qt::ClickFocus);
         setMouseTracking(true);
         backing = QImage(1, 1, QImage::Format_ARGB32_Premultiplied);
         backing.fill(Qt::white);
