@@ -972,6 +972,10 @@ void* shim_button_create(void*           parent_widget,
 {
     auto* parent = static_cast<QWidget*>(parent_widget);
     auto* btn = new QPushButton(QString::fromUtf8(label), parent);
+    // Return/Enter on a *focused* button clicks it (gtk does; Qt only does so
+    // when autoDefault is set, which it defaults to false outside a QDialog).
+    // Block D §2.2.
+    btn->setAutoDefault(true);
     if (click_cb) {
         QObject::connect(btn, &QPushButton::clicked,
                          [click_cb, ud]() { click_cb(ud); });

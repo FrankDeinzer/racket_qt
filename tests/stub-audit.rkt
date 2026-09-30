@@ -308,8 +308,11 @@
     (check-true (and (memq 'get-column-size (map gap-name (find-stub-gaps tmp))) #t))
     (delete-directory/files tmp))
 
-  (test-case "set-focus (§60.7, aktuell unbehobener Bug): wird trotz canvas%'s echter Implementierung gefunden"
-    (check-true (and (memq 'set-focus (map gap-name (find-stub-gaps))) #t)))
+  (test-case "set-focus No-op (historischer §60.7-Bug, a8348fba~1, in Block D §2.1 behoben): wäre gefunden worden"
+    (define tmp (make-historical-qt-tree
+                 (list (list "window.rkt" "a8348fba~1" "gui-lib/mred/private/wx/qt/window.rkt"))))
+    (check-true (and (memq 'set-focus (map gap-name (find-stub-gaps tmp))) #t))
+    (delete-directory/files tmp))
 
   (test-case "maximize/iconize/fullscreen: KEIN Fehlalarm (frame.rkt überschreibt window.rkts Platzhalter real)"
     (define names (map gap-name (find-stub-gaps)))

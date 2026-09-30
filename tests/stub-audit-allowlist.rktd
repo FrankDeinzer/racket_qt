@@ -58,7 +58,6 @@
  (get-dialog-level ("frame.rkt") harmless "frame.rkt: Folgefund NACH dem §61-Fix von window.rkts get-dialog-level (das jetzt an parent delegiert statt hartcodiert 0 zu sein) -- das Tool vergleicht frame.rkts trivialen Override gegen qts eigenes jetzt-substantielles window.rkt (Basisklassen-Spezialfall) und meldet ihn als neuen Gap. Ist aber korrekt und beabsichtigt: gtk/frame.rkt:330, win32/frame.rkt:507 und cocoa/frame.rkt:369 haben ALLE identisch (define/override (get-dialog-level) 0) -- ein Frame terminiert die Delegationskette immer bei 0, sein eigener Dialog-Level wird (falls er zugleich ein dialog% ist) separat über common/dialog.rkts eigenen Override geführt, nicht über den Parent-Chain-Mechanismus. Tool-Fehlalarm, kein Bug (§61).")
 
  ;; ---- backlog: bereits bekannte, offene Gaps ----
- (set-focus ("window.rkt") backlog "Größter Einzelfund aus §60.7: auf praktisch jedem Basis-Widget (button/choice/radio-box/slider/list-box/tab-panel/check-box/message/group-panel) wirkungslos, obwohl shim_widget_set_focus existiert.")
  (set-icon ("frame.rkt") backlog "frame.rkt: Dock/Taskbar-Icon eines Fensters lässt sich nie setzen (§60.7).")
  (set-color ("message.rkt") backlog "message.rkt: wirkungslos (§60.7).")
  (get-color ("message.rkt") backlog "message.rkt: lügt mit hartem #f (§60.7).")
