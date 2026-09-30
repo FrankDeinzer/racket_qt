@@ -11,6 +11,11 @@
 #   tests/input-matrix.sh both   record into a temp file, then compare (default)
 #   MATRIX_ROWS='name1 name2' to run a subset.
 #
+# tests/input-matrix-gtk.tsv is the checked-in native reference (layout-independent
+# rows only; recorded 2026-09-30 on Linux/KDE, DrRacket 9.3 gtk).  Dropped as
+# unreliable in the native run itself: ctrl+d / ctrl+e (buffer leakage), ctrl+k
+# (Racket>Kill dialog), ctrl+t (New Tab).
+#
 # Row format in ROWS below:  name|action;action;...   where action is
 #   k:<xdotool key spec>   or   t:<text to type>
 # The document is reset to empty before every row; the row must end with the
@@ -36,8 +41,6 @@ ROWS=(
  'ctrl-shift-left-select|t:foo bar;k:ctrl+shift+Left;t:Z'
  'ctrl-backspace|t:foo bar;k:ctrl+BackSpace'
  # ctrl+k is Racket > Kill in DrRacket (modal 'Evaluation Terminated' dialog): not a text row
- 'ctrl-d-delete-fwd|t:abc;k:Home;k:ctrl+d'
- 'ctrl-e-end-of-line|t:ab;k:Home;k:ctrl+e;t:X'
  'auto-indent-return|t:(a;k:Return;t:b'
  'tab-reindent|t:(a;k:Return;t:b;k:Tab;t:c'
  'return-newline|t:a;k:Return;t:b'

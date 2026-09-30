@@ -1,0 +1,16 @@
+select-all-replace	Z
+copy-paste	abab
+cut-paste	Qab
+undo	X
+undo-redo	ab
+backspace	ab
+delete-key	bc
+home-end	XabY
+ctrl-left-word	foo Xbar
+shift-left-select	abZ
+ctrl-shift-left-select	foo Z
+ctrl-backspace	foo ba
+auto-indent-return	(a$ b
+tab-reindent	(a$ bc
+return-newline	a$b
+paste-and-indent	(a$ b$ (a$  b
