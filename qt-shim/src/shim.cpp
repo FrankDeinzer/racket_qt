@@ -47,6 +47,9 @@
 #include <QEnterEvent>
 #include <QClipboard>
 #include <QMimeData>
+#include <QUrl>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QFont>
 #include <QFontInfo>
 #include <QCursor>
@@ -109,6 +112,8 @@ typedef void (*shim_wheel_cb_t)(void* ud, int dx, int dy, int mods);
 // once it is maintained from here, exactly like wx/gtk/window.rkt's save-w/
 // save-h (see its remember-size).
 typedef void (*shim_resize_cb_t)(void* ud, int w, int h);
+// File drop: called once per dropped local file, UTF-8 path valid only during the call.
+typedef void (*shim_drop_cb_t)(void* ud, const char* path);
 // File dialog result: ud, path (UTF-8 C string, NULL if the user canceled).
 typedef void (*shim_file_dialog_cb_t)(void* ud, const char* path);
 typedef void (*shim_printer_dialog_cb_t)(void* ud, int accepted);
@@ -362,6 +367,9 @@ public:
     // drops those early events instead of posting into a half-built object.
     shim_resize_cb_t resize_cb = nullptr;
     void*            resize_ud = nullptr;
+    // Wired via shim_window_set_drop_cb (drag-accept-files #t); null = not accepting.
+    shim_drop_cb_t   drop_cb = nullptr;
+    void*            drop_ud = nullptr;
 
     RacketWindow(shim_callback_t cb, void* ud)
         : QMainWindow(nullptr), close_cb(cb), close_ud(ud)
@@ -376,6 +384,22 @@ protected:
     void closeEvent(QCloseEvent* e) override {
         e->ignore();
         if (close_cb) close_cb(close_ud);
+    }
+
+    // File drag & drop (window%::drag-accept-files, Block D §2.3).  Only local
+    // files are offered; the callback just posts (Regel 2).
+    void dragEnterEvent(QDragEnterEvent* e) override {
+        if (drop_cb && e->mimeData()->hasUrls()) e->acceptProposedAction();
+        else QMainWindow::dragEnterEvent(e);
+    }
+    void dropEvent(QDropEvent* e) override {
+        if (!drop_cb || !e->mimeData()->hasUrls()) { QMainWindow::dropEvent(e); return; }
+        for (const QUrl& u : e->mimeData()->urls()) {
+            if (!u.isLocalFile()) continue;
+            QByteArray b = u.toLocalFile().toUtf8();
+            drop_cb(drop_ud, b.constData());
+        }
+        e->acceptProposedAction();
     }
 
     // Base implementation first (QMainWindow lays out its menu bar and central
@@ -513,6 +537,24 @@ void shim_window_set_resize_cb(void* win, shim_resize_cb_t cb, void* ud)
     auto* rw = static_cast<RacketWindow*>(win);
     rw->resize_cb = cb;
     rw->resize_ud = ud;
+}
+
+// Enables/disables accepting dropped files on a top-level window (cb null = off).
+void shim_window_set_drop_cb(void* win, shim_drop_cb_t cb, void* ud)
+{
+    auto* rw = static_cast<RacketWindow*>(win);
+    rw->drop_cb = cb;
+    rw->drop_ud = ud;
+    rw->setAcceptDrops(cb != nullptr);
+}
+
+// Window-manager size limits (frame% enforce-size).  max < 0 = unbounded.
+void shim_window_set_size_limits(void* win, int min_w, int min_h, int max_w, int max_h)
+{
+    auto* rw = static_cast<RacketWindow*>(win);
+    rw->setMinimumSize(std::max(0, min_w), std::max(0, min_h));
+    rw->setMaximumSize(max_w < 0 ? QWIDGETSIZE_MAX : max_w,
+                       max_h < 0 ? QWIDGETSIZE_MAX : max_h);
 }
 
 void shim_window_show(void* win, int visible)
