@@ -5,6 +5,18 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-09-30 (Linux) — Block D: Eingabeschicht (§64)
+
+Details: `docs/2026-09-30_report-linux.md`, `docs/HACKING.md` §64. Neue Prozessregel:
+Automatisierungsbefund erst nach gtk-Gegenprobe. Fixes: Ctrl-Chords, Fokus-Reasons
+(Popup/MenuBar), Tab im Editor, `other-*-key-code`, Delete/Backtab/Alt, `set-focus`,
+Return auf Button, Datei-Drop, `enforce-size`, Popup-Submenüs. Neu: `tests/key-map.rkt`,
+`tests/input-matrix.sh`. Offen: `combo-field%` (Größen-Gate), Windows/macOS-Rebuild+Validierung.
+Commits lokal, **nicht gepusht** (Regel 7: erst nach Rückfrage); Umbrella-Zeiger auf
+`third_party/gui` bewusst noch nicht committet (Regel 8).
+
+---
+
 ## Session 2026-09-28 (Linux) — §63: Shim-Rebuild + Validierung §59.1/§59.2/§60.3/§60.4/§61.1/§60.6
 
 **Kontext:** Letzte der drei Maschinen für diese Serie (nach macOS 2026-09-27 und

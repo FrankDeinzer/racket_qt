@@ -194,6 +194,20 @@ Aufgabe:
 > mit Headern sichtbar, Klick auf „Name"-Header sortiert die Liste sichtbar
 > alphabetisch um. **Damit sind alle drei offenen Rebuild-Pflichten (§59.2/§60.3/§60.6)
 > auf allen drei Maschinen (macOS, Windows, Linux) abgeschlossen.**
+>
+> **Shim-ABI-Stand seit 2026-09-30 (Block D, §64) — nur Linux gebaut+validiert, Windows/macOS
+> offen: Rebuild dort zwingend, sonst fehlen die Fixes (kein Startfehler).** Drei neue Exporte:
+> `shim_key_keysym` (XKB, nur Linux wirksam; anderswo Stub mit Rückgabe 0),
+> `shim_window_set_drop_cb`, `shim_window_set_size_limits`. Anders als bei §59.2/§60.3/§60.6
+> sind alle drei in `wx/qt/utils.rkt` **tolerant** gebunden (`get-ffi-obj` mit Fail-Thunk) — ein
+> altes Binary startet weiter, verliert nur die Features. **Wirksam nur nach Rebuild** (ABI-neutrale
+> Verhaltensänderungen in `shim.cpp`): Fokus-Reason-Filter (`PopupFocusReason` weder In noch Out;
+> `MenuBarFocusReason` beim Canvas-Out, Fokus-Rückgabe nach Menü per `QMenu::aboutToHide`),
+> `RacketCanvas::focusNextPrevChild=false` + `ClickFocus` (Tab erreicht den Editor),
+> `QPushButton::setAutoDefault(true)` (Return auf fokussiertem Button), Scancode in den oberen
+> Bits der Key-`mods` (`<< 8`, Linux). Windows: `min`/`max` und `X11`-Includes sind
+> `#ifdef __linux__`-geschützt; kein Build-Fix erwartet. Details/Validierungsliste:
+> `docs/2026-09-30_report-linux.md`, `docs/HACKING.md` §64.
 
 **Windows:**
 ```powershell
@@ -400,6 +414,18 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 - Zwei der 17 §60.9-`needs-triage`-Stubs gefixt und per echter GUI-Interaktion verifiziert (§61, 2026-09-27, macOS, beide reiner Racket-Code, keine ABI-Änderung): `get-canvas-background-for-backing` (`wx/qt/canvas.rkt`) war hartcodiert `#f`, machte `set-canvas-background` für den regulären Auto-Repaint-Backing-Fill wirkungslos — jetzt `(and clear-bg? bg-col)` wie gtk/cocoa/win32. `get-dialog-level` (`wx/qt/window.rkt`) war für jedes Nicht-Frame-Widget hartcodiert `0` statt an `parent` zu delegieren — Tastatur-/Mausevents an `canvas%`-Kindern innerhalb eines offenen modalen `dialog%` wurden verschluckt (`other-modal?`), jetzt Delegation wie gtk/win32. Neue Probes: `examples/canvas-background-backing-probe.rkt`, `examples/dialog-level-probe.rkt`.
 - **Choose-Language-Dialog „Collection Paths"-Buttons vollständig gefixt** (§60.4/§61.1, 2026-09-27, macOS, reiner Racket-Code, keine ABI-Änderung) — zweite Ursache gefunden: `group-panel%`s `get-client-size` berechnet den `QGroupBox`-Chrome-Overhead als `get-height`/`get-width` minus Content-Margins, aber bei der allerersten Layout-Abfrage (vor jedem echten `set-size`-Aufruf) lesen diese noch `0` — kollabiert das gemeldete Minimum um genau die Titelleistenhöhe, drängt die nicht-stretchbare Button-Reihe aus dem sichtbaren Bereich. Fix: Chrome-only-Größe direkt nach Konstruktion seeden (spiegelt win32s Konstruktor-`set-size`). Vorab per nativer-vs-Qt-Vergleich bestätigt, dass es sich um eine echte qt-Regression handelt (nativ rendert korrekt). Neue Probe: `examples/collection-paths-clip-probe-dialog.rkt`. **Windows nachgetestet 2026-09-28** (`docs/2026-09-28_report-win.md`): alle fünf Collection-Paths-Buttons (Add/Add Default/Remove/Raise/Lower) im echten Choose-Language-Dialog vollständig sichtbar, kein Clipping. **Linux nachgetestet 2026-09-28** (`docs/2026-09-28_report-linux.md`, §63): identisch, alle fünf Buttons vollständig sichtbar.
 - **Choose-Language-Dialog Hintergrundfarbe links bestätigt, aber Styling statt Bug** (§60.5/§61.1) — `QGroupBox`s Standard-macOS-Rahmen+Füllung (229–236/255) vs. `NSBox`s randlose moderne Optik (255/255 weiß). Echter, systematischer Unterschied, aber kein hartcodierter-Farb-Bug — ein Fix bräuchte ein eigenes Stylesheet, nicht versucht.
+
+- **Block D — Eingabeschicht** — ✅ 2026-09-30, Linux (§64), Windows/macOS-Validierung offen.
+  Gefunden per Nativ-Vergleich (neue Prozessregel: Automatisierungsbefund erst nach gtk-Gegenprobe):
+  Ctrl+<Zeichen> wurde verworfen (jeder Ctrl-Shortcut tot), Menü-Öffnen als Fokusverlust
+  (Edit-Menü grau nach < 1 s), Fokus kam nach Menü+Escape nicht zurück, Ctrl+Shift+Z fügte `Z`
+  ein (`other-*-key-code` fehlten), Tab im Editor von Qts Fokuskette gefressen, Delete/Backtab/
+  Alt-Mapping falsch, `set-focus` No-op, Return auf fokussiertem Button, Datei-Drop, `enforce-size`,
+  Popup-Submenüs. Neue Testinfrastruktur: `tests/key-map.rkt` (GUI-frei), `tests/input-matrix.sh`
+  + `tests/input-matrix-gtk.tsv` (16 Zeilen, Qt == gtk), `examples/key-probe.rkt`,
+  `dialog-keys-probe.rkt`, `popup-submenu-probe.rkt`; `tests/smoke.rkt` 4 Tests. **Offen:**
+  `combo-field%`-Dropdown (Größen-Gate, s. Report), Drop per echtem Dateimanager-Drag nicht
+  automatisierbar (Prüfpunkt im freien Test), `other-*-key-code` nur Linux/X11.
 
 ### Reklassifiziert (kein Produktbefund)
 

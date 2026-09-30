@@ -8321,3 +8321,64 @@ Klick vermeiden. Keine der aus früheren Sessions bekannten Linux-Fallstricke
 
 Damit sind alle drei Build-Banner-Rebuild-Pflichten (§59.2/§60.3/§60.6) auf Windows
 abgeschlossen. Linux bleibt die einzige noch ausstehende Maschine.
+
+## §64 — Block D (Linux, 2026-09-30): Eingabeschicht — Ctrl-Chords, Fokus, Tab, Drop, Popup-Submenüs
+
+Voller Bericht mit Messtabellen: `docs/2026-09-30_report-linux.md`.
+
+### 64.0 Neue Prozessregel: Nativ-Vergleich gilt auch für Automatisierungsbefunde
+
+**Ein Eingabefehler darf erst dann als Automatisierungsartefakt gelten, wenn dieselbe
+Injektion gegen das native Backend (gtk, ohne `PLT_QT`) funktioniert.** Der Nativ-Vergleich
+ist die Kernmethode des Projekts, wurde aber auf Automatisierungsbefunde nicht angewendet:
+das Windows-Ctrl-Symptom lag dreimal als „Methodik-Befund" (§24, §56.4, §62.3), §49.5
+(Cmd/Ctrl vertauscht) acht Tage als „bewusst nicht korrigiert" — beides waren echte Bugs.
+Werkzeuge: `examples/key-probe.rkt` (loggt alle `key-event%`-Felder), `tests/input-matrix.sh`
+(gtk-Referenz, Qt muss identisch sein), `tests/key-map.rkt` (GUI-frei).
+
+### 64.1 Bug A — Ctrl+<druckbares Zeichen> wurde verworfen (+ Folgefunde)
+
+Unter X11 (und Windows) liefert `QKeyEvent::text()` bei Ctrl ein Steuerzeichen
+(Ctrl+A → `0x01`); `key()` ist der Großbuchstabe bzw. das (shift-aufgelöste) Zeichen.
+`key-map.rkt` kannte Buchstaben nicht → `#f` → `canvas.rkt` verwarf das Event lautlos.
+Fix: Fallback aus `key()`. Gleichzeitig nach gtk-Sollwert korrigiert: Delete → `#\rubout`
+(nicht `'delete`), `Key_Backtab` → `#\tab`, Alt → `meta-down` (Super → `mod4-down`,
+`alt-down` #f) **nur unter Unix**, Alt/Super/AltGr-Tastendrücke unter Unix nicht melden;
+Maus-/Wheel-Events nutzen dieselben Modifier-Flags.
+**1.1b:** `other-shift/altgr/shift-altgr/caps-key-code` fehlten komplett — Rackets Keymap
+matcht Ctrl+Shift-Bindungen (Redo = `c:s:z`) darüber; ohne sie fügte Ctrl+Shift+Z ein
+literales `Z` ein. Umsetzung: Shim packt den X11-Hardware-Keycode in `mods` (`<< 8`,
+ABI-neutral), `shim_key_keysym` (XKB) liefert die Level, `qt-key-alternates` spiegelt
+gtks `get-alts`. Bekannte Abweichung: gtk-Eigenheit bei AltGr-Tasten auf dt. Layout.
+
+### 64.2 Bug B — Menü-Öffnen als Fokusverlust
+
+`focusOutEvent` reichte jedes FocusOut weiter; ein Menü-Popup schickt
+`Qt::PopupFocusReason` → `on-kill-focus` → der asynchrone Enable-Recompute (§37) fand kein
+Edit-Ziel → Edit-Einträge nach < 1 s ausgegraut. Fix: `PopupFocusReason` in In und Out
+nicht weitergeben (gtk meldet beim Menüöffnen nichts). **1.2b:** Klick auf die Menüleiste
+→ `MenuBarFocusReason`, der Fokus kam nach Escape nie zurück (Tasten gingen ins Leere).
+Fix: Canvas merkt sich beim Bar-Grab, `QMenu::aboutToHide` stellt per `QTimer(0)` wieder
+her (nur wenn kein Popup mehr offen und der Fokus nicht legitim woanders liegt), ohne
+Racket-Fokusereignisse.
+
+### 64.3 Tab im Editor / Tastatur in Dialogen
+
+- `RacketCanvas::focusNextPrevChild` → `false` und `Qt::ClickFocus`: Qts Fokuskette fraß Tab
+  (Einrücken!) in jedem echten DrRacket-Fenster (gefunden von `tab-reindent` der
+  Eingabe-Matrix). Rackets eigene Traversal (`gets-focus?`) übernimmt; Canvases sind wie bei
+  gtk nicht in der nativen Tab-Kette.
+- `QPushButton::setAutoDefault(true)`: Return auf fokussiertem Button klickt ihn (gtk-Verhalten).
+- `window%::set-focus` war No-op für jedes Nicht-Canvas-Widget → `shim_widget_set_focus`.
+- Divergenzen (bewusst nicht angeglichen): in Dialogen ist `list-box%` in der Qt-Tab-Kette,
+  in gtk nicht; Qt gibt einem Dialog initial dem ersten Feld Fokus, gtk keinem.
+
+### 64.4 Neue Features
+
+`drag-accept-files` (`setAcceptDrops` + `shim_window_set_drop_cb`, Regel 2: Callback nur
+`queue-event`), `enforce-size` (`shim_window_set_size_limits`), Popup-Submenüs
+(`append` setzt `set-parent`, Blätter leiten an die Popup-Wurzel `popup-select` weiter).
+Beide FFI-Bindungen sind mit Fail-Thunk tolerant gegenüber einem alten Shim. **Fehler auf dem
+Weg:** `(_or-null _drop_cb_t)` bricht mit `cast`-Kontraktfehler ab und tötete DrRacket-Start
+unter Qt (Smoke sah es nicht, die Eingabe-Matrix schon) → `tests/smoke.rkt` deckt jetzt
+`accept-drop-files`/`focus` ab. `combo-field%` (§2.6): nicht in diesem Block, Größen-Gate.

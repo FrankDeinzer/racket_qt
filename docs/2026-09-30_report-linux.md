@@ -75,3 +75,45 @@ das native gtk-Backend funktioniert. → `docs/HACKING.md`.
   Edit-Menü-Ausgrauen nachstellen; AltGr auf deutscher Tastatur.
 - macOS: Cmd-Shortcuts (§58.1) unverändert, echte Control-Taste.
 - `derived`-Zeilen in `tests/key-map.rkt` nachmessen.
+
+## Phase 2 — übrige Eingabeschicht
+
+| # | Thema | Status | Kern |
+|---|---|---|---|
+| 2.1 | `set-focus` auf Basis-Widgets | ✅ | Symptom belegt: `(send check-box focus)` / `(send list-box focus)` wirkungslos (Leertaste landete im Nachbarfeld), Text-Feld ging. Base-`window%::set-focus` ruft jetzt `shim_widget_set_focus`. Stub-Audit: Allowlist-Eintrag entfernt, historischer Recall-Test (`a8348fba~1`). |
+| 2.2 | Tastatur in Nicht-Canvas-Widgets | ✅ (Teil) | Messung gegen gtk (`examples/dialog-keys-probe.rkt`): Enter = Default-Button und Escape = Abbrechen aus Textfeld **schon gleich**; Tab-Reihenfolge/Space auf Check-Box gleich. Lücke: Return auf fokussiertem Button tat nichts → `setAutoDefault(true)`. Divergenzen ohne Handlungsbedarf: `list-box%` in Qt-Tab-Kette (gtk nicht); Qt fokussiert im Dialog initial das erste Feld (gtk keins). |
+| 2.3 | `drag-accept-files` | ✅ Code, ⏳ Live | `setAcceptDrops` + `dropEvent` → `shim_window_set_drop_cb` (nur `queue-event`, Regel 2). Echte Datei-aus-Dateimanager-Geste per Automatisierung nicht verlässlich → **Prüfpunkt im freien Test**. Bugfix auf dem Weg: `_or-null` auf `_fun`-Typ tötete den DrRacket-Start (Matrix-Lauf fand es; Smoke deckt es jetzt ab). |
+| 2.4 | `enforce-size` | ✅ | `shim_window_set_size_limits`. `xdotool windowsize 100 100` auf Probe-Frame: gtk 314×222, Qt 288×174 (Differenz = unterschiedliche Widget-Mindestgrößen, nicht die Erzwingung selbst). |
+| 2.5 | Popup-Submenüs | ✅ | Vorher: Blatt im Submenü feuerte nie (`examples/popup-submenu-probe.rkt`: vorher leer, nachher `leaf`, gtk `leaf`). `append` setzt `set-parent`, `popup-root`/`popup-select`. |
+| 2.6 | `combo-field%`-Dropdown | ⏸ Größen-Gate | In gtk ist der Pfeil ein natives `GtkComboBox` neben dem Editor-Canvas (`extract-combo-button`, `connect-combo-key-and-mouse`, `popup-combo`). Qt bräuchte: neues Kombi-Widget (Editor-Canvas + Pfeil-Button + `QMenu`/`QListView`-Popup), Layout-/Größenlogik, vier Racket-Methoden, Shim-Exporte. Umfang etwa wie §60.6. **Entscheidung beim Nutzer** (s. Fragen). |
+
+Weitere Folgefunde aus der Eingabe-Matrix (Phase 3):
+- **Tab im Editor:** Qts Fokuskette fraß Tab, sobald irgendein anderes Widget fokussierbar war (jedes echte DrRacket-Fenster) → Einrücken tot, danach lief der Fokus weg. Fix: `focusNextPrevChild=false` + `ClickFocus` am Canvas.
+- Die Matrix hat auch den `_or-null`-Startfehler (2.3) gefunden, den Smoke 3/3 nicht sah.
+
+## Phase 3 — Testinfrastruktur
+
+- `tests/key-map.rkt` (GUI-frei, 56 Prüfungen): Qt-Rohwerte → erwarteter Racket-Key-Code, `measured`/`derived` markiert; Alternativcodes gegen gtk-`get-alts`-Werte.
+- `tests/input-matrix.sh` + `tests/input-matrix-gtk.tsv`: 16 Zeilen (Ctrl+A/C/X/V/Z/Shift+Z, Entf/Backspace, Home/End, Wortsprünge, Selektion, Ctrl+Backspace, Return-Auto-Indent, Tab-Reindent, Paste-and-Indent), per `xdotool` in echtes DrRacket, Datei-Ergebnis Qt == gtk-Referenz. **16/16 PASS.** Verworfen als unzuverlässig schon im nativen Lauf: Ctrl+D/Ctrl+E (Pufferreste), Ctrl+K (= Racket>Kill, modaler Dialog), Ctrl+T (= Neuer Tab).
+- `examples/key-probe.rkt`, `dialog-keys-probe.rkt`, `popup-submenu-probe.rkt`; `tests/smoke.rkt` jetzt 4 Tests.
+- **Nicht in Suite A eingegliedert als Skript** — Suite A ist eine dokumentierte Liste (HACKING §52.2); die Matrix ist als weiterer Punkt dazuzuzählen.
+
+## Bekannte Grenzen / Abweichungen
+- `other-*-key-code` nur Linux/X11 (Gruppe 0; keine Mehrfach-Layouts); AltGr-Tasten auf dt. Layout weichen von gtks Eigenheit ab (`Ctrl+[`).
+- Modifier-Druck-Events tragen das eigene Flag (gtk: noch nicht).
+- Während der Tests erschien einmalig ein KDE-„Quick Settings"-Fenster (System Settings); Ursache nicht geklärt (nicht von den Testkeys belegt), nicht angefasst.
+
+## „Später zu validieren" (Windows / macOS)
+
+**Braucht Shim-Rebuild** (`cmake --build`; kein Start-Fehler ohne Rebuild, aber die Fixes fehlen):
+- Fokus-Reasons (Popup/MenuBar) — Windows: Edit-Menü öffnen, Einträge bleiben ≥ 3 s wählbar (Beobachtung des Nutzers vom 30.09. direkt nachstellen); Menü + Escape, danach Tippen.
+- `focusNextPrevChild`/`ClickFocus`: Tab im Editor reindentet; Dialog mit Canvas dazwischen.
+- `setAutoDefault`: Return auf fokussiertem Button. `shim_window_set_drop_cb` (Datei aufs Fenster ziehen), `shim_window_set_size_limits` (`xdotool`-Äquivalent: Fenster unter Minimum ziehen).
+- macOS/Windows kompilieren `shim_key_keysym` als Stub (0) und den Scancode-Pack als 0 — Erwartung: unverändertes Verhalten dort.
+
+**Reiner Racket-Code** (`git pull` genügt):
+- `key-map.rkt`/`canvas.rkt`: Ctrl+<Zeichen> — Windows: `SendKeys` Ctrl+L öffnet „Choose Language", Ctrl+A/Ctrl+Z wirken; wenn ja, §24/§56.4/§62.3 als „war echter Bug, nicht Methodik" reklassifizieren. AltGr-Zeichen (`@`, `\`, `{`) auf deutscher Tastatur unverändert. Delete → `#\rubout` (win32/key.rkt liefert dasselbe; Windows: Entf im Editor).
+- macOS: Cmd-Shortcuts unverändert (§58.1-Regression ausschließen; der `text ≥ 32`-Zweig steht weiter zuerst), echte Control-Taste (Emacs-Belegungen Ctrl+A/Ctrl+E) jetzt wirksam; Alt/Option-Flag unverändert `alt-down`.
+- `set-focus`, Popup-Submenüs, Drop-/Size-Bindings (tolerant gebunden).
+- `tests/key-map.rkt`: alle `derived`-Zeilen (macOS/Windows) auf der Zielplattform nachmessen (`PLT_QT_DEBUG=1` loggt Rohwerte).
+- Die Eingabe-Matrix ist Linux/X11-only (`xdotool`); ein Windows/macOS-Pendant gibt es nicht.
