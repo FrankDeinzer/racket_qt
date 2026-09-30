@@ -28,10 +28,18 @@ Buchstaben nicht in der Sondertabelle → `#f` → `canvas.rkt` verwirft komment
 **Fix:** Fallback aus `key()` (Buchstaben klein, groß bei Shift, wie gtk-keyval);
 Backtab→`#\tab`; Delete→`#\rubout`; unter Unix Alt→`meta-down`, Super→`mod4-down`,
 `alt-down` #f (wie `gtk/window.rkt`); Alt/Super/AltGr-Tastendrücke unter Unix nicht melden.
-Nur Unix-Zweige geändert; macOS/Windows-Pfade (text ≥ 32 zuerst) unverändert.
-**Nicht gefixt (Backlog):** `other-shift/altgr/caps-key-code` setzt Qt nicht (gtk schon);
-bisher kein Symptom. Modifier-Druck-Events tragen bei Qt das eigene Modifier-Flag
-(gtk: noch nicht) — harmlos.
+Auf allen Plattformen wirksam (nicht nur Unix): Delete→`#\rubout` (win32/key.rkt liefert
+dasselbe), Backtab→`#\tab`, `Key_Menu`→`'menu` und der `key()`-Fallback für druckbare
+Tasten; nur der Alt/Super-Teil ist Unix-spezifisch. Der `text ≥ 32`-Zweig steht weiter zuerst
+(macOS-Cmd, Windows-AltGr-Zeichen unverändert). Maus- und Wheel-Events nutzen jetzt dieselben
+Modifier-Flags wie Tasten (gtk: MOD1=meta, MOD4).
+**1.1b Folgefund: `other-*-key-code` fehlten** — Ctrl+Shift+Z (Redo) fügte ein literales `Z` ein,
+weil Rackets Keymap Ctrl+Shift-Bindungen (`c:s:z`) über `get-other-shift-key-code` u. Ä. matcht.
+Fund über den nativen Vergleich (gtk: Datei verdoppelt; Qt: `XYZ`). Fix: Shim packt den
+X11-Hardware-Keycode in `mods` (`<< 8`, ABI-neutral), neuer Export `shim_key_keysym`
+(`XkbKeycodeToKeysym`), `qt-key-alternates` in `key-map.rkt` spiegelt gtks `get-alts`.
+Abgleich Qt↔gtk identisch bis auf gtk-Eigenheit bei AltGr-Tasten (Ctrl+[ auf dt. Layout).
+Modifier-Druck-Events tragen bei Qt das eigene Flag (gtk: noch nicht) — harmlos, offen gelassen.
 **Test:** `tests/key-map.rkt` (49 Prüfungen, `measured`/`derived` markiert).
 **Live (echtes DrRacket, xdotool):** Ctrl+A markiert alles, Ctrl+C/Ctrl+V fügt ein,
 Ctrl+Z, Ctrl+S (Scratch-Kopie), Ctrl+R → `144`.
@@ -44,7 +52,17 @@ Commit: gui `e0adc1aa`, Umbrella `9dc272c`.
 Racket weiter (beide Flanken, damit balanciert). ABI-neutral, Rebuild nötig.
 **Live:** Text markieren → Edit-Menü offen, nach 3,5 s: Cut/Copy/Paste/Select All weiterhin
 wählbar (Screenshot). Andere Reasons bewusst unverändert (nicht geraten).
-Kontextmenü-/`choice%`-Popups nutzen denselben Pfad; gezielte Prüfung siehe unten (offen).
+**Nativ-Spiegel** (`examples/key-probe.rkt`, Menü öffnen): gtk meldet keinen Fokusverlust — bestätigt.
+
+### 1.2b Folgefund: Fokus kehrt nach Menü+Escape nicht zurück — ✅ gefixt
+Klick auf die Menüleiste → `focusOut reason=6` (`MenuBarFocusReason`), nach Escape kein
+`focusIn`: Tastatureingaben gingen ins Leere, bis in den Canvas geklickt wurde (vorher schon
+so; gtk: Fokus bleibt). Fix: Canvas merkt sich beim MenuBar-Grab (und meldet ihn nicht als
+Fokusverlust), `QMenu::aboutToHide` stellt den Fokus per `QTimer(0)` wieder her, sofern kein
+Popup offen ist und der Fokus nicht legitim woanders liegt; die Wiederherstellung wird nicht
+an Racket gemeldet. Verifiziert: Probe (`a` nach Menü+Escape kommt an, keine falschen
+Fokus-Events) und DrRacket-Sequenz (Datei-Ergebnis Qt == gtk, 90 Bytes: Ctrl+A/C/End/V/Z/
+Ctrl+Shift+Z, Tippen nach Menü+Escape).
 
 ## Prozessregel (neu)
 Ein Eingabefehler gilt erst als Automatisierungsartefakt, wenn dieselbe Injektion gegen

@@ -75,3 +75,22 @@
 (check-true  (qt-mods->alt-down?  4 'macosx))
 (check-false (qt-mods->mod4-down? 8 'macosx))
 (check-true  (qt-mods->alt-down?  4 'windows))
+
+;; other-*-key-code (qt-key-alternates), German layout, measured against gtk's
+;; get-alts: (scan mods) -> (other-shift other-altgr other-shift-altgr other-caps).
+;; Fake keysym table: scan 38 = a/A, 10 = 1/!, 52 = z/Z.
+(define (ks scan lv)
+  (case scan
+    [(38) (if (= lv 0) #x61 #x41)]
+    [(10) (if (= lv 0) #x31 #x21)]
+    [(52) (if (= lv 0) #x7a #x5a)]
+    [else 0]))
+(define (alts scan mods)
+  (call-with-values (lambda () (qt-key-alternates scan mods ks)) list))
+(check-equal? (alts 38 0) '(#\A #\a #\A #\A) "plain a")
+(check-equal? (alts 38 1) '(#\a #\A #\a #\a) "shift+a")
+(check-equal? (alts 52 2) '(#\Z #f #f #\Z)   "ctrl+z: no altgr alternatives")
+(check-equal? (alts 10 2) '(#\! #f #f #\1)   "ctrl+1")
+(check-equal? (alts 10 0) '(#\! #\1 #\! #\1) "plain 1")
+(check-equal? (qt-mods-scancode (bitwise-ior 2 (arithmetic-shift 38 8))) 38)
+(check-equal? (qt-mods-modifiers (bitwise-ior 2 (arithmetic-shift 38 8))) 2)

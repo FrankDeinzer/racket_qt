@@ -18,6 +18,8 @@
 #include <QScrollBar>
 #include <QSignalBlocker>
 #include <QMenuBar>
+#include <QTimer>
+#include <QPointer>
 #include <QMenu>
 #include <QAction>
 #include <QLabel>
@@ -67,6 +69,7 @@
 
 #ifdef __linux__
 #include <X11/Xlib.h>
+#include <X11/XKBlib.h>
 // X11/X.h #defines CursorShape to 0 (an XFontCursor constant), which clobbers
 // Qt::CursorShape used later in this file (shim_cursor_create_standard).
 // It's the only Qt/Xlib macro collision in this translation unit (checked).
@@ -129,6 +132,29 @@ static bool plt_qt_debug()
         cached = (v && v[0] && v[0] != '0') ? 1 : 0;
     }
     return cached != 0;
+}
+
+// Menu-bar focus round trip (Block D §1.2b).  A menu-bar click makes the
+// QMenuBar grab keyboard focus (MenuBarFocusReason) and Qt does not hand it
+// back when the menu is closed with Escape, so typing afterwards went nowhere
+// until the user clicked into the canvas again.  gtk keeps focus in the widget
+// throughout.  The canvas remembers itself when the bar takes focus, and a
+// menu's aboutToHide restores it once no popup is left open.
+static QPointer<QWidget> s_focus_before_menubar;
+static bool              s_restoring_focus = false;
+
+static void restore_focus_after_menu()
+{
+    QTimer::singleShot(0, [] {
+        if (QApplication::activePopupWidget()) return;          // menu-to-menu hop
+        QWidget* fw = QApplication::focusWidget();
+        if (!s_focus_before_menubar) return;
+        if (fw && !qobject_cast<QMenuBar*>(fw)) return;          // focus went elsewhere legitimately
+        s_restoring_focus = true;
+        s_focus_before_menubar->setFocus(Qt::OtherFocusReason);
+        s_restoring_focus = false;
+        s_focus_before_menubar = nullptr;
+    });
 }
 
 // Phase-3 measurement knob (docs/2026-07-11_prompt.md): lets the native
@@ -267,6 +293,16 @@ protected:
 
     // ---- keyboard -------------------------------------------------------
 
+    // X11 hardware keycode, packed above the modifier bits (<< 8) so Racket can
+    // look up the key's other shift levels (get-other-shift-key-code etc.)
+    // without changing the callback's signature.  0 elsewhere.
+    static int keyExtra(QKeyEvent* e) {
+#ifdef __linux__
+        return (int)((e->nativeScanCode() & 0xffff) << 8);
+#else
+        (void)e; return 0;
+#endif
+    }
     static void debugKey(const char* what, QKeyEvent* e) {
         if (!plt_qt_debug()) return;
         fprintf(stderr, "[PLT_QT_DEBUG] %s key=0x%x text=[", what, (unsigned)e->key());
@@ -279,14 +315,14 @@ protected:
         debugKey("press", e);
         if (key_cb) {
             int tc = e->text().isEmpty() ? 0 : (int)e->text().at(0).unicode();
-            key_cb(key_ud, 0, e->key(), tc, encodeMods(e->modifiers()));
+            key_cb(key_ud, 0, e->key(), tc, encodeMods(e->modifiers()) | keyExtra(e));
         }
     }
     void keyReleaseEvent(QKeyEvent* e) override {
         debugKey("release", e);
         if (key_cb) {
             int tc = e->text().isEmpty() ? 0 : (int)e->text().at(0).unicode();
-            key_cb(key_ud, 1, e->key(), tc, encodeMods(e->modifiers()));
+            key_cb(key_ud, 1, e->key(), tc, encodeMods(e->modifiers()) | keyExtra(e));
         }
     }
 
@@ -299,13 +335,17 @@ protected:
         // and returning focus is not a focus change as far as Racket is
         // concerned (gtk never reports it; Block D §1.2).  Skip both edges so
         // on-set-focus / on-kill-focus stay balanced.
-        if (e->reason() == Qt::PopupFocusReason) return;
+        if (e->reason() == Qt::PopupFocusReason || s_restoring_focus) return;
         if (focus_cb) focus_cb(focus_ud, 1);
     }
     void focusOutEvent(QFocusEvent* e) override {
         QWidget::focusOutEvent(e);
         if (plt_qt_debug()) fprintf(stderr, "[PLT_QT_DEBUG] focusOut reason=%d\n", (int)e->reason());
         if (e->reason() == Qt::PopupFocusReason) return;
+        if (e->reason() == Qt::MenuBarFocusReason) {   // bar grabbed focus: not a Racket focus change
+            s_focus_before_menubar = this;
+            return;
+        }
         if (focus_cb) focus_cb(focus_ud, 0);
     }
 };
@@ -755,6 +795,19 @@ static Display* shim_x11_display()
 }
 #endif
 
+#ifdef __linux__
+// Keysym of an X11 hardware keycode at a shift level (0 = base, 1 = shift), group 0.
+// 0 when unavailable.  Used to fill key-event%'s other-*-key-code fields.
+int shim_key_keysym(int keycode, int level)
+{
+    Display* dpy = shim_x11_display();
+    if (!dpy || keycode <= 0) return 0;
+    return (int)XkbKeycodeToKeysym(dpy, (KeyCode)keycode, 0, level);
+}
+#else
+int shim_key_keysym(int, int) { return 0; }
+#endif
+
 void shim_get_mouse_state(int* out_x, int* out_y, int* out_flags)
 {
     QPoint p = QCursor::pos();
@@ -1025,7 +1078,9 @@ public:
 
 void* shim_menu_create(const char* title)
 {
-    return new RacketMenu(QString::fromUtf8(title));
+    RacketMenu* m = new RacketMenu(QString::fromUtf8(title));
+    QObject::connect(m, &QMenu::aboutToHide, m, [] { restore_focus_after_menu(); });
+    return m;
 }
 
 // Wires the native about-to-show notification. Called once per menu% (top-level
