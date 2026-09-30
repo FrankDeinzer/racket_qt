@@ -138,3 +138,8 @@ Gemeldet und durch die Triage-Regel gelaufen (Details: `docs/HACKING.md` §64.5)
 - Multi-File-Search: Menüpunkt „Search in Files…"; das Dropdown im Dialog ist der offene `combo-field%`-Pfeil (2.6).
 - Die Optik der Tab-Leiste weicht ab (volle Breite je Tab, ohne Schließen-Kreuz/Plus-Knopf); nur ein Stilunterschied, nicht angeglichen.
 - Methodik-Fund: `xdotool key` ins aktive Fenster → stray Escape im Claude-Terminal brach Tool-Aufrufe ab; Skripte prüfen jetzt das aktive Fenster.
+
+## Gate nach den Freitest-Fixes (Linux, Sonnet-Subagent)
+
+Nach Panel-0×0-, Tab-Leisten- und NavKey-Änderungen: **keine Regression.** Suite A (20 Proben, inkl. `panel-sizing`, `collection-paths-clip`, `tab-panel`, `group-panel`, `deleted-style` Qt+nativ) komplett PASS; Eingabe-Matrix 16/16; `test-dock-size` 3/3 crashfrei mit sichtbarer Tab-Leiste (`1: … | 2: …`); Datei-Dropdown öffnet das Pfad-Menü; Escape schließt Preferences. Alle Tasten wurden nur bei verifiziert aktivem Testfenster gesendet.
+Unbestätigte Nebenbeobachtung: bei offenem Popup/Edit-Menü/Preferences war der Editortext im Screenshot kurz nicht gemalt (Zeilennummern sichtbar); in einem sauberen Screenshot danach vollständig. Vermutlich Repaint-Verzögerung unter Overlays, **nicht nachgeprüft** — im nächsten freien Test beachten.
