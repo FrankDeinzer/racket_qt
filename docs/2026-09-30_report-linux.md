@@ -117,3 +117,12 @@ Weitere Folgefunde aus der Eingabe-Matrix (Phase 3):
 - `set-focus`, Popup-Submenüs, Drop-/Size-Bindings (tolerant gebunden).
 - `tests/key-map.rkt`: alle `derived`-Zeilen (macOS/Windows) auf der Zielplattform nachmessen (`PLT_QT_DEBUG=1` loggt Rohwerte).
 - Die Eingabe-Matrix ist Linux/X11-only (`xdotool`); ein Windows/macOS-Pendant gibt es nicht.
+
+## Phase 5 — Gate (Linux)
+
+Es gab **keine** Suite-A-Basislinie vor den Änderungen (Phase 0 hat nur Smoke/stub-audit erfasst); Vergleichsbasis sind die dokumentierten PASS-Stände (§52.2, §63).
+
+- Smoke 4/4 mit **und** ohne `PLT_QT`; `stub-audit` 9/9; `tests/key-map.rkt` 56/56; `tests/input-matrix.sh` 16/16 (Qt == gtk).
+- **Suite A** (Sonnet-Subagent, nach den letzten Shim-Änderungen): clipboard, menu-demand, is-shown, resize-reflow, live-resize, minsize-resize, scroll, panel-scroll, canvas-panel, deleted-style (Qt+nativ), crash-b-teardown (Accept+Cancel), enable-cascade — alle PASS; zusätzlich dialog-widgets, group-panel, tab-panel, value-widgets, widget, list-box-sizehint, multi-column-list-box, htdp-bigbang — alle PASS.
+- **`test-dock-size`** (F5 → zweite Datei per Ctrl+O → F5, n=3, frischer DrRacket je Lauf): 3/3 crashfrei, zwei Tabs per Tabs-Menü/Ctrl+1/2 belegt, stderr leer.
+- Ungeprüft/auffällig, kein FAIL: (a) im Qt-DrRacket war bei zwei Tabs keine Tab-Leiste sichtbar, nur das Tabs-Menü — **nicht gegen nativ verglichen**, ob ein Altbefund oder eine Regression; im freien Test ansehen. (b) `menu-demand-probe` meldet „demand-callback already fired" bei Verdikt PASS (vermutlich der proaktive Refresh aus §60.2). (c) `put-file` lieferte `cb_out` statt getipptem `cb_out.txt` (Qt-Filter oder Tipp-Artefakt, ungeklärt).
