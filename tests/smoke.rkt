@@ -55,3 +55,20 @@
   (pump-n PUMP-CYCLES)
   (send frame show #f)
   (check-true #t))
+
+; Block D regression: every DrRacket frame calls (accept-drop-files #t) at
+; startup (framework/private/frame.rkt); a broken drop binding killed DrRacket
+; under PLT_QT=1 while the other smoke tests stayed green.  Also exercises
+; programmatic focus on non-canvas widgets and the WM size limits.
+(test-case "frame% accept-drop-files on/off, button focus, min size"
+  (define frame (new frame% [label "drop-smoke"] [width 300] [height 200]))
+  (define b (new button% [label "ok"] [parent frame] [callback (lambda (b e) (void))]))
+  (send frame accept-drop-files #t)
+  (send frame show #t)
+  (pump-n PUMP-CYCLES)
+  (send b focus)
+  (send frame accept-drop-files #f)
+  (send frame accept-drop-files #t)
+  (pump-n 5)
+  (send frame show #f)
+  (check-true #t))
