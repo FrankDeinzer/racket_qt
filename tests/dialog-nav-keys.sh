@@ -11,7 +11,7 @@ one() {  # mode focus key
   local mode=$1 focus=$2 key=$3 log
   log=$(mktemp)
   if [ "$mode" = qt ]; then export PLT_QT=1; else unset PLT_QT; fi
-  ( cd "$HERE" && "$HOME/racket/bin/racket" examples/dialog-keys-probe.rkt "$log" "$focus" >/dev/null 2>&1 ) &
+  ( cd "$HERE" && exec "$HOME/racket/bin/racket" examples/dialog-keys-probe.rkt "$log" "$focus" >/dev/null 2>&1 ) &
   local pid=$! W=""
   for _ in $(seq 1 60); do
     W=$(xdotool search --onlyvisible --name KeyDialog | head -1); [ -n "$W" ] && break; sleep 0.5

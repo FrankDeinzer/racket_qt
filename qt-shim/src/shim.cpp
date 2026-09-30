@@ -267,6 +267,10 @@ protected:
     }
 
     void mousePressEvent(QMouseEvent* e) override {
+        if (plt_qt_debug())
+            fprintf(stderr, "[PLT_QT_DEBUG] canvas %p mousePress pos=(%d,%d) size=%dx%d cb=%d\n",
+                    (void*)this, (int)e->position().x(), (int)e->position().y(),
+                    width(), height(), mouse_cb ? 1 : 0);
         // For press/release, pass e->button() (single triggering button) so
         // Racket always knows which button caused the event.
         if (mouse_cb)
@@ -400,6 +404,24 @@ public:
     }
 };
 
+// Debug only (PLT_QT_DEBUG): who actually receives mouse presses.  Installed on
+// the QApplication in shim_app_init.
+class DebugMouseFilter : public QObject {
+public:
+    bool eventFilter(QObject* o, QEvent* ev) override {
+        if (ev->type() == QEvent::MouseButtonPress) {
+            auto* me = static_cast<QMouseEvent*>(ev);
+            auto* w = qobject_cast<QWidget*>(o);
+            fprintf(stderr, "[PLT_QT_DEBUG] press -> %s %p geom=(%d,%d %dx%d) local=(%d,%d) global=(%d,%d)\n",
+                    o->metaObject()->className(), (void*)o,
+                    w ? w->x() : -1, w ? w->y() : -1, w ? w->width() : -1, w ? w->height() : -1,
+                    (int)me->position().x(), (int)me->position().y(),
+                    (int)me->globalPosition().x(), (int)me->globalPosition().y());
+        }
+        return false;
+    }
+};
+
 // ---- RacketWindow -------------------------------------------------------
 
 class RacketWindow : public QMainWindow {
@@ -486,6 +508,7 @@ void shim_app_init(void)
     s_argc = 1;
     s_argv = argv_arr;
     s_app = new QApplication(s_argc, s_argv);
+    if (plt_qt_debug()) s_app->installEventFilter(new DebugMouseFilter());
 }
 
 void shim_app_quit(void)
@@ -1054,6 +1077,11 @@ void* shim_panel_create(void* parent_widget, int border)
 {
     auto* frame = new QFrame(static_cast<QWidget*>(parent_widget));
     if (border) frame->setFrameStyle(QFrame::Box | QFrame::Plain);
+    // A child QWidget starts out at Qt's default 100x30 at (0,0).  A panel that
+    // Racket never positions (empty / zero-sized, e.g. DrRacket's uncommon
+    // panels) would stay that size, invisibly covering whatever lies top-left
+    // and swallowing its clicks (free test 2026-09-30: file-name dropdown dead).
+    frame->setGeometry(0, 0, 0, 0);
     return frame;
 }
 
