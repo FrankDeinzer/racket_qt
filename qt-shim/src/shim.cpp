@@ -77,6 +77,9 @@
 // Qt::CursorShape used later in this file (shim_cursor_create_standard).
 // It's the only Qt/Xlib macro collision in this translation unit (checked).
 #undef CursorShape
+// Same for X.h's KeyPress/KeyRelease (QEvent::KeyPress is used below).
+#undef KeyPress
+#undef KeyRelease
 // QNativeInterface::QX11Application -- gives wx/qt/gcwin.rkt (DrRacket's GC
 // indicator, register-collecting-blit) the same Display* Qt itself uses, so
 // a raw Xlib child window created on it shares X11's request ordering with
@@ -114,6 +117,8 @@ typedef void (*shim_wheel_cb_t)(void* ud, int dx, int dy, int mods);
 typedef void (*shim_resize_cb_t)(void* ud, int w, int h);
 // File drop: called once per dropped local file, UTF-8 path valid only during the call.
 typedef void (*shim_drop_cb_t)(void* ud, const char* path);
+// Navigation keys from native controls: Qt::Key (Escape / Return / Enter), mods.
+typedef void (*shim_nav_key_cb_t)(void* ud, int key, int mods);
 // File dialog result: ud, path (UTF-8 C string, NULL if the user canceled).
 typedef void (*shim_file_dialog_cb_t)(void* ud, const char* path);
 typedef void (*shim_printer_dialog_cb_t)(void* ud, int accepted);
@@ -368,6 +373,33 @@ protected:
     }
 };
 
+// Escape / Return from native controls (Block D, free-test finding 4).  Only
+// canvas% delivers key events to Racket; with focus on a list, check box,
+// radio, slider, choice or button, Escape (dialog cancel) and Return (default
+// button) never reached racket/gui's dialog traversal.  The filter forwards
+// just those keys and never consumes them.  Return on a QPushButton is left to
+// the button (autoDefault clicks *that* button, like gtk).
+class NavKeyFilter : public QObject {
+public:
+    shim_nav_key_cb_t cb; void* ud;
+    NavKeyFilter(QObject* parent, shim_nav_key_cb_t c, void* u) : QObject(parent), cb(c), ud(u) {}
+    bool eventFilter(QObject* o, QEvent* ev) override {
+        if (ev->type() == QEvent::KeyPress) {
+            auto* ke = static_cast<QKeyEvent*>(ev);
+            int k = ke->key();
+            bool ret = (k == Qt::Key_Return || k == Qt::Key_Enter);
+            if (k == Qt::Key_Escape || (ret && !qobject_cast<QPushButton*>(o)))
+                {
+                    Qt::KeyboardModifiers m = ke->modifiers();
+                    int bits = (m & Qt::ShiftModifier ? 1 : 0) | (m & Qt::ControlModifier ? 2 : 0)
+                             | (m & Qt::AltModifier ? 4 : 0) | (m & Qt::MetaModifier ? 8 : 0);
+                    cb(ud, k, bits);
+                }
+        }
+        return false;
+    }
+};
+
 // ---- RacketWindow -------------------------------------------------------
 
 class RacketWindow : public QMainWindow {
@@ -550,6 +582,13 @@ void shim_window_set_resize_cb(void* win, shim_resize_cb_t cb, void* ud)
     auto* rw = static_cast<RacketWindow*>(win);
     rw->resize_cb = cb;
     rw->resize_ud = ud;
+}
+
+// Installs the Escape/Return forwarder on a native control (see NavKeyFilter).
+void shim_widget_set_nav_key_cb(void* w, shim_nav_key_cb_t cb, void* ud)
+{
+    auto* widget = static_cast<QWidget*>(w);
+    widget->installEventFilter(new NavKeyFilter(widget, cb, ud));
 }
 
 // Enables/disables accepting dropped files on a top-level window (cb null = off).
