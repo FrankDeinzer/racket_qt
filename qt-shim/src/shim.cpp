@@ -267,13 +267,23 @@ protected:
 
     // ---- keyboard -------------------------------------------------------
 
+    static void debugKey(const char* what, QKeyEvent* e) {
+        if (!plt_qt_debug()) return;
+        fprintf(stderr, "[PLT_QT_DEBUG] %s key=0x%x text=[", what, (unsigned)e->key());
+        for (QChar c : e->text()) fprintf(stderr, "%x ", (unsigned)c.unicode());
+        fprintf(stderr, "] mods=0x%x nativeVK=0x%x nativeScan=0x%x autorep=%d\n",
+                (unsigned)e->modifiers().toInt(), (unsigned)e->nativeVirtualKey(),
+                (unsigned)e->nativeScanCode(), (int)e->isAutoRepeat());
+    }
     void keyPressEvent(QKeyEvent* e) override {
+        debugKey("press", e);
         if (key_cb) {
             int tc = e->text().isEmpty() ? 0 : (int)e->text().at(0).unicode();
             key_cb(key_ud, 0, e->key(), tc, encodeMods(e->modifiers()));
         }
     }
     void keyReleaseEvent(QKeyEvent* e) override {
+        debugKey("release", e);
         if (key_cb) {
             int tc = e->text().isEmpty() ? 0 : (int)e->text().at(0).unicode();
             key_cb(key_ud, 1, e->key(), tc, encodeMods(e->modifiers()));
@@ -284,10 +294,18 @@ protected:
 
     void focusInEvent(QFocusEvent* e) override {
         QWidget::focusInEvent(e);
+        if (plt_qt_debug()) fprintf(stderr, "[PLT_QT_DEBUG] focusIn reason=%d\n", (int)e->reason());
+        // A popup (menu-bar dropdown, context menu, choice/combo list) taking
+        // and returning focus is not a focus change as far as Racket is
+        // concerned (gtk never reports it; Block D §1.2).  Skip both edges so
+        // on-set-focus / on-kill-focus stay balanced.
+        if (e->reason() == Qt::PopupFocusReason) return;
         if (focus_cb) focus_cb(focus_ud, 1);
     }
     void focusOutEvent(QFocusEvent* e) override {
         QWidget::focusOutEvent(e);
+        if (plt_qt_debug()) fprintf(stderr, "[PLT_QT_DEBUG] focusOut reason=%d\n", (int)e->reason());
+        if (e->reason() == Qt::PopupFocusReason) return;
         if (focus_cb) focus_cb(focus_ud, 0);
     }
 };
