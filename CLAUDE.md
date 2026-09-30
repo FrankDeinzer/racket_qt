@@ -208,6 +208,13 @@ Aufgabe:
 > Bits der Key-`mods` (`<< 8`, Linux). Windows: `min`/`max` und `X11`-Includes sind
 > `#ifdef __linux__`-geschützt; kein Build-Fix erwartet. Details/Validierungsliste:
 > `docs/2026-09-30_report-linux.md`, `docs/HACKING.md` §64.
+> **Nachtrag aus dem freien Test (gleicher Stand, nur Linux gebaut):** ein weiterer tolerant
+> gebundener Export `shim_widget_set_nav_key_cb` (Escape/Return aus nativen Steuerelementen,
+> `NavKeyFilter`); ABI-neutrale Änderungen nur nach Rebuild wirksam: Panels starten 0×0
+> (`shim_panel_create`), `PLT_QT_DEBUG`-Mausfilter. Reiner Racket-Code: `tab-panel.rkt`
+> (Chrome-Höhe seeden), `panel.rkt` (Null-Größe anwenden), `window.rkt`/Steuerelement-Klassen
+> (`qt-forward-nav-keys!`). Windows: X11-`#undef KeyPress/KeyRelease` steht im
+> `#ifdef __linux__`-Block. Befunde/Triage: `docs/HACKING.md` §64.5.
 
 **Windows:**
 ```powershell

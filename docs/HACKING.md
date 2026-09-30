@@ -8382,3 +8382,16 @@ Beide FFI-Bindungen sind mit Fail-Thunk tolerant gegenüber einem alten Shim. **
 Weg:** `(_or-null _drop_cb_t)` bricht mit `cast`-Kontraktfehler ab und tötete DrRacket-Start
 unter Qt (Smoke sah es nicht, die Eingabe-Matrix schon) → `tests/smoke.rkt` deckt jetzt
 `accept-drop-files`/`focus` ab. `combo-field%` (§2.6): nicht in diesem Block, Größen-Gate.
+
+### 64.5 Freier Test des Nutzers (Linux, 2026-09-30) — Befunde und Triage
+
+| # | Symptom | Triage | Fix |
+|---|---|---|---|
+| 3 | „Tab hat keine Wirkung" im Editor | kein Fehler: Tab reindentiert nur, bei korrekter Einrückung ändert sich nichts (Matrix `tab-reindent` grün, Qt == gtk) | – |
+| 4 | Escape/Enter ohne Wirkung in Preferences/„Choose Language" | echter Bug (Nativ-Gegenprobe: gtk schließt/bestätigt): Tasten aus nativen Steuerelementen (Liste, Check-Box, Radio, Slider, Choice, Button) erreichten Racket nie, nur `canvas%` hatte einen Key-Callback | `NavKeyFilter` (Shim) + `window%::qt-forward-nav-keys!`: Escape/Return werden als `key-event%` an `dispatch-on-char` gepostet (Regel 2), nie konsumiert; Return auf `QPushButton` bleibt beim Button (`autoDefault`). Probe: `examples/dialog-keys-probe.rkt`, `tests/dialog-nav-keys.sh` |
+| 6 | „Wo ist Multi-File-Search?" | Menüpunkt „Search in Files…" (`mfs-multi-file-search-menu-item`); das Dialogfeld nutzt `combo-field%` → Dropdown-Pfeil fehlt noch (§2.6, eigener Block) | – |
+| 7a | Keine Tab-Leiste bei zwei Dateien | echter Bug: `tab-panel%` mit `'deleted` meldete Höhe 0 (Qt 500×0, gtk 500×37; latentes 0-Klemm-Muster wie `group-panel%` vor §61.1) | Chrome-Höhe nach Konstruktion seeden (`tab-panel.rkt`). Probe: `examples/tab-bar-deleted-probe.rkt` |
+| 7b | Datei-Dropdown links (Dateiname) öffnet sich nicht | echter Bug: ein nie positioniertes `panel%` (`QFrame`) behielt Qts Standardgröße 100×30 bei (0,0) und überdeckte das Dropdown unsichtbar (app-weiter `PLT_QT_DEBUG`-Mausfilter zeigte den Empfänger). `set-size` ignorierte Größe 0 | Panels starten 0×0, Null-Größen werden angewendet (`panel.rkt`, `shim_panel_create`). Proben: `examples/name-message-probe.rkt`, `yield-paint-probe.rkt` (Mechanismus `refresh`+`yield` intakt) |
+| 9 | Mindestgröße | sinnvoll, kein Fehler | – |
+
+**Methodik-Lehre (für künftige Automatisierung):** `xdotool key` geht an das *aktive* Fenster. Ein Escape, das mangels aktivem Testfenster im Claude-Terminal landete, brach mehrfach Tool-Aufrufe ab (angezeigt als „abgelehnt", ohne dass eine Abfrage erschien). Skripte senden Tasten nur noch nach Prüfung `xdotool getactivewindow == $W`; Proben werden per `( exec racket … ) &` gestartet, damit `kill $PID` den richtigen Prozess trifft (Überbleibsel-Fenster hatten Klicks abgefangen). Neues Debug-Werkzeug: `PLT_QT_DEBUG=1` loggt jetzt Key-/Fokus-/Maus-Press-Empfänger.

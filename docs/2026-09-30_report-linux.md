@@ -126,3 +126,15 @@ Es gab **keine** Suite-A-Basislinie vor den Änderungen (Phase 0 hat nur Smoke/s
 - **Suite A** (Sonnet-Subagent, nach den letzten Shim-Änderungen): clipboard, menu-demand, is-shown, resize-reflow, live-resize, minsize-resize, scroll, panel-scroll, canvas-panel, deleted-style (Qt+nativ), crash-b-teardown (Accept+Cancel), enable-cascade — alle PASS; zusätzlich dialog-widgets, group-panel, tab-panel, value-widgets, widget, list-box-sizehint, multi-column-list-box, htdp-bigbang — alle PASS.
 - **`test-dock-size`** (F5 → zweite Datei per Ctrl+O → F5, n=3, frischer DrRacket je Lauf): 3/3 crashfrei, zwei Tabs per Tabs-Menü/Ctrl+1/2 belegt, stderr leer.
 - Ungeprüft/auffällig, kein FAIL: (a) im Qt-DrRacket war bei zwei Tabs keine Tab-Leiste sichtbar, nur das Tabs-Menü — **nicht gegen nativ verglichen**, ob ein Altbefund oder eine Regression; im freien Test ansehen. (b) `menu-demand-probe` meldet „demand-callback already fired" bei Verdikt PASS (vermutlich der proaktive Refresh aus §60.2). (c) `put-file` lieferte `cb_out` statt getipptem `cb_out.txt` (Qt-Filter oder Tipp-Artefakt, ungeklärt).
+
+## Phase 4 — Freier Test des Nutzers (Linux)
+
+Gemeldet und durch die Triage-Regel gelaufen (Details: `docs/HACKING.md` §64.5):
+- Schritte 1/2/5/9 ok. Schritt 3 „Tab ohne Wirkung": kein Fehler (Reindent ändert korrekt eingerückte Zeilen nicht).
+- **Escape/Enter in Dialogen** (Preferences, Choose Language): echter Bug, gefixt (Nativ-Gegenprobe gtk: schließt/bestätigt). Test: `tests/dialog-nav-keys.sh` (Qt == gtk, 4/4).
+- **Tab-Leiste fehlt bei zwei Dateien**: echter Bug (0-Höhe), gefixt, im echten DrRacket per Screenshot bestätigt.
+- **Datei-Dropdown öffnet nicht**: echter Bug (unpositioniertes 100×30-Panel überdeckt das Widget), gefixt; im echten DrRacket öffnet sich das Pfad-Menü wie nativ.
+- Drag&Drop aufs Fenster lädt die zweite Datei (Nutzer bestätigt) — damit 2.3 live verifiziert.
+- Multi-File-Search: Menüpunkt „Search in Files…"; das Dropdown im Dialog ist der offene `combo-field%`-Pfeil (2.6).
+- Die Optik der Tab-Leiste weicht ab (volle Breite je Tab, ohne Schließen-Kreuz/Plus-Knopf); nur ein Stilunterschied, nicht angeglichen.
+- Methodik-Fund: `xdotool key` ins aktive Fenster → stray Escape im Claude-Terminal brach Tool-Aufrufe ab; Skripte prüfen jetzt das aktive Fenster.
