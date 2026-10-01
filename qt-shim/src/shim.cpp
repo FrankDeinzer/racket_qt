@@ -593,6 +593,22 @@ void shim_window_set_title(void* win, const char* title)
         QString::fromUtf8(title));
 }
 
+// frame% style flags that need native window flags; call before the first show.
+// bit0 = 'no-caption (frameless), bit1 = 'float (tool window above its parent that
+// never takes focus -- gtk uses a GTK_WINDOW_POPUP, DrRacket's tooltip frame is
+// '(no-caption float no-resize-border)).
+void shim_window_set_style_flags(void* win, int flags)
+{
+    auto* rw = static_cast<RacketWindow*>(win);
+    Qt::WindowFlags f = rw->windowFlags();
+    if (flags & 1) f |= Qt::FramelessWindowHint;
+    if (flags & 2) {
+        f |= Qt::Tool | Qt::WindowStaysOnTopHint | Qt::WindowDoesNotAcceptFocus;
+        rw->setAttribute(Qt::WA_ShowWithoutActivating, true);
+    }
+    rw->setWindowFlags(f);
+}
+
 void shim_window_set_size(void* win, int w, int h)
 {
     static_cast<RacketWindow*>(win)->resize(w, h);
@@ -749,6 +765,12 @@ int shim_window_is_fullscreen(void* win)
 void shim_widget_set_geometry(void* widget, int x, int y, int w, int h)
 {
     static_cast<QWidget*>(widget)->setGeometry(x, y, w, h);
+}
+
+// canvas% 'no-focus: the widget never takes keyboard focus (policy 0 = Qt::NoFocus).
+void shim_widget_set_no_focus(void* widget)
+{
+    static_cast<QWidget*>(widget)->setFocusPolicy(Qt::NoFocus);
 }
 
 // Gives keyboard focus to a widget (called by editor-canvas% grab-caret).
