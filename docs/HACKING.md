@@ -8395,3 +8395,14 @@ unter Qt (Smoke sah es nicht, die Eingabe-Matrix schon) → `tests/smoke.rkt` de
 | 9 | Mindestgröße | sinnvoll, kein Fehler | – |
 
 **Methodik-Lehre (für künftige Automatisierung):** `xdotool key` geht an das *aktive* Fenster. Ein Escape, das mangels aktivem Testfenster im Claude-Terminal landete, brach mehrfach Tool-Aufrufe ab (angezeigt als „abgelehnt", ohne dass eine Abfrage erschien). Skripte senden Tasten nur noch nach Prüfung `xdotool getactivewindow == $W`; Proben werden per `( exec racket … ) &` gestartet, damit `kill $PID` den richtigen Prozess trifft (Überbleibsel-Fenster hatten Klicks abgefangen). Neues Debug-Werkzeug: `PLT_QT_DEBUG=1` loggt jetzt Key-/Fokus-/Maus-Press-Empfänger.
+
+### 64.6 `combo-field%`-Dropdown (Backlog aus Block D, 2026-10-01, Linux)
+
+Reiner Racket-Fix in `wx/qt/canvas.rkt`, **keine ABI-Änderung** (kein Shim-Rebuild nötig). Vorbild gtk: Pfeil liegt *außerhalb* des Client-Bereichs des Editor-Canvas; `wxtextfield.rkt`s `pre-on-event` öffnet das Popup bei Button-Down mit `x > client-width`. Umsetzung:
+
+- Pfeil-Streifen = rechte 18 px des Canvas-Widgets (nur Stil `'combo`). `get-client-size` zieht ihn ab; `qt-dc%` malt den Pfeil beim Flush in den Streifen (`paint-combo-strip!`, ARGB-Puffer, nach Höhe gecacht).
+- **Bewusst kein Kind-Widget (`QPushButton`):** es käme in die Tab-Kette, stünde mit `setAutoDefault(true)` (Block D) in Konkurrenz zum Default-Button des Dialogs (Return), und der Shim hat keinen Focus-Policy-Export.
+- `append-combo-item`/`clear-combo-items`/`popup-combo`: ein `QMenu` pro Canvas (`shim_menu_create`/`shim_action_create`/`shim_menu_remove_action`/`shim_menu_popup`), Popup an der linken unteren Canvas-Ecke (`client-to-screen`). Action-Callbacks bleiben in einem Feld erreichbar (GC-Regel §59.1) und posten nur (`qt-queue-window-event`, Regel 2). Index = 0-basierte Append-Reihenfolge; gtks `"..."`-Platzhalter wird nicht nachgebaut (würde `wxtextfield`s `(- len i 1)`-Mapping verschieben). `append-combo-item` liefert `#t`. Restleck: abgehängte `QAction`s bleiben allokiert (kein Shim-Delete).
+- `set-combo-text` bleibt No-op (gtk ebenfalls); Allowlist-Einträge für die drei anderen Methoden entfernt, `tests/stub-audit.rkt` 9/9.
+- Probe: `examples/combo-field-probe.rkt`. Verifiziert (Linux/Qt): Pfeil sichtbar, Klick öffnet Menü mit 3 Einträgen (`PLT_QT_DEBUG`-Popup-Log), Auswahl „beta" landet im Feld; Smoke 4/4, `key-map` 56/56.
+- **Nicht geprüft:** gtk-Gegenprobe der Probe, echtes DrRacket „Search in Files…" (Tab/Return im Dialog), Windows/macOS (HiDPI: Streifenbreite ist unskaliert).
