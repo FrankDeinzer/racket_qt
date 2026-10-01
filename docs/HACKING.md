@@ -8525,3 +8525,38 @@ DrRackets Preferences (und Autosave-Tabellen) liegen unter `$XDG_CONFIG_HOME/rac
 ### 66.3 Nicht erreicht / offen
 
 Nicht geprüft: Replace All (nur „Replace" ausgeführt), Save As, Autosave-Wiederherstellung, Fensterposition-Wiederherstellung (`get-x`/`get-y`), 2htdp mit `universe`-Netzwerk, Stepper-Schritte (nur Start/Navigationsleiste aufgenommen). Offen (kosmetisch): breitere Buttons (Find-Leiste), schmalere Debug-Seitenleiste, Tab-[x] auf aktivem Tab auffälliger. `message%` `set-color` bleibt Stub (backlog). Validierung auf Windows/macOS steht aus (Rebuild nötig für 66.2e/f; Rest reiner Racket-Code).
+
+## §67 — Funktions-Sweeps Teil 2 (Linux, 2026-10-01): Replace All, Save As, Autosave, Fensterposition, Stepper, OCR
+
+Neue Skripte (Muster §66): `tests/sweep/func-replaceall.sh`, `func-saveas.sh`, `func-autosave.sh`, `func-winpos.sh`, `func-stepper.sh`; `func-run.sh` prüft jetzt zusätzlich per OCR (`ocr_check`, tesseract, nur als zusätzliche Evidenz). `func-lib.sh`: `KEEP_ENV=1 start_dr` (gleiche Preferences für den Neustart), `kill_dr` (SIGKILL eigene PID), `stop_dr` eskaliert nach 5 s auf SIGKILL (modaler Dialog schluckt SIGTERM), `listwins`, `fullshot`.
+
+### 67.1 Ergebnis je Szene
+
+| Szene | Ergebnis |
+|---|---|
+| Replace All (`func-replaceall.sh`, Edit-Menü per Klick; kein Shortcut) | identisch: 6× foo → qux auf Platte, Titel `*`, Ctrl+Z = ein Undo-Schritt (foo 6/qux 0). Einmal (n=1 von 3) fehlte in Qt das rosa Suchfeld bei „0 Matches"; 2 Wiederholungen + isolierte Probe (`examples/canvas-onpaint-pink-probe.rkt`, `set-red`-Muster mit `refresh`) zeigen Rosa korrekt → nicht reproduziert, als seltene Repaint-Race notiert |
+| Save As (`func-saveas.sh`) | identisch: neue Datei mit Marker, Original unverändert, Titel = neuer Name, weiteres Ctrl+S geht in die neue Datei, Überschreiben-Rückfrage erscheint. Unterschied nur Dialog-Theme (gtk-nativ „Replace/Cancel" im Dialog, Qt-Widget-Dialog „Yes/No") |
+| Autosave (`func-autosave.sh`, frisches XDG/PLTADDONDIR, SIGKILL, Neustart mit denselben Prefs) | identisch: `#one.rkt#1#` nach ≤ 30 s mit Marker, Original unverändert, beim Neustart „Recover Files" (Original/Backup nebeneinander), „Recover" schreibt die Datei, „Done" öffnet das Hauptfenster. Kosmetik: Qt-Fenster 571 statt 591 hoch, „Delete" fokussiert. gtk zeigte bei einem Lauf das Recover-Fenster erst nach > 40 s (Startverzögerung, nicht reproduziert) |
+| Fensterposition/-größe (`func-winpos.sh`) | **Abweichung, echter Qt-Bug, gefixt** (67.2) |
+| Macro-Stepper-Schritte (`func-stepper.sh`) | Step ×3, Previous ×2, End, Start: Inhalt pro Schritt in Qt == gtk (visueller Vergleich der 8 Seite-an-Seite-Aufnahmen; OCR liest nur Toolbar-Beschriftung, hier inkonklusiv). Der erste Klick auf den Macro-Stepper-Knopf wurde bei gtk einmal nicht ausgeführt (Automatisierung, Skript wiederholt) |
+| REPL-Inhalt per OCR (`func-run.sh`) | `144`, `hello`, `err-output`, `(1 2 3)`, Eingabe `(f 3)`/`9`/`string-append`, `Welcome to`: in beiden Modi gefunden |
+
+### 67.2 Fensterposition: Ursachen und Fixes
+
+Messung (`examples/frame-position-probe.rkt`, `xdotool windowmove`): Qt feuerte **nie `on-move`**, `get-x`/`get-y` blieben der Cache des Konstruktors, DrRacket speicherte `drracket:window-position` nie (Default `(0 0 0)`), und der Konstruktor übergab `x`/`y` nur an den Cache (das WM platzierte). Dazu war `display-size` (`frame.rkt`) hartcodiert **1920×1080** (reale Bildschirmgröße hier 1518×998): `position-for-initial-show`/Klemmung und die Monitor-Information der Prefs `(((0 0 1920 1080)))` waren falsch.
+
+Fixes: (a) Shim (alle tolerant): `shim_window_set_move_cb` (`RacketWindow::moveEvent`, nur Posten, Regel 2), `shim_window_get_pos` (Client-Ursprung), `shim_screen_count`/`shim_screen_geometry`. (b) `frame.rkt`: Move-Callback → `remember-position` → `queue-on-size` (wxwindow vergleicht `get-x`/`get-y` und ruft `on-move`), live `get-x`/`get-y`, `move` ruft zusätzlich `queue-on-size` (gtk: `move` → `set-size` → `queue-on-size`), echte Anfangsposition im Konstruktor (**gegatet auf den neuen Shim**, sonst pinnte der Default `(0 0 0)` mit altem Binary jedes Fenster auf Client-(0,0)), `display-size/-origin/-count` aus dem Shim (alter Shim: alte Stub-Werte). Ergebnis: Qt kommt exakt zurück (gesetzt 200/150, wiederhergestellt 200/150, Startposition jetzt 0,28 wie gtk statt mittig).
+
+**gtk driftet, Qt nicht — Ursache = WM-Gravity, kein Qt-Code:** `xprop WM_NORMAL_HINTS` am Probe-Fenster: gtk `window gravity: NorthWest` (Position = Rahmen-Ursprung), Qt `Static` (Position = Client-Ursprung); `_NET_FRAME_EXTENTS` beider `0, 0, 28, 0`. gtks `move(300,200)` setzt den Rahmen, `get-y` meldet den Client (`on-move 300 228`) ⇒ +28 px bei jedem Neustart (gesetzt 178, wiederhergestellt 206). Qt bleibt konsistent, weil `move` und `get-x` beide den Client-Ursprung benutzen. Daher gleicher `xdotool windowmove 200 150` ⇒ gtk-Client y=178, Qt-Client y=150.
+
+### 67.3 `message%` `set-color`/`get-color`
+
+Neuer tolerant gebundener Export `shim_label_set_color` (`QPalette::WindowText` des `QLabel`; `use=0` setzt die Standardpalette). `message.rkt` wie `gtk/message.rkt`: nur bei Text-Label, `get-color` gibt die gesetzte Farbe, `#f` = Standard; Init-Argument `color` wirkt. Probe `examples/message-color-probe.rkt` (Pixelzählung rot/blau/grün gtk 252/111/0, Qt 180/165/0). Zwei `stub-audit`-Allowlist-Einträge (`set-color`, `get-color`) entfernt.
+
+### 67.4 Methodenvorfall
+
+Ein zu breiter `findwin`-Regex (`^(…|Racket|…)`, xdotool-Suche ist case-insensitiv) lieferte das Konsole-Fenster („racket_qt : claude — Konsole"); `key` aktivierte es, die Aktiv-Prüfung bestand (Ziel == aktiv), Escape ging ins Terminal (gleiche Klasse wie die Memory-Notiz vom 2026-09-30). Gegenmaßnahmen: `findwin` filtert `*Konsole*`, `key`/`typ`/`click` verweigern Terminal-Ziele. Zweiter Fund: ein offener modaler Dialog (gtk „Replace?") schluckt SIGTERM, `stop_dr` hing — jetzt SIGKILL-Eskalation (nur eigene PID).
+
+### 67.5 Offen / nicht erreicht
+
+Windows/macOS: Pull, Rebuild (fünf neue tolerante Exporte), Validierung — insbesondere Client- vs. Rahmen-Ursprung (`get-x`/`move`) und `display-size`. `center` ist in Qt (und gtk) ein No-op (Dialoge nicht zentriert, WM entscheidet). Nicht bearbeitet (bewusst): `on-activate`-Shim-Ereignis, Kosmetik (Find-Leiste/Debug-Seitenleiste), `universe`-Netzwerk. Rosa-Suchfeld-Race (n=1) ungeklärt.

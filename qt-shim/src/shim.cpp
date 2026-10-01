@@ -435,6 +435,9 @@ public:
     // drops those early events instead of posting into a half-built object.
     shim_resize_cb_t resize_cb = nullptr;
     void*            resize_ud = nullptr;
+    // Wired via shim_window_set_move_cb: frame position changed (user drag, WM placement, our own move).
+    shim_resize_cb_t move_cb = nullptr;
+    void*            move_ud = nullptr;
     // Wired via shim_window_set_drop_cb (drag-accept-files #t); null = not accepting.
     shim_drop_cb_t   drop_cb = nullptr;
     void*            drop_ud = nullptr;
@@ -452,6 +455,14 @@ protected:
     void closeEvent(QCloseEvent* e) override {
         e->ignore();
         if (close_cb) close_cb(close_ud);
+    }
+
+    // Position of the client area in screen coordinates (gtk_window_get_position semantics, and the
+    // same origin shim_widget_set_geometry moves -- so get-x/move round-trip without drifting by the
+    // title-bar height).  The callback only posts (Regel 2).  Mirrors gtk's configure-event -> on-move.
+    void moveEvent(QMoveEvent* e) override {
+        QMainWindow::moveEvent(e);
+        if (move_cb) move_cb(move_ud, geometry().x(), geometry().y());
     }
 
     // File drag & drop (window%::drag-accept-files, Block D §2.3).  Only local
@@ -622,6 +633,23 @@ void shim_window_set_resize_cb(void* win, shim_resize_cb_t cb, void* ud)
     auto* rw = static_cast<RacketWindow*>(win);
     rw->resize_cb = cb;
     rw->resize_ud = ud;
+}
+
+// Wires the native move notification (client-area position, screen coordinates).
+void shim_window_set_move_cb(void* win, shim_resize_cb_t cb, void* ud)
+{
+    auto* rw = static_cast<RacketWindow*>(win);
+    rw->move_cb = cb;
+    rw->move_ud = ud;
+}
+
+// Current client-area position (screen coordinates) -> out[0]=x, out[1]=y.  Returns 1.
+int shim_window_get_pos(void* win, int* out)
+{
+    auto* rw = static_cast<RacketWindow*>(win);
+    out[0] = rw->geometry().x();
+    out[1] = rw->geometry().y();
+    return 1;
 }
 
 // Installs the Escape/Return forwarder on a native control (see NavKeyFilter).
@@ -1338,6 +1366,22 @@ void shim_menu_debug_dump(void* menu)
             (int)acts[i]->isChecked());
 }
 
+// Screens (display-size / display-origin / display-count).  Index 0 = primary.  out[0..3] = x, y, w, h of
+// the full screen geometry (logical pixels).  shim_screen_geometry returns 1 on success, 0 for a bad index.
+int shim_screen_count()
+{
+    return (int)QGuiApplication::screens().size();
+}
+
+int shim_screen_geometry(int num, int* out)
+{
+    const QList<QScreen*> scr = QGuiApplication::screens();
+    if (num < 0 || num >= scr.size()) return 0;
+    const QRect g = scr[num]->geometry();
+    out[0] = g.x(); out[1] = g.y(); out[2] = g.width(); out[3] = g.height();
+    return 1;
+}
+
 void shim_menu_popup(void* menu, int x, int y)
 {
     auto* m = static_cast<QMenu*>(menu);
@@ -1444,6 +1488,18 @@ int shim_label_set_pixmap(void* label_ptr, const uint8_t* src, int w, int h)
     }
     lbl->setText(QString());
     lbl->setPixmap(QPixmap::fromImage(img));
+    return 1;
+}
+
+// message%.set-color: foreground (WindowText) colour of a text label; use=0 restores the default
+// palette (message% with colour #f).  Returns 1.
+int shim_label_set_color(void* label_ptr, int use, int r, int g, int b, int a)
+{
+    auto* lbl = static_cast<QLabel*>(label_ptr);
+    if (!use) { lbl->setPalette(QPalette()); return 1; }
+    QPalette pal = lbl->palette();
+    pal.setColor(QPalette::WindowText, QColor(r, g, b, a));
+    lbl->setPalette(pal);
     return 1;
 }
 

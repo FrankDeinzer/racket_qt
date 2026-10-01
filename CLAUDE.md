@@ -244,6 +244,23 @@ Aufgabe:
 > (DrRackets Save-Knopf blieb sichtbar), `frame%` `set-modified` (Titel „…*"), `on-activate` über
 > Kind-Fokus (Check-Syntax-Tooltips), `frame%` `move` echt (Tooltip-Position, via
 > `shim_widget_set_geometry` auf dem Top-Level). Funktions-Sweeps: `tests/sweep/func-*.sh`.
+>
+> **Shim-ABI-Stand seit 2026-10-01 (Funktions-Sweeps Teil 2, §67) — nur Linux gebaut+validiert, Windows/macOS
+> offen: Rebuild nötig, sonst fehlen die Features (kein Startfehler).** Fünf neue, **tolerant** gebundene
+> Exporte (`get-ffi-obj` mit Fail-Thunk, ein altes Binary startet weiter): `shim_label_set_color`
+> (`message%` `set-color`/`get-color`, QPalette), `shim_window_set_move_cb` + `shim_window_get_pos`
+> (`frame%` `on-move`, live `get-x`/`get-y`; Position = Ursprung des Client-Bereichs wie
+> `shim_widget_set_geometry`), `shim_screen_count` + `shim_screen_geometry` (`display-size`/`-origin`/
+> `-count` waren hartcodiert 1920×1080 — setzt Mitte/Klemmung beim ersten Anzeigen und die Monitor-
+> Information in DrRackets Fensterpositions-Prefs falsch). Mit altem Binary: `display-*` bleiben auf den
+> alten Stub-Werten, kein `on-move`, `get-x`/`get-y` gecacht, und die neue **Anfangsposition im
+> `frame%`-Konstruktor ist auf `shim_window_get_pos` = 1 gegatet** (sonst würde der Default `(0 0 0)` jedes
+> Fenster auf Client-(0,0) pinnen). Reiner Racket-Code (ohne Rebuild wirksam): `frame%` `move` meldet
+> sich selbst über `queue-on-size` (`on-move` wie gtk). **Windows/macOS-Prüfpunkt nach Rebuild:** bei
+> frischen Preferences liegt die Titelleiste des ersten DrRacket-Fensters sichtbar auf dem Bildschirm
+> (Client- vs. Rahmen-Ursprung dort ungeprüft), und ein verschobenes/verkleinertes Fenster kommt nach
+> Ctrl+Q/Neustart an derselben Stelle zurück. Funktions-Sweeps neu: `func-replaceall|saveas|autosave|
+> winpos|stepper.sh`.
 
 **Windows:**
 ```powershell
@@ -490,6 +507,14 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
   (daher keine Check-Syntax-Tooltips), `frame%` `move` war No-op (Tooltip an falscher Stelle), Bitmap-Label-Knöpfe zeigten
   „Button", `message%` ohne Symbol-/Bitmap-Icon. Wichtigster Methodenfund: **Preferences liegen unter `$XDG_CONFIG_HOME/racket`,
   nicht unter `PLTADDONDIR`** — gtk-Lauf hatte den Qt-Lauf bisher beeinflusst. Windows/macOS: Pull, Shim-Rebuild, Validierung offen.
+
+- **Funktions-Sweeps Teil 2 (2026-10-01, Linux, §67):** Replace All, Save As, Autosave-Wiederherstellung (kontrollierter SIGKILL,
+  gleiches Preferences-Verzeichnis), Macro-Stepper-Einzelschritte (8 Schritte vor/zurück/Start/End) und OCR-gestützte REPL-Prüfung:
+  Qt == gtk. Fensterposition: **echter Qt-Bug, gefixt** — `on-move` feuerte nie (DrRacket speicherte die Position nie), `get-x`/`get-y`
+  waren Cache, der Konstruktor platzierte nie, und `display-size` war hartcodiert 1920×1080 (reale 1518×998). `message%`
+  `set-color`/`get-color` real (`shim_label_set_color`). gtk driftet bei Restore um die Titelleistenhöhe (WM-Gravity NorthWest, `move` =
+  Rahmen, `get-y` = Client) — kein Qt-Befund. Methodenvorfall: ein zu breiter `findwin`-Regex lieferte das Konsole-Fenster, `key`
+  schickte Escape ins Terminal; `key`/`typ`/`click` verweigern jetzt Terminal-Ziele. Windows/macOS: Pull, Rebuild, Validierung offen.
 
 - **API-Oberflächen-Audit** (`tests/api-audit.rkt`, §65) — ✅ 2026-10-01, Linux. Dritte statische Audit-Klasse; 16 relevante Funde, 6 echte Lücken gefixt (u. a. `frame%` `destroy` — jeder Eventspace-Shutdown mit offenem Fenster, z. B. DrRackets Stop, warf `no such method`; `set-label-top`, `canvas%` `scroll`, `get-client-handle`, `wheel-event-mode`), 9 `harmless`, 1 `backlog` (`warp-pointer`, bräuchte neuen Shim-Export). Reiner Racket-Code, keine ABI-Änderung, kein Rebuild. Probe: `examples/api-audit-probe.rkt`. Windows/macOS: Pull + Audit + Probe offen.
 

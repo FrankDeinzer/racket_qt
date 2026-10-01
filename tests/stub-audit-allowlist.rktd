@@ -61,8 +61,6 @@
 
  ;; ---- backlog: bereits bekannte, offene Gaps ----
  (set-icon ("frame.rkt") backlog "frame.rkt: Dock/Taskbar-Icon eines Fensters lässt sich nie setzen (§60.7).")
- (set-color ("message.rkt") backlog "message.rkt: wirkungslos (§60.7).")
- (get-color ("message.rkt") backlog "message.rkt: lügt mit hartem #f (§60.7).")
  (get-label-position ("panel.rkt") backlog "panel.rkt: immer 'horizontal, win32/gtk/cocoa führen echten Zustand (§60.7).")
  (set-label-position ("panel.rkt") backlog "panel.rkt: wirkungslos, win32/gtk/cocoa führen echten Zustand (§60.7).")
  (adopt-child ("panel.rkt") backlog "panel.rkt: reparented nie wirklich, win32/gtk tun es über set-parent (§60.7).")
