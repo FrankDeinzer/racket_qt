@@ -8455,3 +8455,34 @@ Befunde und Status:
 ### 64.11 Package-Manager-Szene (`sweep.sh pkg-manager`, `pkg-tabs.sh`)
 
 `tests/sweep/pkg-manager.args` (`-l- pkg/gui`, Startseite „Do What I Mean") und `tests/sweep/pkg-tabs.sh` (die vier weiteren Tabs per Mausklick auf die Beschriftung, Koordinaten pro Toolkit; Catalog-Tab bekommt 10 s zum Nachladen). Ausgabe `out/pkgtab-<n>-{gtk,qt,side}.png`. Ergebnis (2026-10-01, Linux): **alle fünf Seiten gleichwertig**, kein neuer Befund — Currently Installed (213 Pakete, Mehrspaltenliste mit Kopfzeile; Qt zeigt die Spalten sogar lesbarer als gtk, das `Scope`/`Checksum` abschneidet), Available from Catalog (361 Pakete, Qt mit horizontaler Scrollleiste statt abgeschnittener Spalten), Copy from Version, Settings. Fenstergröße identisch (800×600). Damit ist auch der Mehrspaltenpfad (§60.6) unter dem neuen Stand erneut visuell bestätigt.
+
+## §65 — API-Oberflächen-Audit (Linux, 2026-10-01): Methoden, die Qt gar nicht hat
+
+### 65.1 `tests/api-audit.rkt` (dritte statische Audit-Klasse)
+
+Warum: `stub-audit` (§60.9) sieht leere Stubs, `style-audit` (§64.8) ungelesene Style-Flags — beide setzen voraus, dass die Qt-Klasse die Methode *hat*. Fehlt sie ganz, fällt es erst zur Laufzeit als `send: no such method` auf, und nur auf dem Codepfad, der sie ruft.
+
+Verfahren (reine Textanalyse per `read`, kein `PLT_QT`, kein Shim): pro `wx/qt/F.rkt` mit gleichnamiger Datei in gtk/cocoa/win32 die dort per `define/public|override|augment|…` oder `(public …)`-Klauseln definierten Methoden. „Qt hat M", wenn M (a) in F selbst oder (b) in einer transitiv referenzierten Qt-Klasse/einem Mixin (Toplevel-Namen auf `%`/`mixin`/`glue`) definiert ist, oder (c) der Glue-Layer (`mred/private/wx*.rkt`, `wx/common/*.rkt`) M per `public*`/`override*`/`define/public` hinzufügt (Regel 3: dann **keine** Lücke). Die `mr*.rkt`-`public*` gehören zu den mred-Klassen und zählen nicht als Glue. **Relevanzfilter:** gemeldet wird nur, was der gemeinsame Code (`mred/private/*.rkt`, `wx/common/*.rkt`, `mred/*.rkt`) per `(send OBJ M …)`/`send*`/`send/apply` (und auf wx-Ebene `inherit`) aufruft; der Rest (z. B. `get-cocoa-content`, `get-hwnd`, 241 Methoden) ist Plattform-intern des Referenz-Backends. Gate wie bei den anderen Audits; Allowlist `tests/api-audit-allowlist.rktd` (`backlog`/`harmless` + Begründung). Recall-Test: gegen den Stand `d82585ad` (vor den §65-Fixes) findet das Audit `destroy`, `set-label-top`, `scroll`, `get-client-handle`, `get-wheel-steps-mode`. Aufruf: `~/racket/bin/raco test tests/api-audit.rkt`; `racket tests/api-audit.rkt` listet die Funde.
+
+**Grenzen:** Init-Argumente werden *nicht* geprüft (die Glue-Schicht übergibt sie positionell/per `make-object`; ein Namensvergleich der `init`-Klauseln wäre fast nur Rauschen). Aufrufer werden nur per Namen gefunden, nicht per Empfängerklasse — Zufallstreffer (`number`, `reset`, `get-frame`) landen als `harmless` in der Allowlist. Methoden, die ein Backend in einer anderen Datei definiert als Qt (cocoa `flush` in `window.rkt`, Qt in `canvas.rkt`) tauchen als `harmless`-Fund auf. Aufrufe über `apply`/dynamische Namen und Aufrufe von Qt-Dateien untereinander bleiben unsichtbar.
+
+### 65.2 Auswertung
+
+Erster Lauf (nach Relevanzfilter und Glue-Korrektur): **16 Funde** (Methodennamen; ohne Relevanzfilter 251). Davon **6 echte Lücken gefixt** (`destroy`, `get-client-handle`, `get-wheel-steps-mode`, `set-wheel-steps-mode`, `scroll`, `set-label-top`), **9 `harmless`**, **1 `backlog`**. `get-gl-client-size` war auf Canvas ebenfalls eine Lücke (gefixt, nur die win32-`window.rkt`-Variante bleibt als `harmless` in der Allowlist). Ein Zwischenstand meldete zusätzlich `set-parent`; das war ein Zufallstreffer (`inherit` in `mrcontainer.rkt` meint die mred-Methode) und ist seither durch die Beschränkung von `inherit` auf die wx-Ebene verschwunden.
+
+| Methode | Aufrufer | Wirkung der Lücke | Status |
+|---|---|---|---|
+| `frame%` `destroy` | `wx/common/queue.rkt` `shutdown-eventspace!` (für jedes Top-Level-Fenster) | **wichtigster Fund:** jeder Eventspace-Shutdown mit offenem Fenster (DrRackets Run/Stop beendet das Benutzerprogramm per Custodian) endete mit `no such method: destroy` | **gefixt** (`(direct-show #f)` wie gtk/win32/cocoa) |
+| `window%` `get/set-wheel-steps-mode` | `mrwindow.rkt` `wheel-event-mode` | `(send canvas wheel-event-mode)` warf; Canvas hatte nur einen No-op-Stub, den das stub-audit nicht fand | **gefixt** (Feld in `window.rkt`; Mausrad-Callback wertet `'one`/`'integer`/`'fraction` aus) |
+| `window%` `get-client-handle` | `mrwindow.rkt`, `mrtop.rkt` | `get-client-handle` (FFI-Einbettung) warf | **gefixt** (`get-content-hwnd`) |
+| `canvas%` `scroll` | `mrcanvas.rkt` | Brüche 0..1 auf Auto-Scroll-Canvas; warf | **gefixt** (Scrollbar-Wert = `floor(frac·(len−page))`, danach `refresh-for-autoscroll`) |
+| `canvas%` `get-gl-client-size` | `mrcanvas.rkt` | nur für `'gl`-Canvas (die Qt ohnehin nicht kann) | **gefixt** (= `get-scaled-client-size`) |
+| `menu-bar%` `set-label-top` | `mrmenu.rkt` (`menu%` `set-label` nach dem Einhängen) | Menü in der Leiste umbenennen warf | **gefixt** (Menü-Liste in `menu-bar.rkt`, `QMenu::setTitle`) |
+| `window%` `warp-pointer` | `mrwindow.rkt` | Mauszeiger setzen: `no such method`; kein Aufrufer in gui-lib/framework/drracket | `backlog` (bräuchte `QCursor::setPos`, neuer Shim-Export) |
+| `flush`, `get-gl-client-size`, `get-scaled-client-size` (`window.rkt`) | nur Canvas | Qt definiert sie in `canvas.rkt` | `harmless` |
+| `get-event-type`, `get-frame`, `number`, `reset` | Aufrufer meinen andere Objekte | Zufallstreffer | `harmless` |
+| `set-color-callback` (cocoa), `system-menu` (win32) | plattformspezifisch | – | `harmless` |
+
+Keine ABI-Änderung, **kein Rebuild** nötig (reiner Racket-Code). Probe: `examples/api-audit-probe.rkt` (`PLT_QT=1`): Eventspace-Shutdown mit offenem Frame ohne Ausnahme, `menu%` `set-label`, `wheel-event-mode`-Roundtrip, `get-client-handle`, `canvas%` `scroll 0.5 0.5` (View-Start 214/375 bei 1000×1000-Auto-Scroll-Canvas) — alles PASS. **Windows/macOS:** nach dem Pull `raco test tests/api-audit.rkt` laufen lassen und die Probe starten; die Fixes sind plattformneutral.
+
+**Methodik-Lehre:** die erste Version des Audits las Dateien ohne `#lang`-Zeile (`(module …)`) falsch und verschluckte Lesefehler stumm — dadurch fehlte der halbe Glue-Layer und es gab Falsch-Negative. Seither bricht ein Lesefehler den Lauf laut ab. Außerdem zählt `public*` in `mr*.rkt` nicht als Glue (sonst wäre `warp-pointer` fälschlich „abgedeckt").

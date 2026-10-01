@@ -287,6 +287,16 @@ Stub-Audit strukturell nicht sieht (§64.7/§64.8). Allowlist: `tests/style-audi
 (`backlog`/`harmless` mit Begründung; behobene Flags brauchen keinen Eintrag). Reine Textanalyse,
 braucht weder `PLT_QT` noch Shim; ein Recall-Test prüft gegen den Stand vor dem Tab-Fix (`git`).
 
+**API-Oberflächen-Audit (alle drei Plattformen, ebenfalls nach jeder Änderung an `wx/qt/*.rkt`):**
+`~/racket/bin/raco test tests/api-audit.rkt` (macOS: `raco test …`; Windows analog zum Stub-Audit).
+Findet Methoden, die ein Referenz-Backend in der gleichnamigen Datei definiert und die vom gemeinsamen
+Code (`mred/private`, `wx/common`) per `send` aufgerufen werden, die Qt-Klasse aber **gar nicht** hat
+(weder selbst noch geerbt noch per Glue-`public*`) — die Lücken-Klasse, die weder Stub- noch Style-Audit
+sehen (`no such method` erst zur Laufzeit; §65). Allowlist: `tests/api-audit-allowlist.rktd`
+(`backlog`/`harmless` mit Begründung; behobene Methoden brauchen keinen Eintrag). Reine Textanalyse,
+braucht weder `PLT_QT` noch Shim; ein Recall-Test prüft gegen den Stand vor §65 (`git`). Init-Argumente
+werden bewusst nicht geprüft. `racket tests/api-audit.rkt` listet die aktuellen Funde.
+
 **Windows:** `racket` liegt seit der 9.3-Migration (2026-09-11, §24.1) auf dieser
 Maschine **nicht** im Machine- oder User-PATH — immer vollen Pfad verwenden oder
 `$env:PATH` wie unten setzen.
@@ -460,6 +470,8 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
   automatisierbar (Prüfpunkt im freien Test), `other-*-key-code` nur Linux/X11.
 
 - **Freier Test 2 (2026-10-01, Linux, §64.7/§64.8):** (1) Splash-Screen mit grauen Balken — Ursache `frame.rkt`-Fallback 400×300 (wxtops `correct-size` schrumpft dehnbare Panels nie), jetzt 1×1 wie gtk; (2)+(3) Tabs ohne [x] und ohne Drag-Reorder — `tab-panel.rkt` las `'can-close`/`'can-reorder` nie, jetzt echt (`QTabBar`, neuer tolerant gebundener Export). Dazu per neuem **Style-Flag-Audit** (`tests/style-audit.rkt`) gefunden und behoben: `frame%` `'no-caption`/`'float` (Tooltip-Frame war ein normales Fenster), `canvas%` `'no-focus` (ignoriert). Offene Audit-Funde als `backlog`: `'gl`-Canvas, `'border`/`'control-border` (optisch zu prüfen), `'hide-menu-bar`. **Windows/macOS: Rebuild + Validierung offen.** Proben: `examples/splash-width-probe.rkt`, `tab-close-reorder-probe.rkt`, `frame-float-probe.rkt`.
+
+- **API-Oberflächen-Audit** (`tests/api-audit.rkt`, §65) — ✅ 2026-10-01, Linux. Dritte statische Audit-Klasse; 16 relevante Funde, 6 echte Lücken gefixt (u. a. `frame%` `destroy` — jeder Eventspace-Shutdown mit offenem Fenster, z. B. DrRackets Stop, warf `no such method`; `set-label-top`, `canvas%` `scroll`, `get-client-handle`, `wheel-event-mode`), 9 `harmless`, 1 `backlog` (`warp-pointer`, bräuchte neuen Shim-Export). Reiner Racket-Code, keine ABI-Änderung, kein Rebuild. Probe: `examples/api-audit-probe.rkt`. Windows/macOS: Pull + Audit + Probe offen.
 
 ### Reklassifiziert (kein Produktbefund)
 
