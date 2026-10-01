@@ -3,16 +3,14 @@
 ;;   status: backlog = echte Lücke, noch nicht behoben; harmless = betrifft Qt/Linux
 ;;           nicht oder wird anderswo abgedeckt.
 ;; Behobene Flags (fixed) tauchen im Audit nicht mehr auf und brauchen keinen Eintrag:
-;;   can-close, can-reorder (§64.7), no-caption, float, no-focus (§64.8).
+;;   can-close, can-reorder (§64.7), no-caption, float, no-focus (§64.8), border/control-border auf canvas (§64.9).
 ;; Die Datei-Liste muss EXAKT mit dem aktuellen Lauf übereinstimmen (wie bei
 ;; stub-audit-allowlist.rktd) -- ändert sie sich, ist der Eintrag neu zu triagieren.
 
-(border (button.rkt canvas.rkt tab-panel.rkt) backlog
- "button: gtk set-border (Default-Button-Rahmen); canvas: Rahmen um das Widget; tab-panel: nur cocoa. Optisch im Screenshot-Sweep gegen gtk prüfen, bevor behoben wird.")
+(border (button.rkt tab-panel.rkt) harmless
+ "button: gtk set-border (Default-Button); im Screenshot-Sweep (gallery) unter gtk optisch kein Unterschied zu einem normalen Button. tab-panel: nur cocoa. canvas/text-field/editor-canvas: behoben (§64.9).")
 (close-button (frame.rkt) harmless
  "macOS-Titelleistenknopf (cocoa). Qt-Fenster haben unter Linux/Windows immer einen Schließknopf.")
-(control-border (canvas.rkt) backlog
- "gtk/win32/cocoa zeichnen einen Rahmen um Editor-/Text-Canvases ('control-border). Optisch im Screenshot-Sweep prüfen.")
 (deleted (window.rkt) harmless
  "win32 liest 'deleted in der Basisklasse; in Qt behandelt jede Widget-Klasse (canvas/panel/tab-panel/...) 'deleted selbst per no-show?.")
 (enter-packages (filedialog.rkt) harmless "macOS-only (.app-Pakete im Dateidialog).")

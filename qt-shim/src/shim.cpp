@@ -2422,6 +2422,7 @@ void* shim_tab_panel_create(void* parent_widget, shim_callback_t changed_cb, voi
     auto* parent = static_cast<QWidget*>(parent_widget);
     auto* container = new QWidget(parent);
     auto* tabbar = new QTabBar(container);
+    tabbar->setExpanding(false); // compact, left-aligned tabs like gtk (sweep finding)
     auto* content = new QWidget(container);
     tabbar->show();
     content->show();

@@ -8421,3 +8421,17 @@ Drei Befunde des Nutzers, alle gegen das Original (gtk) belegt:
 Warum: §64.7 zeigte eine Lücken-Klasse, die `stub-audit` strukturell nicht sieht — kein leerer Stub, sondern ein **Style-Flag, das niemand liest**. Verfahren: pro `wx/qt/*.rkt` alle in `(memq|member|memv 'SYM …)` gelesenen Symbole; gemeldet wird, was ein Referenz-Backend (gtk/cocoa/win32) in der *gleichnamigen* Datei liest und Qt nicht. Gate wie beim Stub-Audit (neuer Fund ohne Eintrag oder veralteter Eintrag → Fehler); Allowlist `tests/style-audit-allowlist.rktd`. Recall-Test: gegen den Stand `61509bb6` (vor dem Tab-Fix) meldet es `can-close` und `can-reorder`.
 
 Erste Auswertung (22 Funde, davon behoben): `no-caption`, `float` (**DrRackets Tooltip-Frame** `'(no-caption float no-resize-border)` kam unter Qt als normales Fenster — jetzt `shim_window_set_style_flags`, Probe `examples/frame-float-probe.rkt`), `no-focus` (Canvas nahm Fokus — jetzt `shim_widget_set_no_focus`). Rest: macOS-/win32-only (`harmless`) und drei echte Lücken als `backlog`: `'gl`, `'border`/`'control-border` (optisch per Screenshot-Sweep klären), `'hide-menu-bar`. **Grenzen:** sieht nur `memq`-artige Auswertung; Flags in gemeinsamem Code oder per `case`/`eq?` bleiben unsichtbar; ein Fund kann anderswo schon behandelt sein (Triage in der Allowlist).
+
+### 64.9 Screenshot-Sweep (`tests/sweep/`)
+
+Werkzeug: `tests/sweep/sweep.sh <szene> [titel-regex]` startet eine Szene nativ (gtk) und mit `PLT_QT=1`, nimmt den Fenster-Client-Bereich auf (`xdotool` + `spectacle` + Pillow) und schreibt `tests/sweep/out/<szene>-{gtk,qt,side}.png` (`side` = links gtk, rechts Qt). Eine Szene ist `tests/sweep/<szene>.rkt` (Titel `sweep-<szene>`) oder eine `.args`-Datei mit Racket-Kommandozeile (`{HERE}` wird ersetzt, `SETTLE=<s>` verlängert die Wartezeit, z. B. für DrRacket). `out/` ist nicht eingecheckt. Grenzen: Theme-Unterschiede gtk↔Qt (Schrift, Gauge-Dicke, Slider-Wertposition) sind erwartet; gesucht werden fehlende Elemente, Rahmen, Größen, Clipping. Linux/X11 only.
+
+**Szene `gallery`** (alle Widget-Klassen + Style-Flags), erste Auswertung:
+
+| Befund | Ursache | Status |
+|---|---|---|
+| Kein Rahmen um `text-field%`, `combo-field%`, `editor-canvas%`, `canvas%` `'border`/`'control-border` | Qt-Widgets haben keinen eigenen Rahmen; gtk zeichnet bei `has-border?` (`'border` oder `'control-border`) | **behoben**: 1-px-Rahmen in den Backing-Puffer (`qt-dc%` `paint-border!`), reiner Racket-Code |
+| Tabs über die ganze Leiste gestreckt (DrRacket: zwei Tabs je halbe Fensterbreite) | `QTabBar::expanding` ist Qt-Default | **behoben**: `setExpanding(false)` in `shim_tab_panel_create` (ABI-neutral, Shim-Rebuild nötig) |
+| Mehrspaltige `list-box%` deutlich höher als gtk bei gleichem `min-height` | Verteilung des Zusatzplatzes im Panel-Layout; nicht untersucht | offen |
+| Slider-Wert (40) unter statt über dem Regler; Gauge dicker; vertikale Gauge breit | Qt-Stil | Theme, kein Fix geplant |
+| `tab-panel%`-Inhalt ohne Rahmen (gtk: Notebook-Rahmen) | nicht gezeichnet | offen, kosmetisch |
