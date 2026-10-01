@@ -5,6 +5,40 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-10-01 (Linux) — §64.6–§64.11, §65 API-Audit, §66/§67 Funktions-Sweeps
+
+Details: `docs/2026-10-01_report-linux.md`, `-2-linux.md`, `-3-linux.md`, `docs/HACKING.md`
+§64.6–§64.11 (combo-field%-Dropdown, Tab-[x]/Reorder, Splash-1×1, Style-Flag-Audit,
+Screenshot-Sweep), §65, §66, §67.
+
+- **§65 API-Oberflächen-Audit** (`tests/api-audit.rkt` + Allowlist): 16 Funde, 6 gefixt
+  (u. a. `frame%.destroy` — jeder Eventspace-Shutdown warf `no such method`), 9 `harmless`,
+  1 `backlog` (`warp-pointer`). Reiner Racket-Code.
+- **§66/§67 Funktions-Sweeps** (`tests/sweep/func-*.sh`, nativ gtk vs. `PLT_QT=1`, OCR via
+  tesseract als Zusatzevidenz): identisch u. a. Run/REPL, Speichern/Öffnen, Find/Replace,
+  Replace All, Save As, Autosave-Recovery, Kontextmenüs, Check-Syntax-Pfeile, `big-bang`,
+  Stepper. Gefixte Qt-Bugs: Save-Knopf nie versteckt (`is-shown?`), `set-modified`-Stern,
+  `on-activate`/Tooltips, `frame%` `move`/`on-move`/`get-x`/`get-y`/Startposition,
+  `display-size` (war 1920×1080 hartcodiert), Bitmap-/Symbol-Labels an `button%`/`message%`,
+  `message%` `set-color`/`get-color`.
+- **Neue Shim-Exporte (alle tolerant gebunden, Windows/macOS-Rebuild nötig, sonst fehlen nur
+  die Features):** `shim_button_set_icon`, `shim_label_set_standard_icon`,
+  `shim_label_set_pixmap`, `shim_label_set_color`, `shim_window_set_move_cb`,
+  `shim_window_get_pos`, `shim_screen_count`, `shim_screen_geometry`.
+- **Methodenfund:** DrRackets Preferences liegen unter `$XDG_CONFIG_HOME/racket`, nicht
+  `PLTADDONDIR`; frühere Sweep-Läufe haben `~/.config/racket` des Nutzers mitbeschrieben.
+  Sweep-Skripte setzen jetzt ein frisches `XDG_CONFIG_HOME`.
+- **Offen:** Windows/macOS Pull + Shim-Rebuild + Validierung (Prüfpunkt: Titelleiste bei
+  frischen Prefs sichtbar, Fensterposition nach Neustart gleich; `frame%` `move` wirkt dort
+  jetzt auch auf normale Frames). Backlog: `on-activate` ohne fokussierbares Kind (bräuchte
+  `QEvent::ActivationChange`), Kosmetik (Find-Leiste, Debug-Seitenleiste), `universe`,
+  `warp-pointer`, `'gl`-Canvas, `'hide-menu-bar`, seltenes rosa Suchfeld (n=1, §67),
+  Linux-Bildzwischenablage Qt→gtk, §33.7.
+- Gepusht 2026-10-01 nach Rückfrage: Submodul `qt-backend` `7b357bf3`, Umbrella `main`
+  `a1278d9` (+ dieser STATUS-Commit).
+
+---
+
 ## Session 2026-09-30 (Linux) — Block D: Eingabeschicht (§64)
 
 Details: `docs/2026-09-30_report-linux.md`, `docs/HACKING.md` §64. Neue Prozessregel:
