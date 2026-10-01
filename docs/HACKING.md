@@ -8451,3 +8451,7 @@ Befunde und Status:
 | Slider-Wert (z. B. „50") unter statt über dem Regler | Qt-Layout von `slider%` | offen, kosmetisch |
 | Search-in-Files-Dialog Qt 252 px hoch, gtk 302 | gtk-Steuerelemente höher | Theme |
 | Find-Leiste, Hauptfenster, übrige Preferences-Seiten | – | gleichwertig |
+
+### 64.11 Package-Manager-Szene (`sweep.sh pkg-manager`, `pkg-tabs.sh`)
+
+`tests/sweep/pkg-manager.args` (`-l- pkg/gui`, Startseite „Do What I Mean") und `tests/sweep/pkg-tabs.sh` (die vier weiteren Tabs per Mausklick auf die Beschriftung, Koordinaten pro Toolkit; Catalog-Tab bekommt 10 s zum Nachladen). Ausgabe `out/pkgtab-<n>-{gtk,qt,side}.png`. Ergebnis (2026-10-01, Linux): **alle fünf Seiten gleichwertig**, kein neuer Befund — Currently Installed (213 Pakete, Mehrspaltenliste mit Kopfzeile; Qt zeigt die Spalten sogar lesbarer als gtk, das `Scope`/`Checksum` abschneidet), Available from Catalog (361 Pakete, Qt mit horizontaler Scrollleiste statt abgeschnittener Spalten), Copy from Version, Settings. Fenstergröße identisch (800×600). Damit ist auch der Mehrspaltenpfad (§60.6) unter dem neuen Stand erneut visuell bestätigt.
