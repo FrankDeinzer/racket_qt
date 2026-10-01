@@ -225,6 +225,13 @@ Aufgabe:
 > (`canvas%` `'no-focus`). ABI-neutral, **ohne Rebuild wirksam (reiner Racket-Code)**:
 > `frame.rkt` startet ohne explizite Größe mit 1×1 statt 400×300 (behebt die grauen Balken am
 > Splash-Screen; betrifft jedes Fenster ohne feste Größe — auf Windows/macOS gegenprüfen).
+>
+> **Nachtrag 2026-10-01 (Screenshot-Sweep, §64.9/§64.10) — Shim-Rebuild nötig, kein Startfehler,
+> nur das Verhalten fehlt ohne Rebuild:** `shim_tab_panel_create` (`setExpanding(false)`: kompakte
+> Tabs), `shim_menu_popup` (klappt am Bildschirmrand nach oben, `availableGeometry`),
+> `RacketListWidget::sizeHint` (Breite ≤ 180 px). Reiner Racket-Code (ohne Rebuild wirksam):
+> 1-px-Rahmen für `canvas%` `'border`/`'control-border`, `'transparent`-Canvas ohne Hintergrund.
+> Screenshot-Sweep: `tests/sweep/sweep.sh <szene>` und `tests/sweep/dr-dialogs.sh` (Linux/X11).
 
 **Windows:**
 ```powershell

@@ -8435,3 +8435,19 @@ Werkzeug: `tests/sweep/sweep.sh <szene> [titel-regex]` startet eine Szene nativ 
 | Mehrspaltige `list-box%` deutlich höher als gtk bei gleichem `min-height` | Verteilung des Zusatzplatzes im Panel-Layout; nicht untersucht | offen |
 | Slider-Wert (40) unter statt über dem Regler; Gauge dicker; vertikale Gauge breit | Qt-Stil | Theme, kein Fix geplant |
 | `tab-panel%`-Inhalt ohne Rahmen (gtk: Notebook-Rahmen) | nicht gezeichnet | offen, kosmetisch |
+
+### 64.10 Dialog-Szenen des Sweeps (`tests/sweep/dr-dialogs.sh`)
+
+Startet das echte DrRacket nativ und mit `PLT_QT=1` mit **frischem** `PLTADDONDIR` (sonst fließt gespeicherter Zustand ein — Fenstergrößen — und wird als Qt-Unterschied missdeutet: die Preferences-Breite 752 vs. 1060 war zunächst genau so ein Artefakt) und nimmt auf: Preferences (alle 9 Seiten, per Mausklick auf die Tab-Beschriftungen, Koordinaten pro Toolkit), Find-Leiste (Ctrl+F), Sprach-Popup + Choose Language, Search in Files. Ausgabe `out/dlg-<name>-{gtk,qt,side}.png`. Taste/Klick nur bei aktivem Zielfenster (`key`/`click` aktivieren vorher; `safe_key` verweigert im Terminal); das Skript bricht ab, wenn noch ein `racket`-Prozess läuft. **Methodik-Lehre:** vergessene DrRacket-Instanzen aus Debug-Läufen hatten ein zweites Fenster „Preferences" offen — das Skript griff das falsche Fenster (Klicks „übersprungen", identische Seiten). Vor jedem Sweep `pgrep -x racket` prüfen.
+
+Befunde und Status:
+
+| Befund | Ursache | Status |
+|---|---|---|
+| Popup-Menü am unteren Bildschirmrand (Sprachanzeige in der Statuszeile) überdeckt die Desktop-Leiste, gtk klappt nach oben | `QMenu::popup` hält nur den Bildschirm, nicht die verfügbare Fläche ein | **behoben**: `shim_menu_popup` klemmt auf `availableGeometry` und klappt nach oben (Shim-Rebuild nötig) |
+| `canvas%` `'transparent` (Beschreibungsfelder im Choose-Language-Dialog) weiß statt Elternfarbe | Qt-`get-canvas-background` lieferte immer Weiß; gtk liefert bei `'transparent` `#f`, dann löschen editor-canvas & Co. nicht | **behoben** (reiner Racket-Code) |
+| Preferences-Dialog Qt 1060 px breit, gtk 752 | `QListWidget::sizeHint` verlangt 256 px Breite; vier Listen nebeneinander (Editing > Indenting) | **behoben**: Hint-Breite auf 180 begrenzt (`RacketListWidget`, Shim-Rebuild); jetzt 756 px |
+| Choose-Language-Dialog Qt 767 px hoch, gtk 630 | größere Abstände zwischen Radio-/Checkboxen, höhere Collection-Paths-Liste | offen, kosmetisch |
+| Slider-Wert (z. B. „50") unter statt über dem Regler | Qt-Layout von `slider%` | offen, kosmetisch |
+| Search-in-Files-Dialog Qt 252 px hoch, gtk 302 | gtk-Steuerelemente höher | Theme |
+| Find-Leiste, Hauptfenster, übrige Preferences-Seiten | – | gleichwertig |

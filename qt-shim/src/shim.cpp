@@ -1316,7 +1316,22 @@ void shim_menu_debug_dump(void* menu)
 
 void shim_menu_popup(void* menu, int x, int y)
 {
-    static_cast<QMenu*>(menu)->popup(QPoint(x, y));
+    auto* m = static_cast<QMenu*>(menu);
+    // QMenu::popup() only keeps the menu inside the screen, not inside the
+    // available (panel-free) area, so a menu opened near the bottom edge covered
+    // the desktop panel.  gtk flips it above the click point; do the same
+    // (sweep finding: DrRacket's language popup in the status bar).
+    QScreen* scr = QGuiApplication::screenAt(QPoint(x, y));
+    if (!scr) scr = QGuiApplication::primaryScreen();
+    if (scr) {
+        const QRect avail = scr->availableGeometry();
+        const QSize sz = m->sizeHint();
+        if (y + sz.height() > avail.bottom() + 1)
+            y = std::max(avail.top(), y - sz.height());
+        if (x + sz.width() > avail.right() + 1)
+            x = std::max(avail.left(), avail.right() + 1 - sz.width());
+    }
+    m->popup(QPoint(x, y));
 }
 
 // ---- action -----------------------------------------------------------------
@@ -1428,6 +1443,12 @@ public:
     QSize sizeHint() const override
     {
         QSize hint = QListWidget::sizeHint();
+        // QListWidget asks for 256 px; gtk's list-box% is ~180 px wide.  Four such
+        // lists side by side (Preferences > Editing > Indenting) made the whole
+        // dialog 1060 px wide instead of 752 (screenshot sweep).  The layout can
+        // still stretch the widget; this only lowers the minimum.
+        static const int kMaxHintWidth = 180;
+        if (hint.width() > kMaxHintWidth) hint.setWidth(kMaxHintWidth);
         int rowH = sizeHintForRow(0);
         if (rowH > 0) {
             static const int kMaxVisibleRows = 6;
