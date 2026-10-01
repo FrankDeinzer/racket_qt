@@ -232,6 +232,18 @@ Aufgabe:
 > `RacketListWidget::sizeHint` (Breite ≤ 180 px). Reiner Racket-Code (ohne Rebuild wirksam):
 > 1-px-Rahmen für `canvas%` `'border`/`'control-border`, `'transparent`-Canvas ohne Hintergrund.
 > Screenshot-Sweep: `tests/sweep/sweep.sh <szene>` und `tests/sweep/dr-dialogs.sh` (Linux/X11).
+>
+> **Shim-ABI-Stand seit 2026-10-01 (Funktions-Sweeps, §66) — nur Linux gebaut+validiert, Windows/macOS
+> offen: Rebuild dort nötig, sonst fehlen die Features (kein Startfehler).** Drei neue, **tolerant**
+> gebundene Exporte (`get-ffi-obj` mit Fail-Thunk, ein altes Binary startet weiter):
+> `shim_button_set_icon` (`button%` mit Bitmap-Label bzw. `(list bitmap string pos)`, z. B. die
+> Macro-Stepper-Navigationsknöpfe; ohne Rebuild zeigt der Knopf wie bisher „Button"),
+> `shim_label_set_standard_icon` / `shim_label_set_pixmap` (`message%` mit Symbol-/Bitmap-Label,
+> z. B. das Warnsymbol der „not saved"-Rückfrage; ohne Rebuild kein Icon). Reiner Racket-Code (ohne
+> Rebuild wirksam, auf Windows/macOS gegenprüfen): `canvas%` `is-shown?` = eigene Sichtbarkeit
+> (DrRackets Save-Knopf blieb sichtbar), `frame%` `set-modified` (Titel „…*"), `on-activate` über
+> Kind-Fokus (Check-Syntax-Tooltips), `frame%` `move` echt (Tooltip-Position, via
+> `shim_widget_set_geometry` auf dem Top-Level). Funktions-Sweeps: `tests/sweep/func-*.sh`.
 
 **Windows:**
 ```powershell
@@ -470,6 +482,14 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
   automatisierbar (Prüfpunkt im freien Test), `other-*-key-code` nur Linux/X11.
 
 - **Freier Test 2 (2026-10-01, Linux, §64.7/§64.8):** (1) Splash-Screen mit grauen Balken — Ursache `frame.rkt`-Fallback 400×300 (wxtops `correct-size` schrumpft dehnbare Panels nie), jetzt 1×1 wie gtk; (2)+(3) Tabs ohne [x] und ohne Drag-Reorder — `tab-panel.rkt` las `'can-close`/`'can-reorder` nie, jetzt echt (`QTabBar`, neuer tolerant gebundener Export). Dazu per neuem **Style-Flag-Audit** (`tests/style-audit.rkt`) gefunden und behoben: `frame%` `'no-caption`/`'float` (Tooltip-Frame war ein normales Fenster), `canvas%` `'no-focus` (ignoriert). Offene Audit-Funde als `backlog`: `'gl`-Canvas, `'border`/`'control-border` (optisch zu prüfen), `'hide-menu-bar`. **Windows/macOS: Rebuild + Validierung offen.** Proben: `examples/splash-width-probe.rkt`, `tab-close-reorder-probe.rkt`, `frame-float-probe.rkt`.
+
+- **Funktions-Sweeps (2026-10-01, Linux, §66):** typische DrRacket-Abläufe nativ (gtk) gegen `PLT_QT=1` auf *Verhalten*
+  verglichen (Titel, Dateien auf Platte, Marker-Dateien, Fensterzustand, Aufnahmen): Run+REPL, Datei bearbeiten/speichern/öffnen,
+  Find/Replace, Kontextmenüs, Check Syntax + Tooltips, `big-bang`, Debug/Macro Stepper, Schließen mit Rückfrage. Gefunden und
+  gefixt: Save-Knopf nie versteckt (`canvas%` `is-shown?`), Titel ohne `*` (`set-modified` war Stub), `on-activate` feuerte nie
+  (daher keine Check-Syntax-Tooltips), `frame%` `move` war No-op (Tooltip an falscher Stelle), Bitmap-Label-Knöpfe zeigten
+  „Button", `message%` ohne Symbol-/Bitmap-Icon. Wichtigster Methodenfund: **Preferences liegen unter `$XDG_CONFIG_HOME/racket`,
+  nicht unter `PLTADDONDIR`** — gtk-Lauf hatte den Qt-Lauf bisher beeinflusst. Windows/macOS: Pull, Shim-Rebuild, Validierung offen.
 
 - **API-Oberflächen-Audit** (`tests/api-audit.rkt`, §65) — ✅ 2026-10-01, Linux. Dritte statische Audit-Klasse; 16 relevante Funde, 6 echte Lücken gefixt (u. a. `frame%` `destroy` — jeder Eventspace-Shutdown mit offenem Fenster, z. B. DrRackets Stop, warf `no such method`; `set-label-top`, `canvas%` `scroll`, `get-client-handle`, `wheel-event-mode`), 9 `harmless`, 1 `backlog` (`warp-pointer`, bräuchte neuen Shim-Export). Reiner Racket-Code, keine ABI-Änderung, kein Rebuild. Probe: `examples/api-audit-probe.rkt`. Windows/macOS: Pull + Audit + Probe offen.
 

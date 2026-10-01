@@ -1,0 +1,16 @@
+#lang racket/gui
+;; Probe: Button in horizontal-panel per change-children + show #f muss unsichtbar werden (DrRacket Save-Button).
+(define f (new frame% [label "sh-probe"]))
+(define top (new horizontal-panel% [parent f]))
+(define a (new button% [parent top] [label "A"]))
+(define b (new button% [parent top] [label "SAVE-B"]))
+(define c (new button% [parent top] [label "C"]))
+(send top change-children (λ (l) (list a b c)))
+(send f show #t)
+(send b show #f)
+(sleep/yield 1)
+(printf "b shown? ~a\n" (send b is-shown?))
+(define ok (not (send b is-shown?)))
+(send b show #t) (send b show #f)
+(sleep/yield 0.5)
+(printf "~a\n" (if ok "PASS" "FAIL"))

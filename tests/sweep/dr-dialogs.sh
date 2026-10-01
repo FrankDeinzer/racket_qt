@@ -51,7 +51,8 @@ run_mode() {
   local mode=$1 pid main dlg
   if pgrep -x racket >/dev/null; then echo "FEHLER: es laeuft noch ein racket-Prozess (altes DrRacket?) -- abbrechen"; return 1; fi
   echo "== $mode =="
-  export PLTADDONDIR=$(mktemp -d)   # frische Prefs: gtk und Qt starten vom gleichen Zustand
+  export PLTADDONDIR=$(mktemp -d)
+  export XDG_CONFIG_HOME=$(mktemp -d)   # Preferences liegen unter $XDG_CONFIG_HOME/racket (nicht PLTADDONDIR): frischer Zustand pro Lauf
   if [ "$mode" = qt ]; then
     (exec env PLT_QT=1 QT_PLUGIN_PATH="$QTP" "$RACKET" -l drracket "$HERE/files/a.rkt" "$HERE/files/b.rkt" >"$OUT/dlg-$mode.log" 2>&1) &
   else

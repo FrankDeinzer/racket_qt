@@ -1,0 +1,20 @@
+#lang racket/gui
+;; Probe: button%/message% mit Bitmap-/Symbol-Label (Macro-Stepper-Navigation, Warn-Dialoge).
+;; Qt zeigte "Button" bzw. nichts; jetzt muessen Icon-Groessen in die Mindestgroesse eingehen.
+(define bm (make-bitmap 24 24))
+(let ([dc (new bitmap-dc% [bitmap bm])]) (send dc set-brush "red" 'solid) (send dc draw-ellipse 0 0 24 24) (send dc set-bitmap #f))
+(define f (new frame% [label "bitmap-label-probe"]))
+(define row (new horizontal-panel% [parent f]))
+(define b-text (new button% [parent row] [label "Step"]))
+(define b-icon (new button% [parent row] [label bm]))
+(define b-both (new button% [parent row] [label (list bm "Step" 'right)]))
+(define m-icon (new message% [parent row] [label 'caution]))
+(define m-bm (new message% [parent row] [label bm]))
+(send f show #t)
+(sleep/yield 1)
+(define (w o) (let-values ([(w h) (send o get-graphical-min-size)]) (list w h)))
+(printf "text ~a  icon ~a  both ~a  caution ~a  bitmap ~a\n" (w b-text) (w b-icon) (w b-both) (w m-icon) (w m-bm))
+(define ok (and (>= (car (w b-icon)) 24) (>= (car (w b-both)) (car (w b-text)))
+                (>= (car (w m-icon)) 32) (>= (car (w m-bm)) 24)))
+(printf "~a\n" (if ok "PASS" "FAIL"))
+(exit (if ok 0 1))

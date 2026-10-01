@@ -23,6 +23,7 @@
 #include <QMenu>
 #include <QAction>
 #include <QLabel>
+#include <QStyle>
 #include <QFileDialog>
 #include <QListView>
 #include <QTreeView>
@@ -1137,6 +1138,29 @@ void shim_button_set_label(void* btn_ptr, const char* label)
     static_cast<QPushButton*>(btn_ptr)->setText(QString::fromUtf8(label));
 }
 
+// button% with a bitmap label or (list bitmap string pos) (Macro Stepper navigation buttons,
+// many DrRacket/framework buttons): QPushButton::setIcon.  `src` is tightly packed straight-alpha
+// (A,R,G,B) bytes, w*h*4 (bitmap%'s get-argb-pixels with pre-mult? = #f).  right != 0: icon right
+// of the text (RightToLeft layout direction); w <= 0 clears the icon.  Returns 1.
+int shim_button_set_icon(void* btn_ptr, const uint8_t* src, int w, int h, int right)
+{
+    auto* b = static_cast<QPushButton*>(btn_ptr);
+    if (w <= 0 || h <= 0 || !src) { b->setIcon(QIcon()); return 1; }
+    QImage img(w, h, QImage::Format_ARGB32);
+    for (int y = 0; y < h; y++) {
+        auto*          dst_row = reinterpret_cast<uint32_t*>(img.scanLine(y));
+        const uint8_t* src_row = src + (std::ptrdiff_t)y * w * 4;
+        for (int x = 0; x < w; x++) {
+            dst_row[x] = (uint32_t(src_row[x * 4 + 0]) << 24) | (uint32_t(src_row[x * 4 + 1]) << 16)
+                       | (uint32_t(src_row[x * 4 + 2]) <<  8) |  uint32_t(src_row[x * 4 + 3]);
+        }
+    }
+    b->setIcon(QIcon(QPixmap::fromImage(img)));
+    b->setIconSize(QSize(w, h));
+    b->setLayoutDirection(right ? Qt::RightToLeft : Qt::LeftToRight);
+    return 1;
+}
+
 // ---- menu-bar ---------------------------------------------------------------
 
 void* shim_menubar_create(void)
@@ -1388,6 +1412,39 @@ void* shim_label_create(void* parent_widget, const char* text)
 void shim_label_set_text(void* label_ptr, const char* text)
 {
     static_cast<QLabel*>(label_ptr)->setText(QString::fromUtf8(text));
+}
+
+// message% with a symbol label ('caution/'stop/other = question/'app) shows a standard dialog icon
+// (gtk: dialog-warning/-error/-question at 48 px), with a bitmap label the bitmap.  Both clear
+// the text.  kind: 1 caution, 2 stop, other question.  Returns 1.
+int shim_label_set_standard_icon(void* label_ptr, int kind)
+{
+    auto* lbl = static_cast<QLabel*>(label_ptr);
+    QStyle::StandardPixmap sp = kind == 1 ? QStyle::SP_MessageBoxWarning
+                              : kind == 2 ? QStyle::SP_MessageBoxCritical
+                                          : QStyle::SP_MessageBoxQuestion;
+    lbl->setText(QString());
+    lbl->setPixmap(QApplication::style()->standardIcon(sp).pixmap(48, 48));
+    return 1;
+}
+
+// Same with a straight-alpha (A,R,G,B) w*h*4 buffer (bitmap%'s get-argb-pixels, pre-mult? = #f).
+int shim_label_set_pixmap(void* label_ptr, const uint8_t* src, int w, int h)
+{
+    auto* lbl = static_cast<QLabel*>(label_ptr);
+    if (w <= 0 || h <= 0 || !src) { lbl->setPixmap(QPixmap()); return 1; }
+    QImage img(w, h, QImage::Format_ARGB32);
+    for (int y = 0; y < h; y++) {
+        auto*          dst_row = reinterpret_cast<uint32_t*>(img.scanLine(y));
+        const uint8_t* src_row = src + (std::ptrdiff_t)y * w * 4;
+        for (int x = 0; x < w; x++) {
+            dst_row[x] = (uint32_t(src_row[x * 4 + 0]) << 24) | (uint32_t(src_row[x * 4 + 1]) << 16)
+                       | (uint32_t(src_row[x * 4 + 2]) <<  8) |  uint32_t(src_row[x * 4 + 3]);
+        }
+    }
+    lbl->setText(QString());
+    lbl->setPixmap(QPixmap::fromImage(img));
+    return 1;
 }
 
 // ---- check-box (check-box%) --------------------------------------------

@@ -8486,3 +8486,42 @@ Erster Lauf (nach Relevanzfilter und Glue-Korrektur): **16 Funde** (Methodenname
 Keine ABI-Änderung, **kein Rebuild** nötig (reiner Racket-Code). Probe: `examples/api-audit-probe.rkt` (`PLT_QT=1`): Eventspace-Shutdown mit offenem Frame ohne Ausnahme, `menu%` `set-label`, `wheel-event-mode`-Roundtrip, `get-client-handle`, `canvas%` `scroll 0.5 0.5` (View-Start 214/375 bei 1000×1000-Auto-Scroll-Canvas) — alles PASS. **Windows/macOS:** nach dem Pull `raco test tests/api-audit.rkt` laufen lassen und die Probe starten; die Fixes sind plattformneutral.
 
 **Methodik-Lehre:** die erste Version des Audits las Dateien ohne `#lang`-Zeile (`(module …)`) falsch und verschluckte Lesefehler stumm — dadurch fehlte der halbe Glue-Layer und es gab Falsch-Negative. Seither bricht ein Lesefehler den Lauf laut ab. Außerdem zählt `public*` in `mr*.rkt` nicht als Glue (sonst wäre `warp-pointer` fälschlich „abgedeckt").
+
+## §66 — Funktions-Sweeps (Linux, 2026-10-01): Verhalten statt Optik
+
+Werkzeug: `tests/sweep/func-lib.sh` (Helfer `key`/`typ`/`click`/`safe_key`/`shot`/`start_dr`/`sidebyside`; jede Taste nur bei verifiziert aktivem Zielfenster, Abbruch bei laufendem `racket`) und je Szene `tests/sweep/func-<szene>.sh [gtk|qt|both]`: `run`, `file`, `find`, `ctxmenu`, `checksyntax` (inkl. Tooltips), `bigbang`, `debug` (Debug + Macro Stepper), `close`. Geprüft wird per Fenstertitel, Dateiinhalt auf Platte, Marker-Dateien (`SWEEP_MARK`, vom Testprogramm geschrieben), Fensterliste/-geometrie (`xdotool`) und Aufnahmen (`out/func-<szene>-<name>-side.png`, links gtk, rechts Qt).
+
+### 66.0 Methodik-Fund: Preferences sind NICHT unter `PLTADDONDIR`
+
+DrRackets Preferences (und Autosave-Tabellen) liegen unter `$XDG_CONFIG_HOME/racket` (Default `~/.config/racket`). Das bisher gesetzte frische `PLTADDONDIR` isolierte sie **nicht**: der gtk-Lauf schrieb z. B. `framework:replace-visible? #t`, der Qt-Lauf startete damit — eine zunächst als Qt-Fehler gelesene Abweichung der Replace-Leiste war genau dieser Artefakt. `start_dr` (und `dr-dialogs.sh`) setzen jetzt zusätzlich ein frisches `XDG_CONFIG_HOME`. (Frühere Sweep-Läufe haben `~/.config/racket` des Nutzers mitbeschrieben; Fenstergrößen aus den Nutzer-Prefs erklären auch die 2079×1153-Aufnahmen vor der Umstellung.)
+
+### 66.1 Ergebnis je Szene
+
+| Szene | Ergebnis |
+|---|---|
+| Run + REPL (`func-run.sh`) | Ausgabe, Fehlertext (rot), REPL-Eingabe `(f 3)` → `9`, Marker identisch. **Abweichung:** Save-Knopf (+ Pfeil) neben der Datei-Auswahl immer sichtbar → **gefixt** (66.2a) |
+| Datei bearbeiten/speichern/öffnen (`func-file.sh`) | Speichern (Datei auf Platte), Öffnen per getipptem Pfad → zweiter Tab: identisch. **Abweichung:** Titel nach Edit ohne `*` → **gefixt** (66.2b). Datei-Dialog Qt-Widget-Dialog statt GTK-nativ (Theme, bekannt §19) |
+| Find/Replace (`func-find.sh`) | Suche inkrementell, Treffer-Zähler, Ersetzen (`qux`) auf Platte: identisch. Kosmetik: Qt-Buttons breiter → Eingabefelder bei 600 px Fensterbreite schmaler (Theme/Mindestgröße) |
+| Kontextmenüs (`func-ctxmenu.sh`) | Editor-, REPL-, Toolbar-Dateiname-Menü: Einträge und Reihenfolge identisch, Schließen per Escape ohne Folgen |
+| Check Syntax + Tooltips (`func-checksyntax.sh`) | Pfeile identisch. **Abweichung:** Tooltip „imported from racket" fehlte → zwei Ursachen, **gefixt** (66.2c/d) |
+| `2htdp/image` `big-bang` (`func-bigbang.sh`) | Tick-Animation, `on-key`, `on-mouse`, `stop-with`: Marker-Ereignisse identisch |
+| Debug / Macro Stepper (`func-debug.sh`) | Debug-Leiste identisch (Stack-/Variables-Spalte in Qt schmaler, Kosmetik). **Abweichung:** Macro-Stepper-Navigationsknöpfe zeigten „Button" → **gefixt** (66.2e) |
+| Schließen mit Änderung (`func-close.sh`) | Rückfrage „not saved", Escape bricht ab, Datei unverändert: identisch. **Abweichung:** Warnsymbol fehlte → **gefixt** (66.2f) |
+
+### 66.2 Befunde und Fixes
+
+**a) Save-Knopf nie versteckt.** `canvas%` überschrieb `is-shown?` mit `is-shown-to-root?` (Spike-Erbe). DrRackets `update-save-button` vergleicht `modified?` mit `(send save-button is-shown?)`; vor dem ersten Show ist `is-shown-to-root?` `#f` ⇒ „gleich" ⇒ nie `show #f`. Fix: Override entfernt (eigene Sichtbarkeit wie gtk/win32/cocoa). Reiner Racket-Code.
+
+**b) Titel ohne `*`.** `window%` `set-modified` war ein No-op, `frame%` überschrieb ihn nicht (Stub-Audit-blinder Fleck, `set-modified` steht in der Allowlist-Kopfnotiz). Fix: `frame.rkt` merkt `saved-title`/`is-modified?` und setzt den Titel mit `*` (`set-title`/`set-label` laufen darüber).
+
+**c) `on-activate` feuerte nie.** Der Shim meldet keine Fenster-Aktivierung; DrRackets Check-Syntax schaltet Tooltips nur in `on-activate` ein (`enable-tooltips`). Fix wie gtk (`on-focus-child`): `frame%` leitet die Aktivierung aus Kind-Fokus-Ereignissen ab (`record-focus-window`/`clear-focus-window`, entprellt in einem Event). **Grenze:** Ein Fenster ohne fokussierbares Kind bekommt weiterhin kein `on-activate` (nur eine Shim-Erweiterung `QEvent::ActivationChange` würde das lösen; DrRacket-Frames haben immer eine Canvas). Probe: `examples/frame-activate-probe.rkt`.
+
+**d) `frame%` `move` war No-op.** Top-Level-Frames wurden nie verschoben (nur `x-pos` gemerkt) — der Tooltip-Frame (`tooltip-frame%` `show-over` → `move`) landete beliebig. Fix: `move` ruft `shim_widget_set_geometry` auf dem Top-Level (Client-Bereich, aktuelle Größe). Kein neuer Export. Position jetzt gtk-gleich (±7 px). Probe: `examples/tooltip-frame-probe.rkt` (Main-Frame-`get-x`/`get-y` bleiben unzuverlässig, nicht gefixt). Hinweis: `move` wirkt nun auch auf normale Frames, z. B. DrRackets gespeicherte Fensterposition — das ist nativ erwartetes Verhalten, aber auf Windows/macOS gegenprüfen.
+
+**e) Bitmap-Label bei `button%`.** `label` ist String, `bitmap%` oder `(list bitmap string pos)`; Qt kannte nur String (sonst „Button"). Neuer tolerant gebundener Export `shim_button_set_icon` (`QPushButton::setIcon`, `pos 'right` → `RightToLeft`-Layout; `'top`/`'bottom` wie `'left`). Mit Bitmap-only-Label ohne Rebuild bleibt „Button". Probe: `examples/bitmap-label-probe.rkt`.
+
+**f) `message%` mit Symbol-/Bitmap-Label.** (`'caution`/`'stop`/`'app`, Bitmap): Qt ignorierte es, das Label blieb leer. Neue Exporte `shim_label_set_standard_icon` (`QStyle::SP_MessageBox*`, 48 px) und `shim_label_set_pixmap`, tolerant gebunden.
+
+### 66.3 Nicht erreicht / offen
+
+Nicht geprüft: Replace All (nur „Replace" ausgeführt), Save As, Autosave-Wiederherstellung, Fensterposition-Wiederherstellung (`get-x`/`get-y`), 2htdp mit `universe`-Netzwerk, Stepper-Schritte (nur Start/Navigationsleiste aufgenommen). Offen (kosmetisch): breitere Buttons (Find-Leiste), schmalere Debug-Seitenleiste, Tab-[x] auf aktivem Tab auffälliger. `message%` `set-color` bleibt Stub (backlog). Validierung auf Windows/macOS steht aus (Rebuild nötig für 66.2e/f; Rest reiner Racket-Code).
