@@ -215,6 +215,16 @@ Aufgabe:
 > (Chrome-Höhe seeden), `panel.rkt` (Null-Größe anwenden), `window.rkt`/Steuerelement-Klassen
 > (`qt-forward-nav-keys!`). Windows: X11-`#undef KeyPress/KeyRelease` steht im
 > `#ifdef __linux__`-Block. Befunde/Triage: `docs/HACKING.md` §64.5.
+>
+> **Shim-ABI-Stand seit 2026-10-01 (§64.7/§64.8) — nur Linux gebaut+validiert, Windows/macOS
+> offen: Rebuild dort nötig, sonst fehlen die Features (kein Startfehler).** Drei neue,
+> **tolerant** gebundene Exporte (`get-ffi-obj` mit Fail-Thunk, ein altes Binary startet weiter):
+> `shim_tab_panel_set_options` (`tab-panel%` `'can-close`/`'can-reorder`: [x] pro Tab,
+> Drag-Umsortieren, `QTabBar::setTabsClosable/setMovable`), `shim_window_set_style_flags`
+> (`frame%` `'no-caption`/`'float`, z. B. DrRackets Tooltip-Frame), `shim_widget_set_no_focus`
+> (`canvas%` `'no-focus`). ABI-neutral, **ohne Rebuild wirksam (reiner Racket-Code)**:
+> `frame.rkt` startet ohne explizite Größe mit 1×1 statt 400×300 (behebt die grauen Balken am
+> Splash-Screen; betrifft jedes Fenster ohne feste Größe — auf Windows/macOS gegenprüfen).
 
 **Windows:**
 ```powershell
@@ -261,6 +271,14 @@ wenn ein Allowlist-Eintrag plötzlich nicht mehr (in denselben Dateien) auftauch
 konventionsbasiert** (diese CLAUDE.md-Zeile), nicht mechanisch erzwungen — kein
 Pre-Commit-Hook im gui-Submodul vorhanden; bei Bedarf als eigener Schritt einrichten, nicht
 stillschweigend voraussetzen.
+
+**Style-Flag-Audit (alle drei Plattformen, ebenfalls nach jeder Änderung an `wx/qt/*.rkt`):**
+`~/racket/bin/raco test tests/style-audit.rkt` (macOS: `raco test …`; Windows analog zum
+Stub-Audit). Findet Style-Flags (`'can-close`, `'no-focus`, …), die ein Referenz-Backend in der
+gleichnamigen Datei per `memq`/`member` liest, die Qt-Datei aber nie — die Lücken-Klasse, die das
+Stub-Audit strukturell nicht sieht (§64.7/§64.8). Allowlist: `tests/style-audit-allowlist.rktd`
+(`backlog`/`harmless` mit Begründung; behobene Flags brauchen keinen Eintrag). Reine Textanalyse,
+braucht weder `PLT_QT` noch Shim; ein Recall-Test prüft gegen den Stand vor dem Tab-Fix (`git`).
 
 **Windows:** `racket` liegt seit der 9.3-Migration (2026-09-11, §24.1) auf dieser
 Maschine **nicht** im Machine- oder User-PATH — immer vollen Pfad verwenden oder
@@ -433,6 +451,8 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
   `dialog-keys-probe.rkt`, `popup-submenu-probe.rkt`; `tests/smoke.rkt` 4 Tests. **Offen:**
   `combo-field%`-Dropdown (Größen-Gate, s. Report), Drop per echtem Dateimanager-Drag nicht
   automatisierbar (Prüfpunkt im freien Test), `other-*-key-code` nur Linux/X11.
+
+- **Freier Test 2 (2026-10-01, Linux, §64.7/§64.8):** (1) Splash-Screen mit grauen Balken — Ursache `frame.rkt`-Fallback 400×300 (wxtops `correct-size` schrumpft dehnbare Panels nie), jetzt 1×1 wie gtk; (2)+(3) Tabs ohne [x] und ohne Drag-Reorder — `tab-panel.rkt` las `'can-close`/`'can-reorder` nie, jetzt echt (`QTabBar`, neuer tolerant gebundener Export). Dazu per neuem **Style-Flag-Audit** (`tests/style-audit.rkt`) gefunden und behoben: `frame%` `'no-caption`/`'float` (Tooltip-Frame war ein normales Fenster), `canvas%` `'no-focus` (ignoriert). Offene Audit-Funde als `backlog`: `'gl`-Canvas, `'border`/`'control-border` (optisch zu prüfen), `'hide-menu-bar`. **Windows/macOS: Rebuild + Validierung offen.** Proben: `examples/splash-width-probe.rkt`, `tab-close-reorder-probe.rkt`, `frame-float-probe.rkt`.
 
 ### Reklassifiziert (kein Produktbefund)
 
