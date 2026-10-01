@@ -2475,6 +2475,26 @@ int shim_tab_panel_get_selection(void* handle)
     return plt_tab_panel_state(handle)->tabbar->currentIndex();
 }
 
+// tab-panel% 'can-close / 'can-reorder (QTabBar::setTabsClosable / setMovable).
+// close_cb(ud, index, 0): the user clicked a tab's [x] -- the tab is NOT
+// removed here; Racket decides (on-choice-close) and calls delete.
+// move_cb(ud, from, to): QTabBar already moved the tab after a mouse drag.
+// Both only post (Regel 2).
+void shim_tab_panel_set_options(void* handle, int closable, int movable,
+                                shim_nav_key_cb_t close_cb, void* close_ud,
+                                shim_nav_key_cb_t move_cb, void* move_ud)
+{
+    auto* tabbar = plt_tab_panel_state(handle)->tabbar;
+    tabbar->setTabsClosable(closable != 0);
+    tabbar->setMovable(movable != 0);
+    if (closable && close_cb)
+        QObject::connect(tabbar, &QTabBar::tabCloseRequested,
+                         [close_cb, close_ud](int i) { close_cb(close_ud, i, 0); });
+    if (movable && move_cb)
+        QObject::connect(tabbar, &QTabBar::tabMoved,
+                         [move_cb, move_ud](int from, int to) { move_cb(move_ud, from, to); });
+}
+
 int shim_tab_panel_count(void* handle)
 {
     return plt_tab_panel_state(handle)->tabbar->count();
