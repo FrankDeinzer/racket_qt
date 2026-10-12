@@ -27,5 +27,3 @@
  "cocoa-only (Farbwähler als natives Panel, wx:color-from-user-platform-mode); Qt meldet dort keinen Plattformmodus.")
 (system-menu (frame.rkt) harmless
  "win32-only: mrtop.rkt ruft es nur unter (system-type) = 'windows.")
-(warp-pointer (window.rkt) backlog
- "window<%> warp-pointer (Mauszeiger setzen) fehlt komplett: Aufruf endet mit 'no such method'. Braucht QCursor::setPos, also einen neuen Shim-Export; nicht benutzt von gui-lib/framework/drracket. Bei Bedarf tolerant binden.")

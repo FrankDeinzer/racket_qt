@@ -17,14 +17,14 @@
 (define lb (new list-box% [parent d] [label #f] [choices '("one" "two" "three")]
                 [callback (lambda (l e) (log! "list=~a ~a" (send l get-selections) (send e get-event-type)))]))
 (define row (new horizontal-panel% [parent d] [alignment '(right center)]))
-(new button% [parent row] [label "Cancel"]
-     [callback (lambda (b e) (log! "BUTTON Cancel") (send d show #f))])
-(new button% [parent row] [label "OK"] [style '(border)]
-     [callback (lambda (b e) (log! "BUTTON OK") (send d show #f))])
+(define cancel-b (new button% [parent row] [label "Cancel"]
+     [callback (lambda (b e) (log! "BUTTON Cancel") (send d show #f))]))
+(define ok-b (new button% [parent row] [label "OK"] [style '(border)]
+     [callback (lambda (b e) (log! "BUTTON OK") (send d show #f))]))
 ; Optional 2nd argument: programmatically focus a control before show
 ; (a|b|check|list|ok|cancel) -- Block D §2.1.
 (define ctl-by-name
-  (hash "a" a "b" b "check" cb "list" lb))
+  (hash "a" a "b" b "check" cb "list" lb "ok" ok-b "cancel" cancel-b))
 (define focus-arg
   (and (> (vector-length (current-command-line-arguments)) 1)
        (vector-ref (current-command-line-arguments) 1)))

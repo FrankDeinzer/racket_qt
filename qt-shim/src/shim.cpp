@@ -405,6 +405,27 @@ public:
     }
 };
 
+// Focus in/out reporting for native controls (button, check box, choice, slider,
+// list, radio box, tab panel).  Same reason filter as RacketCanvas: popup and
+// menu-bar focus is not a Racket focus change.  Never consumes the event.
+class FocusFilter : public QObject {
+public:
+    shim_focus_cb_t cb; void* ud;
+    FocusFilter(QObject* parent, shim_focus_cb_t c, void* u) : QObject(parent), cb(c), ud(u) {}
+    bool eventFilter(QObject*, QEvent* ev) override {
+        // X11 headers #define FocusIn/FocusOut; QEvent::FocusIn = 8, FocusOut = 9.
+        const int et = (int)ev->type();
+        if (et == 8 || et == 9) {
+            auto* fe = static_cast<QFocusEvent*>(ev);
+            Qt::FocusReason r = fe->reason();
+            if (r == Qt::PopupFocusReason || r == Qt::MenuBarFocusReason || s_restoring_focus)
+                return false;
+            cb(ud, et == 8 ? 1 : 0);
+        }
+        return false;
+    }
+};
+
 // Debug only (PLT_QT_DEBUG): who actually receives mouse presses.  Installed on
 // the QApplication in shim_app_init.
 class DebugMouseFilter : public QObject {
@@ -441,6 +462,10 @@ public:
     // Wired via shim_window_set_drop_cb (drag-accept-files #t); null = not accepting.
     shim_drop_cb_t   drop_cb = nullptr;
     void*            drop_ud = nullptr;
+    // Wired via shim_window_set_activate_cb: window activation (QEvent::ActivationChange).
+    shim_focus_cb_t  activate_cb = nullptr;
+    void*            activate_ud = nullptr;
+    int              last_active = -1;
 
     RacketWindow(shim_callback_t cb, void* ud)
         : QMainWindow(nullptr), close_cb(cb), close_ud(ud)
@@ -460,6 +485,16 @@ protected:
     // Position of the client area in screen coordinates (gtk_window_get_position semantics, and the
     // same origin shim_widget_set_geometry moves -- so get-x/move round-trip without drifting by the
     // title-bar height).  The callback only posts (Regel 2).  Mirrors gtk's configure-event -> on-move.
+    // Window (de)activation, independent of any focusable child.  Reports only changes of
+    // isActiveWindow(); the callback only posts (Regel 2).  Popups do not deactivate the window.
+    void changeEvent(QEvent* e) override {
+        QMainWindow::changeEvent(e);
+        if (e->type() == QEvent::ActivationChange && activate_cb) {
+            int a = isActiveWindow() ? 1 : 0;
+            if (a != last_active) { last_active = a; activate_cb(activate_ud, a); }
+        }
+    }
+
     void moveEvent(QMoveEvent* e) override {
         QMainWindow::moveEvent(e);
         if (move_cb) move_cb(move_ud, geometry().x(), geometry().y());
@@ -643,6 +678,24 @@ void shim_window_set_move_cb(void* win, shim_resize_cb_t cb, void* ud)
     rw->move_ud = ud;
 }
 
+// Wires window activation reporting (frame%/dialog% on-activate for windows without a
+// focusable child).  Returns 1 so the caller knows the shim supports it.
+int shim_window_set_activate_cb(void* win, shim_focus_cb_t cb, void* ud)
+{
+    auto* rw = static_cast<RacketWindow*>(win);
+    rw->activate_cb = cb;
+    rw->activate_ud = ud;
+    return 1;
+}
+
+// Moves the mouse pointer to global screen coordinates (QCursor::setPos).  Works on X11/Windows/
+// macOS; Wayland ignores it.  Returns 1.
+int shim_cursor_set_pos(int x, int y)
+{
+    QCursor::setPos(x, y);
+    return 1;
+}
+
 // Current client-area position (screen coordinates) -> out[0]=x, out[1]=y.  Returns 1.
 int shim_window_get_pos(void* win, int* out)
 {
@@ -657,6 +710,17 @@ void shim_widget_set_nav_key_cb(void* w, shim_nav_key_cb_t cb, void* ud)
 {
     auto* widget = static_cast<QWidget*>(w);
     widget->installEventFilter(new NavKeyFilter(widget, cb, ud));
+}
+
+// Installs focus in/out reporting on a native control and on its focusable
+// descendants (radio buttons, tab bar).
+void shim_widget_set_focus_cb(void* w, shim_focus_cb_t cb, void* ud)
+{
+    auto* widget = static_cast<QWidget*>(w);
+    auto* f = new FocusFilter(widget, cb, ud);
+    widget->installEventFilter(f);
+    for (auto* c : widget->findChildren<QWidget*>())
+        if (c->focusPolicy() != Qt::NoFocus) c->installEventFilter(f);
 }
 
 // Enables/disables accepting dropped files on a top-level window (cb null = off).
@@ -805,7 +869,14 @@ void shim_widget_set_no_focus(void* widget)
 // Gives keyboard focus to a widget (called by editor-canvas% grab-caret).
 void shim_widget_set_focus(void* widget)
 {
-    static_cast<QWidget*>(widget)->setFocus();
+    auto* w = static_cast<QWidget*>(widget);
+    // Labelled controls (choice, slider, list box, ...) hand out a container
+    // (QLabel/QWidget) as their handle; focus the first focusable descendant.
+    if (w->focusPolicy() == Qt::NoFocus) {
+        for (auto* c : w->findChildren<QWidget*>())
+            if (c->focusPolicy() != Qt::NoFocus && c->isVisibleTo(w) && c->isEnabled()) { w = c; break; }
+    }
+    w->setFocus();
 }
 
 // QWidget::setEnabled() -- toolkit-level parent disable while a modal
@@ -1138,13 +1209,33 @@ void* shim_panel_create(void* parent_widget, int border)
 
 // ---- button -------------------------------------------------------------
 
+// §71: Fusion pads every text push button to >= 80 px; gtk sizes by label
+// (+ ~18 px).  In DrRacket's find bar that made Next/Prev/Show Replace wider
+// than gtk, so the "0 Matches" message wrapped onto two lines.  Linux only:
+// Windows/macOS keep their platform's conventional minimum button width.
+class RacketButton : public QPushButton {
+public:
+    RacketButton(const QString& text, QWidget* parent) : QPushButton(text, parent) {}
+    QSize sizeHint() const override
+    {
+        QSize hint = QPushButton::sizeHint();
+#ifdef __linux__
+        if (!text().isEmpty() && icon().isNull()) {
+            int w = fontMetrics().horizontalAdvance(text()) + 20;
+            if (w < hint.width()) hint.setWidth(w);
+        }
+#endif
+        return hint;
+    }
+};
+
 void* shim_button_create(void*           parent_widget,
                          const char*     label,
                          shim_callback_t click_cb,
                          void*           ud)
 {
     auto* parent = static_cast<QWidget*>(parent_widget);
-    auto* btn = new QPushButton(QString::fromUtf8(label), parent);
+    auto* btn = new RacketButton(QString::fromUtf8(label), parent);
     // Return/Enter on a *focused* button clicks it (gtk does; Qt only does so
     // when autoDefault is set, which it defaults to false outside a QDialog).
     // Block D §2.2.
@@ -1593,6 +1684,17 @@ void* shim_list_box_create(void*           parent_widget,
     return lb;
 }
 
+// Double-click activation of a list-box% row (QListWidget or QTreeWidget) -> 'list-box-dclick.
+// Return does NOT activate: gtk (measured, §73) sends Return on a selected row to the dialog's
+// default button, which NavKeyFilter already forwards.  cb only posts an event (rule 2).
+void shim_list_box_set_activate_cb(void* view_ptr, shim_callback_t cb, void* ud)
+{
+    auto* view = static_cast<QAbstractItemView*>(view_ptr);
+    if (!cb) return;
+    QObject::connect(view, &QAbstractItemView::doubleClicked,
+                     [cb, ud](const QModelIndex& i) { if (i.isValid()) cb(ud); });
+}
+
 void shim_list_box_clear(void* lb_ptr)
 {
     static_cast<QListWidget*>(lb_ptr)->clear();
@@ -1710,14 +1812,20 @@ public:
     {
         // Same 6-visible-row cap as RacketListWidget (§60.4) -- a long
         // Package Manager result list must not become the panel's permanent
-        // minimum height either.
+        // minimum height either.  §71: seed-size-from-native-hint reads this
+        // right after creation, when the tree is still empty (sizeHintForRow
+        // = -1) -- the cap never applied and QTreeView's 256x192 default became
+        // the permanent minimum (gtk: ~72x41).  Estimate a row from the font,
+        // show header + 4 rows, and cap the width like RacketListWidget.
         QSize hint = QTreeWidget::sizeHint();
+        static const int kMaxHintWidth = 180;
+        if (hint.width() > kMaxHintWidth) hint.setWidth(kMaxHintWidth);
         int rowH = sizeHintForRow(0);
-        if (rowH > 0) {
-            static const int kMaxVisibleRows = 6;
-            int capped = rowH * kMaxVisibleRows + 2 * frameWidth();
-            if (hint.height() > capped) hint.setHeight(capped);
-        }
+        int rows = 6;
+        if (rowH <= 0) { rowH = fontMetrics().height() + 4; rows = 4; }
+        int headH = header() && !header()->isHidden() ? header()->sizeHint().height() : 0;
+        int capped = headH + rowH * rows + 2 * frameWidth();
+        if (hint.height() > capped) hint.setHeight(capped);
         return hint;
     }
     QVector<int> colMinW;
@@ -2170,7 +2278,11 @@ void* shim_radio_box_create(void* parent_widget, int horizontal,
     QBoxLayout* layout = horizontal
         ? static_cast<QBoxLayout*>(new QHBoxLayout(container))
         : static_cast<QBoxLayout*>(new QVBoxLayout(container));
-    (void)layout;
+    // §71: default layout margins/spacing (9/6 px under Fusion) made each radio row
+    // ~28 px against gtk's ~23 and inflated dialogs with several radio-boxes
+    // (Choose Language: 630 vs gtk 604 px; now ~600).  The container is a bare control substitute.
+    layout->setContentsMargins(0, 4, 0, 4);
+    layout->setSpacing(4);
 
     auto* group = new QButtonGroup(container);
     auto* dummy = new QRadioButton(container);
@@ -2551,13 +2663,39 @@ static PltTabPanel* plt_tab_panel_state(void* handle)
     return static_cast<PltTabPanel*>(container->property("plt_tab_panel").value<void*>());
 }
 
+// §71: content area of tab-panel% -- a plain QWidget plus a transparent
+// 1-px frame overlay on top (gtk's notebook draws a border around the page;
+// Qt had none because the content is not a QTabWidget).  The overlay sits above
+// the children (they are parented to this widget by Racket) and ignores the mouse.
+class RacketTabContent : public QWidget {
+public:
+    explicit RacketTabContent(QWidget* parent) : QWidget(parent)
+    {
+        overlay = new QFrame(this);
+        overlay->setFrameShape(QFrame::StyledPanel);
+        overlay->setFrameShadow(QFrame::Plain);
+        overlay->setAttribute(Qt::WA_TransparentForMouseEvents);
+        overlay->setFocusPolicy(Qt::NoFocus);
+    }
+protected:
+    void resizeEvent(QResizeEvent* e) override
+    {
+        QWidget::resizeEvent(e);
+        overlay->setGeometry(rect());
+        overlay->raise();
+        overlay->show();
+    }
+private:
+    QFrame* overlay;
+};
+
 void* shim_tab_panel_create(void* parent_widget, shim_callback_t changed_cb, void* ud)
 {
     auto* parent = static_cast<QWidget*>(parent_widget);
     auto* container = new QWidget(parent);
     auto* tabbar = new QTabBar(container);
     tabbar->setExpanding(false); // compact, left-aligned tabs like gtk (sweep finding)
-    auto* content = new QWidget(container);
+    auto* content = new RacketTabContent(container);
     tabbar->show();
     content->show();
 

@@ -17,9 +17,7 @@
 (fullscreen-aux (frame.rkt) harmless "macOS-only.")
 (fullscreen-button (frame.rkt) harmless "macOS-only (unit.rkt setzt es nur dort).")
 (gl (canvas.rkt) backlog
- "OpenGL-Canvas ('gl) wird nicht unterstützt (kein QOpenGLWidget); betrifft plot/gl-Nutzer. Eigener Block, groß.")
-(hide-menu-bar (frame.rkt) backlog
- "gtk/cocoa: Vollbild ohne Menüleiste. Keine Bibliothek in gui-lib/drracket benutzt es; bei Bedarf wie gtk_window_fullscreen.")
+ "Triage HACKING §70: Qt ignoriert 'gl still (normaler Raster-Canvas, kein Absturz); get-gl-context liefert keinen echten Kontext. Echte Nutzer: sgl, plot3d-gl-Pfad. Eigener Block, Aufwand grob 2-4 Wochen (QOpenGLWidget + Kontext-Bridge).")
 (horizontal (gauge.rkt) harmless
  "win32 liest 'horizontal; Qt-gauge% liest 'vertical (Default horizontal) -- gleiche Semantik.")
 (hscroll (list-box.rkt) harmless "win32-spezifisch (WS_HSCROLL); QListWidget/QTreeWidget scrollen selbst.")

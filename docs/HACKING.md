@@ -8514,7 +8514,7 @@ DrRackets Preferences (und Autosave-Tabellen) liegen unter `$XDG_CONFIG_HOME/rac
 
 **b) Titel ohne `*`.** `window%` `set-modified` war ein No-op, `frame%` überschrieb ihn nicht (Stub-Audit-blinder Fleck, `set-modified` steht in der Allowlist-Kopfnotiz). Fix: `frame.rkt` merkt `saved-title`/`is-modified?` und setzt den Titel mit `*` (`set-title`/`set-label` laufen darüber).
 
-**c) `on-activate` feuerte nie.** Der Shim meldet keine Fenster-Aktivierung; DrRackets Check-Syntax schaltet Tooltips nur in `on-activate` ein (`enable-tooltips`). Fix wie gtk (`on-focus-child`): `frame%` leitet die Aktivierung aus Kind-Fokus-Ereignissen ab (`record-focus-window`/`clear-focus-window`, entprellt in einem Event). **Grenze:** Ein Fenster ohne fokussierbares Kind bekommt weiterhin kein `on-activate` (nur eine Shim-Erweiterung `QEvent::ActivationChange` würde das lösen; DrRacket-Frames haben immer eine Canvas). Probe: `examples/frame-activate-probe.rkt`.
+**c) `on-activate` feuerte nie.** Der Shim meldet keine Fenster-Aktivierung; DrRackets Check-Syntax schaltet Tooltips nur in `on-activate` ein (`enable-tooltips`). Fix wie gtk (`on-focus-child`): `frame%` leitet die Aktivierung aus Kind-Fokus-Ereignissen ab (`record-focus-window`/`clear-focus-window`, entprellt in einem Event). **Grenze (seit §69 behoben):** Ein Fenster ohne fokussierbares Kind bekam hier kein `on-activate`; §69 ergänzt die native Aktivierung. Probe: `examples/frame-activate-probe.rkt`.
 
 **d) `frame%` `move` war No-op.** Top-Level-Frames wurden nie verschoben (nur `x-pos` gemerkt) — der Tooltip-Frame (`tooltip-frame%` `show-over` → `move`) landete beliebig. Fix: `move` ruft `shim_widget_set_geometry` auf dem Top-Level (Client-Bereich, aktuelle Größe). Kein neuer Export. Position jetzt gtk-gleich (±7 px). Probe: `examples/tooltip-frame-probe.rkt` (Main-Frame-`get-x`/`get-y` bleiben unzuverlässig, nicht gefixt). Hinweis: `move` wirkt nun auch auf normale Frames, z. B. DrRackets gespeicherte Fensterposition — das ist nativ erwartetes Verhalten, aber auf Windows/macOS gegenprüfen.
 
@@ -8560,3 +8560,144 @@ Ein zu breiter `findwin`-Regex (`^(…|Racket|…)`, xdotool-Suche ist case-inse
 ### 67.5 Offen / nicht erreicht
 
 Windows/macOS: Pull, Rebuild (fünf neue tolerante Exporte), Validierung — insbesondere Client- vs. Rahmen-Ursprung (`get-x`/`move`) und `display-size`. `center` ist in Qt (und gtk) ein No-op (Dialoge nicht zentriert, WM entscheidet). Nicht bearbeitet (bewusst): `on-activate`-Shim-Ereignis, Kosmetik (Find-Leiste/Debug-Seitenleiste), `universe`-Netzwerk. Rosa-Suchfeld-Race (n=1) ungeklärt.
+
+## §68 — `set-focus` auf Basis-Widgets (Linux, 2026-10-12)
+
+**Befund.** Der Allowlist-/§60.9-Eintrag war veraltet: `window%::set-focus` ruft seit §64.3
+`shim_widget_set_focus`. Eine Probe (`examples/set-focus-probe.rkt`) zeigte aber, dass der Fokus
+trotzdem nicht bei Racket ankam: (1) native Steuerelemente meldeten Fokus-Ein/Aus nie
+(`on-set-focus`/`on-kill-focus` kamen nur vom `canvas%`) -> `has-focus?`, `get-focus-window` und
+fokus-getriebenes `on-activate` blieben falsch; (2) `radio-box%`s Handle ist ein Container
+(`NoFocus`) -> `setFocus` wirkungslos (gtk: selektierten Button fokussieren).
+
+**Fix.**
+- Shim: neuer, tolerant gebundener Export `shim_widget_set_focus_cb` (`FocusFilter`, Event-Filter auf
+  dem Widget und seinen fokussierbaren Kindern, gleicher Reason-Filter wie `RacketCanvas`: Popup-/
+  MenuBar-Fokus ist kein Racket-Fokuswechsel; konsumiert nie). Hinweis: X11-Header definieren
+  `FocusIn`/`FocusOut` als Makros, daher Vergleich mit den Zahlenwerten 8/9.
+- `shim_widget_set_focus`: hat das Widget `NoFocus`, wird der erste fokussierbare, sichtbare,
+  aktive Nachkomme fokussiert.
+- `wx/qt/window.rkt` `qt-forward-nav-keys!` verdrahtet zusaetzlich den Fokus-Callback (Regel 2:
+  Callback nur `qt-queue-window-event`); alle Steuerelement-Klassen rufen es schon auf.
+- `wx/qt/radio-box.rkt`: `(define/override (set-focus) (button-focus (max 0 (get-selection))))`.
+- `message%`/`group-panel%`: bewusst no-op (gtk `gets-focus?` #f), `harmless`.
+- Paritaet: *beschriftete* `choice%`/`radio-box%`/`slider%`/`list-box%` bleiben auch bei gtk ein
+  No-op (`wxpanel` dispatcht an `(car children)` = Label-Message). Probe nutzt daher label-lose
+  Varianten; Qt == gtk.
+
+**Verifikation.** `set-focus-probe.rkt`: `FAILS 0` unter gtk und `PLT_QT=1`
+(`get-focus-window` == Widget fuer button/check/choice/radio/slider/list/text/canvas; `tab`
+informativ, Proxy-Identitaet weicht auch bei gtk ab). Stub-/Style-/API-Audit 16 Tests gruen,
+`tests/smoke.rkt` 4/4.
+
+**ABI.** Ein neuer, tolerant gebundener Export + ABI-neutrale Aenderung an `shim_widget_set_focus`:
+Windows/macOS Pull + Rebuild noetig, sonst nur kein Fokus-Tracking (kein Startfehler).
+
+## §69 — `on-activate` ueber native Fensteraktivierung (Linux, 2026-10-12)
+
+**Luecke.** §66.2c leitete `on-activate` nur aus Kind-Fokus ab; ein `frame%`/`dialog%` ohne fokussierbares Kind (z. B. nur `message%`) bekam nie ein Ereignis. (`dialog%` erbt von `frame%`, eine Aenderung in `frame.rkt` deckt beide ab.)
+
+**Fix.**
+- Shim: `RacketWindow::changeEvent` reagiert auf `QEvent::ActivationChange`, meldet Aenderungen von `isActiveWindow()` (intern dedupliziert, `last_active`) ueber den neuen Export `shim_window_set_activate_cb(win, cb, ud)` (Rueckgabe 1; `shim_focus_cb_t`: `gained` 0/1). Popups (QMenu) deaktivieren das Fenster nicht.
+- `wx/qt/utils.rkt`: **tolerant** gebunden (`get-ffi-obj` mit Fail-Thunk, liefert 0; altes Binary -> nur Kind-Fokus-Pfad wie vor §69).
+- `wx/qt/frame.rkt`: Regel 2 — der atomare Callback setzt nur `window-active?` und stoesst den entprellten Reporter an. Beide Quellen (Kind-Fokus, Fensteraktivierung) laufen durch denselben Reporter: `on?` = `(or window-active? child-has-focus?)`, `on-activate` feuert nur bei Aenderung gegenueber `reported-activate` -> keine Doppelaufrufe. (gtk: nur `on-focus-child`, gleiche Entprellung; die OR-Verknuepfung ist die Qt-Erweiterung fuer kindlose Fenster.)
+
+**Verifikation.** `examples/on-activate-probe.rkt` (zwei Frames nur mit `message%`, `xdotool windowactivate` auf die eigenen Fenster, keine Tasten): gtk und `PLT_QT=1` identisch, A `(#t #f #t #f #t)`, B `(#t #f #t #f)`, PASS, keine aufeinanderfolgenden Duplikate. `frame-activate-probe.rkt` (Kind-Fokus-Pfad) weiter PASS. Stub-/Style-/API-Audit 16 Tests gruen, `tests/smoke.rkt` 4/4.
+
+**ABI.** Ein neuer, tolerant gebundener Export: Windows/macOS Pull + Rebuild noetig, sonst nur kein `on-activate` fuer kindlose Fenster (kein Startfehler). Prueffpunkt dort: kein doppeltes `on-activate` beim ersten Anzeigen (Qt-Aktivierung vs. erster Kind-Fokus; Reporter dedupliziert).
+
+## §70 — `warp-pointer`, `'hide-menu-bar`, `'gl`-Triage (Linux, 2026-10-12)
+
+**warp-pointer (echt).** `window<%> warp-pointer` fehlte komplett (`no such method`, §65 backlog). gtk: `client-to-screen` + `gdk_display_warp_pointer` (x/y = Client-Koordinaten des Fensters). Qt: `window%` bekommt `warp-pointer` (`wx/qt/window.rkt`, nicht in Glue-`public*`, §1-Invariante geprueft): `client-to-screen` (vorhandene `mapToGlobal`-Bruecke), dann neuer Shim-Export `int shim_cursor_set_pos(int x, int y)` (`QCursor::setPos`, plattformneutral, kein `#ifdef` noetig; unter Wayland wirkungslos). **Tolerant** gebunden (`wx/qt/utils.rkt`, Fail-Thunk -> 0 -> No-op). Allowlist-Eintrag entfernt.
+Verifikation: `examples/warp-pointer-probe.rkt`; `xdotool getmouselocation` = erwartete Bildschirmposition (250,240) bei gtk und `PLT_QT=1`. Hinweis: Qt startet langsamer, der Wert erscheint erst nach ~5 s (zuerst gelesene Position war noch die alte - Messartefakt, kein Bug).
+
+**'hide-menu-bar (reiner Racket-Code).** gtk (`gtk/frame.rkt:257`) macht schlicht `gtk_window_fullscreen` bei Konstruktion. `wx/qt/frame.rkt` ruft nach `super-new` `shim_window_fullscreen qt-handle 1` (`setWindowState`, zeigt das Fenster nicht). Probe `examples/hide-menu-bar-probe.rkt`: Frame == Display-Groesse (2158x1280) bei gtk und Qt. Allowlist-Eintrag entfernt. (`frame%` hat oeffentlich kein `fullscreened?`; die Probe vergleicht Groessen.)
+
+**'gl-Canvas - Triage, nicht implementiert.**
+- gtk: `prepare-widget-gl-context`/`create-widget-gl-context` (GLX bzw. EGL/Wayland via `gtk/gl-context.rkt`, `x11.rkt`, `wayland.rkt`, `gl-cairo.rkt`), `canvas%`-DC liefert ein echtes `gl-context%`; `with-gl-context`/`swap-gl-buffers` funktionieren.
+- Qt jetzt: `'gl` wird ignoriert, es entsteht ein normaler Raster-Canvas (kein Absturz). `get-gl-context` liefert `#f`, `with-gl-context` wirft `no gl context available`, `swap-gl-buffers` ist No-op (`examples/gl-canvas-probe.rkt`: gtk -> Kontext + `ok`, Qt -> `#f` + Fehler). `make-gl-bitmap` in `qt/platform.rkt` ist ebenfalls `#f`.
+- Reale Nutzer in dieser Installation: nur das `sgl`-Paket (Beispiele `gears.rkt`, `gl-frame.rkt`, `gears-bitmap.rkt`; `sgl` selbst braucht einen Kontext). `plot`/`plot-gui-lib`/DrRacket nutzen `'gl` nicht (Grep ohne Treffer) - DrRacket ist nicht betroffen.
+- Aufwand grob 2-4 Wochen: `QOpenGLWidget` (oder natives Fenster + `QOpenGLContext`) als Canvas-Backend, `gl-context%`-Implementierung (`call-as-current`, `swap-buffers`, Kontext-Sharing, Resize), Co-Existenz mit dem Raster-Backing-Store (Overlay vs. `'transparent`), `make-gl-bitmap` (Offscreen-FBO), neue Shim-Exporte, Tests auf drei Plattformen (macOS: deprecated GL / Core-Profile-Wahl). Empfehlung: nur auf konkreten Bedarf (sgl-Nutzer). Allowlist-Begruendung praezisiert.
+
+**Verifikation/ABI.** Stub-/Style-/API-Audit 16 Tests gruen, `tests/smoke.rkt` 4/4. Neuer Export `shim_cursor_set_pos` (per `nm -D` vorhanden), tolerant gebunden: Windows/macOS Pull + Rebuild noetig, sonst nur warp-pointer No-op (kein Startfehler). `'hide-menu-bar` braucht keinen Rebuild.
+
+## §71 — Kosmetik-Backlog (Linux, 2026-10-12)
+
+Methode: gtk (ohne `PLT_QT`) gegen `PLT_QT=1` per `tests/sweep/dr-dialogs.sh`, `sweep.sh gallery|pkg-manager`, `func-debug.sh` und neue Maßprobe `examples/cosmetic-sizes-probe.rkt` (`get-graphical-min-size`). Frisches `PLTADDONDIR`/`XDG_CONFIG_HOME`.
+
+| Punkt | Befund | Fix / kein Befund |
+|---|---|---|
+| a) Find-Leiste | Gegenteil der Vermutung: Qt-Buttons **zu breit** (Fusion-Minimum 80 px, gtk: Label + ~18 px; Next 80 statt 44). Folge: Meldung „0 Matches" brach auf zwei Zeilen um. | Shim: `RacketButton::sizeHint` (nur `#ifdef __linux__`, nur Text ohne Icon): Breite = Textbreite + 20. Next 54 px, Show Replace passend. **Restabweichung:** „0 Matches" bricht weiter um, weil gtk dort die kleine Steuerfont (`small-control-font`) nutzt; `message%`/`button%` ignorieren das `font`-Init-Argument komplett (kein per-Widget-Font in der Qt-Schicht) -> eigener Backlog-Punkt (neuer Export `shim_widget_set_font` nötig). |
+| b) Debug-Seitenleiste | Nicht reproduzierbar: Stack/Variables-Spalte gtk und Qt je 160 px breit (`func-dbg-debug-side.png`). | Kein Befund, nichts geändert. |
+| c) Choose-Language-Höhe | Real: Qt 630 vs gtk 604 px. Ursache: `shim_radio_box_create` übernahm die Fusion-Standardränder/-Abstände des QBoxLayout (9/6 px) pro Radio-Box (gallery: Zeilenabstand 28 statt 23 px). | Shim: Layout-Ränder `(0,4,0,4)`, Spacing 4. Dialog jetzt 600 px (gtk 604), Zeilenlagen gleich. |
+| d) Slider-Wert | Real: Wert-Zahl stand unter dem Regler (gtk: über dem Regler, dem Knauf folgend). | `slider.rkt`: Label oberhalb, mittig über dem Knauf (`place-value!`, bei `set-value`/Änderung/`set-size` nachgeführt). Vertikaler Slider unverändert. Reiner Racket-Code. |
+| e) `tab-panel%`-Inhaltsrahmen | Real: gtk zeichnet Rahmen um die Seite, Qt (QWidget statt QTabWidget) keinen. | Shim: `RacketTabContent` mit transparentem 1-px-`QFrame`-Overlay (mausdurchlässig, `raise()` bei jedem Resize; überdeckt den äußersten Pixel der Kinder). Rahmen links/rechts/unten sichtbar (Gallery + Preferences). |
+| f) Mehrspalten-`list-box%` | Anders als vermutet nicht zu niedrig, sondern **zu hoch**: `RacketTreeWidget::sizeHint` wurde im leeren Zustand abgefragt (`sizeHintForRow(0)` = -1 -> Deckel griff nie) und blieb bei QTreeViews 256x192 als dauerhaftes Minimum (gtk ~72x41). Header-Höhe fehlte im Deckel. | Shim: Zeilenhöhe aus der Schrift schätzen, Header + 4 Zeilen (6 bei bekannter Zeilenhöhe), Breite <= 180. Minimum jetzt 180x107; Package-Manager-Liste unverändert nutzbar (Gallery-Frame 836 -> 581 px bei 400x500-Probe). Einspaltige Liste (104 px Min.) nicht angefasst. |
+
+**Verifikation.** Stub-/Style-/API-Audit 16 Tests grün, `tests/smoke.rkt` 4/4. Vorher-/Nachher: `tests/sweep/out/{gallery,dlg-find,dlg-lang,pkg-manager,func-dbg-debug}-side.png`.
+
+**ABI/Rebuild.** Keine neuen Exporte (nur Verhaltensänderungen in `shim.cpp`: `RacketButton`, `RacketTabContent`, Radio-Layout, `RacketTreeWidget::sizeHint`) -> Windows/macOS kompilieren/starten unverändert; wirksam erst nach Rebuild, Button-Verbreiterung ist auf Linux beschränkt, die anderen drei Änderungen gelten plattformübergreifend (auf Windows/macOS Optik gegenprüfen: Radio-Abstände, Tab-Rahmen doppelt zum nativen Stil?). `slider.rkt` ohne Rebuild wirksam.
+
+## §72 — Funktions-Sweep `2htdp/universe` (Linux, 2026-10-12): Server + zwei big-bang-Clients, localhost
+
+Werkzeug: `tests/sweep/func-universe.sh [gtk|qt|both]` mit `tests/sweep/files/universe-server.rkt` (Counter-Universe: Clients senden `'inc`, Server zählt und broadcastet an alle) und `universe-client.rkt NAME` (`register "127.0.0.1"`, Space/Mausklick → `make-package 'inc`, `q` → `stop-with`, 10-Tick-Zeitstempel, Marker über `SWEEP_MARK`/`SWEEP_MARK_SRV`, Port `SWEEP_PORT`). Server läuft im jeweiligen Modus (gtk bzw. `PLT_QT=1`), Clients sind echte Fenster (Titel = `name`). Frisches `PLTADDONDIR` + `XDG_CONFIG_HOME`, nur 127.0.0.1, Tasten nur via `key`/`click` mit Active-Window-Check.
+
+| Punkt | gtk | Qt |
+|---|---|---|
+| Beitritt (Server-Log `join A/B`, Startzustand `recv 0` in beiden) | ok | identisch |
+| Space in A → Server → Broadcast an A **und** B | je 1× `recv 1` | identisch |
+| Mausklick in B → Broadcast an beide | je 1× `recv 2` | identisch |
+| Tick-Rate ohne Automatisierung (25 s, 10-Tick-Intervalle, Soll 1000 ms; 2 Läufe je Modus) | Median 1009–1010, max 1013 | Median 1006–1007, max 1010 |
+| `q` (stop-with) in A: Fenster weg, Prozess beendet, Server `gone`, B läuft weiter und bekommt Broadcasts | ok | identisch |
+| Fenster schließen (alt+F4 auf B): Prozess beendet sauber (`exit` im Marker), Server `gone` | ok | identisch |
+| Server-Stop (SIGTERM) mit laufendem Client C: C beendet sich selbst (kein Hänger), `final` geloggt | ok | identisch |
+| Neuer Server + neuer Client D: Startzustand 0, Space → `recv 1` | ok | identisch |
+| `pgrep -x racket` vorher/nachher | 0 / 0 | 0 / 0 |
+| stderr der Prozesse | leer | leer |
+
+**Ergebnis: Qt == gtk, kein Qt-Bug, kein Code geändert, kein Rebuild.** Netzwerk-I/O (Racket-TCP-Threads) und Qt-Pump hungern sich nicht aus (Regel 1 hält): Tick-Takt und Nachrichtenzustellung stabil.
+
+**Methodik-Fund (Automatisierungsartefakt).** Der erste Lauf (Tick-Messung während `spectacle`-Aufnahmen/`xdotool`-Aktionen) zeigte Ausreißer bis ~2,8 s je 10 Ticks und einen schlechteren Qt-Mittelwert (1210/1288 vs. 1051/1060 ms). Ausreißer traten in **beiden** Modi auf (Screenshots + drei Racket-Prozesse gleichzeitig) und verschwinden in der ruhigen 25-s-Phase — nicht als Qt-Befund werten; Tick-Rate daher nur ohne gleichzeitige Automatisierung messen (so macht es das Skript jetzt). `xdotool windowclose` wird weiterhin nicht verwendet (§38), alt+F4 wird vom WM ausgeliefert und funktioniert.
+
+**Offen/nicht geprüft:** Fenster-Schließen per Titelleisten-[x]-Klick (nur alt+F4), >2 Clients, Server mit GUI (`universe` ohne Fenster ist der Normalfall), Windows/macOS-Lauf (Skript ist X11/xdotool-spezifisch).
+
+## §73 — Rosa Suchfeld bei „0 Matches" (nicht reproduziert) und Return in Dialogen (Linux, 2026-10-12)
+
+### 73.1 Rosa Suchfeld (§67, n=1 von 3) — nicht reproduziert
+
+Messung per Pixelprobe (Zahl der Pixel ≈ (255,192,203) im Fensterbild, > 500 = rosa):
+`tests/sweep/func-nomatch.sh [gtk|qt|both] [Läufe] [Zyklen]` (Ctrl+F, `zzqq` tippen; Zyklen = Feld leeren und neu tippen im selben Prozess)
+und `tests/sweep/func-nomatch-replace.sh` (der Auslöser aus §67: Replace All per Menü, Treffer 6 → 0, danach Ctrl+Z und wieder Replace All).
+Ergebnis Qt: Ctrl+F-Szene 6/6 Läufe + 12 Zyklen rosa, unter 4-fach CPU-Last (`yes` ×4, kürzere Wartezeit) 2 Läufe + 24 Zyklen 26/26 rosa;
+Replace-All-Szene 10 Läufe × 2 Zyklen = 20/20 rosa, jedes Undo danach 0 rosa Pixel (korrekt). gtk: 6/6 rosa.
+Code-Analyse: `searchable-canvas%` (`framework/private/frame.rkt`) setzt `red?` und ruft `refresh`; `on-paint` malt vor `super on-paint`. Der Pfad ist
+derselbe `queue-paint`/`queue-backing-flush`-Pfad wie bei gtk (`common/canvas-mixin.rkt`); eine Race ist nicht auffindbar. Die §67-Aufnahme existiert nicht mehr
+(von späteren Läufen überschrieben). **Kein Befund, kein Fix**; Fehlklassifizierung durch einen Screenshot-Zeitpunkt (Menü-Schließen/Repaint-Verzug) ist die
+wahrscheinlichste Erklärung. Falls es wieder auftritt: `func-nomatch-replace.sh` mit `NM_SETTLE=0.3` und die Aufnahme (`out/func-nomatch-replace-r*`) sichern.
+
+### 73.2 Return im Dialog gegen gtk — ein echter Bug, ein Gap, eine bewusste Abweichung
+
+Werkzeuge: `tests/dialog-return-matrix.sh` (Return/KP_Enter/Escape je Fokuszustand a/b/check/list/ok/cancel, gtk vs Qt, `examples/dialog-keys-probe.rkt`;
+`MATRIX_FOCUS`/`MATRIX_KEYS`/`CLICK_Y` schränken ein; Tokens `CLICKROW <Taste>`, `DBLROW`) und `tests/sweep/func-return.sh` (echtes DrRacket:
+Preferences, Choose Language, Configure Search, „Save changes?"-Rückfrage).
+
+**a) Bug: Dialog-Tasten liefen zuerst durch die `pre-on-char`-Kette des Besitzer-Frames (gefixt).** DrRackets „Choose Language" schloss unter Qt bei Return nicht
+(gtk: schließt; Escape ging). Ursache (per temporärer `eprintf`-Instrumentierung in `window.rkt`/`wxwindow.rkt`, zurückgespielt, Hash geprüft): `window%`
+`call-pre-on-char`/`call-pre-on-event` laufen über `parent` nach oben; bei einem `dialog%` ist `parent` der Besitzer-Frame. Qts `frame%` überschrieb das nicht (gtk/win32/cocoa
+tun es: `(pre-on-char w e)` ohne Aufstieg), also wurde jede Taste **und jedes Mausereignis** im Dialog zuerst vom `on-subwindow-char` des Hauptfensters bearbeitet; `handle-traverse-key`
+(wxtop) verschluckte Return (`(not (is-a? o wx:editor-canvas%))` → `#t`, kein Default-Button), bevor der Dialog seinen eigenen `on-subwindow-char` (`enter-callback`) erreichte.
+Betroffen war nur Return mit Fokus in einem Nicht-Canvas-Steuerelement (Radio/Check/…); im Hierlist-Canvas ging es zufällig. Fix: `wx/qt/frame.rkt` überschreibt beide
+`call-pre-on-*` wie gtk. Reiner Racket-Code. Nach dem Fix: alle vier DrRacket-Dialoge Qt == gtk (`func-return.sh`).
+
+**b) Gap: Doppelklick auf eine Listenzeile erzeugte nie `'list-box-dclick` (gefixt).** Neuer tolerant gebundener Export `shim_list_box_set_activate_cb`
+(`QAbstractItemView::doubleClicked`, QListWidget und QTreeWidget); `list-box.rkt` postet `control-event% 'list-box-dclick` (Regel 2). Return aktiviert **nicht**: gtk
+schickt Return auf eine selektierte Zeile an den Default-Button (gemessen: `CLICKROW Return` → `BUTTON OK`; das scheinbare dclick bei „a Return" war das GTK-Typeahead-Suchfeld).
+Mit altem Shim bleibt es beim bisherigen Verhalten (kein dclick).
+
+**c) Bewusste Abweichung (kein Fix):** `KP_Enter` im `text-field%` löst unter gtk nur den Text-Callback aus (`'text-field-enter`), unter Qt den Default-Button;
+bei selektierter Zeile gtk → dclick, Qt → Default-Button. Qt behandelt Keypad-Enter wie Return (dieselbe Abbildung in `nav-key-cb`); gtk-Eigenheit, selten relevant.
+Artefakt der Matrix: `CLICKROW`-Zeilen treffen wegen des Layoutunterschieds in Qt eine andere Zeile als in gtk (`CLICK_Y` anpassen); Vergleich nur aussagekräftig bei gleicher getroffener Zeile.
+
+**Dateien:** `wx/qt/frame.rkt`, `wx/qt/list-box.rkt`, `wx/qt/utils.rkt`, `qt-shim/src/shim.cpp` (`shim_list_box_set_activate_cb`), neue Skripte/Proben s. o.,
+`examples/dialog-radio-return-probe.rkt` (Radio-Fokus + Default-Button; war unter gtk und Qt schon grün, da die Probe kein Eltern-Frame hat — der Fehler braucht `parent`).
+**ABI:** ein neuer, tolerant gebundener Export (`shim_list_box_set_activate_cb`); der Frame-Fix ist reiner Racket-Code. Windows/macOS: Pull + Rebuild, `func-return`-Äquivalent prüfen (Return im Choose-Language-Dialog).
