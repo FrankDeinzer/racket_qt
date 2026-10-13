@@ -261,6 +261,18 @@ Aufgabe:
 > (Client- vs. Rahmen-Ursprung dort ungeprüft), und ein verschobenes/verkleinertes Fenster kommt nach
 > Ctrl+Q/Neustart an derselben Stelle zurück. Funktions-Sweeps neu: `func-replaceall|saveas|autosave|
 > winpos|stepper.sh`.
+>
+> **Shim-ABI-Stand seit 2026-10-13 (Windows-Validierung, `docs/2026-10-13_report-win.md`) — Windows gebaut+
+> validiert, Linux/macOS Rebuild nötig, sonst fehlt nur das Feature (kein Startfehler).** Ein neuer, **tolerant**
+> gebundener Export: `shim_screen_available_geometry` (Windows: `QScreen::availableGeometry`, sonst Rückgabe `0` →
+> `frame.rkt` bleibt bei der vollen Geometrie; `display-size`/`-origin` ohne Taskleiste wie win32). Zusätzlich ABI-neutrale
+> Verhaltensänderung in `shim.cpp`, **nur `#ifdef Q_OS_WIN`**: `frame%`-Position = Außenrahmen (`moveEvent`,
+> `shim_window_get_pos`, `shim_widget_set_geometry` über `frameGeometry()`, `winId()` erzwingt die Fenstererzeugung);
+> Linux/macOS behalten den Client-Ursprung (§67). Größe bleibt überall das Client-Maß. **Windows-Build:** `std::max` in
+> `shim.cpp` braucht Klammern `(std::max)(…)` (MSVC C2589, `<windows.h>`-Makros). Reiner Racket-Code, wirkt nach Pull ohne
+> Rebuild, **auf Linux/macOS gegen die dortige Referenz prüfen:** `message.rkt` (Fokus-Callback + `get-top-frame`) und
+> `tab-panel.rkt` (`get-top-frame`) — beschriftete `slider%`/`choice%`/`list-box%`/`radio-box%` melden Fokus (`set-focus-probe`,
+> `behavior-matrix`). Windows-Matrix-Skript: `tests/sweep/behavior-matrix.ps1` (nativ win32 gegen Qt).
 
 **Windows:**
 ```powershell
@@ -551,6 +563,17 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
   Slider-Mitte-Ziehen nicht testbar; Backlog klein: `tab-panel%`-Minimum ohne Reiterbreite, `frame%`-Breite ignoriert Menüleiste (67 vs 127 px), `list-box%`
   `min-height` unter dem 6-Zeilen-Deckel; `font` für `slider%`/`gauge%`/`tab-panel%`.
   **Shim-ABI (alle tolerant gebunden, außer Link-Abhängigkeit):** `shim_widget_set_font`, `shim_window_set_icon`, `shim_widget_reparent`, acht `shim_gl_*`/`shim_canvas_gl_create`-Exporte; ABI-neutrale Änderungen in `shim.cpp` (NavKeyFilter, Fokus-Restore, `shim_is_xcb`-Gate, Menü-`transientParent`). **Neue harte Link-Abhängigkeit `Qt6OpenGL`** — fehlt sie auf Windows/macOS, lädt das ganze Backend nicht (CMake-Zeile „canvas% 'gl support ON" prüfen). Prüfpunkte nach Rebuild: Find-Leiste Schrift, F5 direkt nach Dialog, Ctrl+D in Choose Language, Fenster-Icons, GL-Canvas (`tests/sweep/gl-canvas.sh`, `examples/gl-canvas-probe.rkt`), `canvas%`-`on-size`. Offen: `make-gl-bitmap`, FBO-Grenzen (`glBindFramebuffer 0`), `share-context`/`stereo`/`accum`, `on-size`/`on-move` für Nicht-Canvas-Widgets, programmatisches `frame%` `resize` ohne Kind-Reflow, `slider%`/`gauge%`/`tab-panel%` ohne `font`.
+
+- **Windows-Validierung der Linux-Serie §64–§84 (2026-10-13, `docs/2026-10-13_report-win.md`):** Pull auf `f2104dfa`, Shim neu gebaut
+  (204 `shim_*`-Exporte per `dumpbin`, `Qt6OpenGL` vorhanden), fünf Audits 24/24 und `smoke` 4/4 grün. Neu `tests/sweep/behavior-matrix.ps1`:
+  **52 von 55 Sektionen identisch nativ (win32) gegen Qt**; Rest `panel`-Pixelwert, `popup-menu` (win32 blockiert), `clipboard`
+  (UTF-16/Bitmapgröße, Ursache vermutet). Gefixt: (1) `tests/api-audit.rkt` unter Windows falsch-positiv (Pfadseparator `\` in der
+  `wx*.rkt`-Erkennung), (2) beschriftete Steuerelemente und `tab-panel%` meldeten keinen Fokus (`message.rkt`/`tab-panel.rkt` ohne
+  Fokus-Callback bzw. `get-top-frame`), (3) **`frame%`-Titelleiste lag bei Standardposition außerhalb des Bildschirms** (Qt-Position = Client-
+  Ursprung, jetzt Außenrahmen unter Windows), (4) `get-display-size` ohne Taskleiste. GL-Canvas unter Qt/Windows funktional
+  (`opengl32`-Probe). **Offen auf Windows:** manuelle Punkte (Find-Leiste „0 Matches", Return in Dialogen, Ctrl+D in Choose Language,
+  Fenster-Icons, Optik), Neustart-Test der gespeicherten Fensterposition, ~7 px horizontaler Versatz (unsichtbarer Windows-Rand),
+  `frame%`-Größe weiter Client-Maß. Die `.sh`-Sweeps laufen nur unter Linux/X11.
 
 ### Reklassifiziert (kein Produktbefund)
 
