@@ -8915,3 +8915,133 @@ Alles vorhanden, nichts installiert: Qt 6.11.1 `libQt6OpenGL`/`libQt6OpenGLWidge
 - Windows/macOS: Rebuild nötig (sonst nur alter Zustand: `'gl` ignoriert, kein Startfehler). macOS: Legacy-Profil = GL 2.1 (FBO-Blit via EXT), 3.2-Core
   bei `legacy? #f`; Prüfpunkte: `tests/sweep/gl-canvas.sh`-Äquivalent manuell, `sgl/examples/gears.rkt`.
 - Wayland: `QOffscreenSurface` braucht dort EGL-pbuffer/surfaceless — ungeprüft (§77-Umgebung hätte es, kein Lauf in dieser Sitzung).
+
+## §79 — Init-Argument-Audit (`tests/init-audit.rkt`, Linux, 2026-10-13)
+
+### 79.1 Audit-Methode und Grenzen
+
+Vierte statische Audit-Klasse neben Stub-/Style-/API-Audit: Init-Argumente, die ein Referenz-Backend (gtk/cocoa/win32) in einer Klasse deklariert **und im Klassenkörper
+benutzt**, die gleichnamige Qt-Klasse (gleichnamige Datei) aber nicht deklariert (`missing`) oder deklariert und nie benutzt (`unused`) — die Klasse von §74.1 (`font` in sechs
+Steuerelementen entgegengenommen und verworfen). Reine Textanalyse (`racket tests/init-audit.rkt` listet die Funde, `raco test` ist das Gate), kein `PLT_QT`, kein Shim.
+
+**Soll-Liste:** Gemeinsamer Code (`mred/private/wx*.rkt`) ruft die wx-Klassen per `make-object` **positional** auf (z. B. `(super-make-object mred proxy style parent cb label x y w h … font)`);
+jedes in der Referenzklasse deklarierte Init-Argument wird also tatsächlich übergeben — die Deklaration der Referenz ist die Soll-Liste, ein eigener Durchgang über `mred/private`
+ist nicht nötig.
+
+**Verfahren:** Eine Liste mit direkter `(init|init-field|init-rest …)`-Klausel (oder ein `defclass`) ist ein Klassenkörper; Name = nächstes umschließendes `define`/`defclass`.
+„Benutzt" = das Symbol kommt im Körper ausserhalb der init-Klauseln vor. Vererbung: Init-Argumente der Oberklasse werden geerbt (gtk: `button%` hat gar keine eigene `init`-Klausel,
+`font` steht in `button-core%` in `button.rkt`, `check-box%` erbt daraus) — Suche zuerst in derselben Datei, dann in allen Dateien desselben Backends; eine eigene Neu-Deklaration
+überschreibt die geerbte (gtk `gauge%`/`slider%` deklarieren `font` neu und reichen es nicht an `item%` weiter → dort ignoriert). Geerbte Referenz-Inits erzeugen kein `missing`
+(meist backend-intern: `gtk`, `hwnd`, `extra-gtks`). In Qt zählt ein `[k sym]`-Paar in `super-new`, dessen Schlüssel `k` in **keiner** Qt-Klasse deklariert ist, nicht als Benutzung.
+Allowlist `tests/init-audit-allowlist.rktd`: `(qt-datei klasse initarg kind status "Begründung")`.
+
+**Recall-Test:** kopiert `message/button/check-box/choice/radio-box/list-box.rkt` aus gui `1f3c18e0` (Parent des Font-Fixes `c3242ae7`) in ein Temp-Verzeichnis; der Audit muss `font` in allen sechs
+finden (tut er; Stand vor den Vererbungs-/Super-new-Verfeinerungen scheiterte er erst an `button.rkt`/`check-box.rkt`, daher die Vererbung).
+
+**Blindstellen:** nur gleichnamige Klassen in gleichnamigen Dateien; Weitergabe `[x x]` an `window%` zählt als „benutzt", wenn `x` irgendwo in Qt deklariert ist (dann kann `window%`
+sie dennoch verwerfen); Qt-`init-field` zählt immer als „benutzt"; Schattenvariablen (`label` als Schleifenvariable) zählen als Benutzung (z. B. gtk `list-box%` `label`, Fehlalarm der
+sicheren Art — verdeckt nur Referenz-Seite); umbenannte Init-Argumente (Qt `popup-label` statt `label`, `labels` statt `choices`) erscheinen als `missing`; Init-Argumente, die nur
+über Schlüsselwort-`new` (nicht positional) ankommen, werden wie positionale behandelt; Wirkung im Shim wird nicht geprüft (ein Aufruf einer No-op-Funktion zählt als Benutzung — das ist Sache des Stub-Audits).
+
+### 79.2 Funde und Triage
+
+Aktueller Stand: **34 Funde** (20 `unused`, 14 `missing`; `racket tests/init-audit.rkt` listet sie), **0 echte Lücken, 0 `backlog`, alle `harmless`** mit Begründung in der Allowlist:
+- `w`/`h` (choice, check-box, group-panel, list-box, panel, radio-box, slider): Anfangsgröße — nur cocoa/win32 werten sie aus, gtk ignoriert sie; Qt-Größen kommen aus `set-size`/`seed-size-from-native-hint`.
+- `label` (choice, gauge, list-box, radio-box, slider): mred zeigt Control-Labels als eigenes `message%`; nur win32/cocoa nutzen das wx-Label als Fenstertitel.
+- `slider%` `font`: gtk deklariert und ignoriert es ebenfalls; cocoa/win32 `set-control-font`. Slider-Schrift bewusst nicht gesetzt (§74.1), kein Symptom.
+- `message%` `x`/`y` (cocoa), `frame%` `is-dialog?` (Qt-`dialog%` löst es über `clear-icon!`), `menu%` `callback`/`label`/`cb`/`lbl` und `tab-panel%` `choices` (Umbenennung, positional gleich), `window%` backend-interne Argumente (`gtk`, `hwnd`, `cocoa`, `style` …).
+Nach dem Font-Fix (§74.1) und den §75-Fixes gab es keine weitere Initarg-Lücke; Qt-Code wurde in diesem Abschnitt **nicht** geändert, keine neuen Shim-Exporte, kein Rebuild.
+
+Tests: `raco test tests/stub-audit.rkt style-audit.rkt api-audit.rkt init-audit.rkt` 19/19, `PLT_QT=1 raco test tests/smoke.rkt` 4/4. Windows/macOS: Pull + `raco test tests/init-audit.rkt` (braucht `git` im PATH).
+
+## §80 — Callback-Audit (`tests/callback-audit.rkt`) und `on-size`/`on-move`/`resize`-Fix (Linux, 2026-10-13)
+
+### 80.1 Audit-Methode und Grenzen
+
+Fünfte statische Audit-Klasse (neben Stub-/Style-/API-/Init-Audit): Callbacks, die ein Referenz-Backend (gtk/cocoa/win32) in einer Klasse **selbst auslöst**, das Qt-Backend in
+derselben Klasse (samt Oberklassen) **nie** — obwohl der gemeinsame Code die Methode definiert/überschreibt. Die Klasse des `canvas%`-`on-size`-Bugs (§78.4): die Methode existiert
+(API-Audit grün), wird aber nie aufgerufen, DrRackets/frameworks Overrides laufen nie. Reine Textanalyse (`racket tests/callback-audit.rkt` listet, `raco test` ist das Gate), kein `PLT_QT`, kein Shim.
+
+**Verfahren:**
+- **Hook-Universum** = Namen mit Muster `^(on-|do-on-|queue-|pre-on|call-pre-on)` (+ explizit `display-changed`, `resized`), die der gemeinsame Code (`mred/private/*.rkt`, `wx/common/*.rkt`) per
+  `define/public|override|…` oder `public*/override*`-Klausel **definiert** und die mindestens ein Referenz-Backend aufruft. Ohne Muster (Test mit `.`) sind es 81 Funde, fast nur
+  gemeinsame-Code-Aufrufe in die Plattformklasse (`get-x`, `show` …) — das ist die API-Audit-Richtung, hier Rauschen.
+- **Aufruf** = Name in Kopfposition `(H …)` oder `(send obj H …)`, auch in Lambdas/Thunks (so zählt `(qt-queue-window-event this (λ () (send this on-close)))`). Nicht gezählt:
+  Definitionsköpfe, `(super H …)`, inherit-/public-Klauseln.
+- **Closure:** für Datei F und Backend: R(F) = Aufrufe in allen Klassen, die F transitiv über `%`-/`mixin`-/`glue`-Namen erreicht (auch `defclass`, gtk) — Vererbung/Mixins eingeschlossen
+  (gtks `queue-on-size` steht in `window.rkt`s `set-size`, `button.rkt` erbt es über `item%`→`window%`). Q(F) analog für Qt, zusätzlich über `qt-…`-Helfer (Event-Posting in `utils.rkt`/`queue.rkt`).
+- **Fund** = H in R(F), nicht in Q(F); aggregiert pro Hook `(hook (qt-datei …) (backend …))`. Allowlist `tests/callback-audit-allowlist.rktd`: `(hook (dateien) backlog|harmless "Begründung")`.
+- **Recall-Test:** holt das komplette `qt/`-Verzeichnis aus gui `1f3c18e0` (vor §78) per `git ls-tree`/`git show`; der Audit muss `queue-on-size` mit `canvas.rkt` finden (tut er). Ein zweiter Test
+  stellt sicher, dass `queue-on-size` auf dem aktuellen Stand kein Fund mehr ist.
+
+**Blindstellen:** Auslösung über Symbole/`dynamic-send` unsichtbar; ein Aufruf in einer *anderen Qt-Datei* als der Klassen-Closure (z. B. `on-menu-click` in `menu.rkt`, nicht `frame.rkt`) erscheint als
+Fund (Fehlalarm der sicheren Art → `harmless`); jeder Aufruf im Closure zählt als Auslösung, auch auf einem Zweig, der nie läuft (zu gutmütig); „Auslösung vorhanden" heißt nicht „an der richtigen Stelle/mit
+richtigen Argumenten"; Hooks ohne Muster werden nicht erkannt (Liste `EXTRA-HOOKS` erweitern); Reflexion nur der Namen, nicht der Bedingungen (gtks `unless`-Dedup).
+
+### 80.2 Funde und Fixes
+
+Stand vor dem Fix: 6 Funde. Nach dem Fix: **7 Funde** (`display-changed` und `resized` als Extra-Hooks hinzugekommen), **0 neu zu fixen, 2 `backlog`, 5 `harmless`**:
+- **`queue-on-size` (echte Lücke, GEFIXT; 12 Dateien: `window`, `button`, `check-box`, `choice`, `gauge`, `group-panel`, `list-box`, `message`, `panel`, `radio-box`, `slider`, `tab-panel`):** gtk/win32/cocoa beenden jedes
+  `window%` `set-size` mit `(queue-on-size)`; `wxwindow.rkt` macht daraus das deduplizierte `(send mred on-size w h)` + `on-move`, `wxtop.rkt` das Frame-Re-Layout (`resized`/`correct-size`). Qt tat das nur für `canvas%`
+  (§78) und für Frames bei *nativem* Resize/Move. Folge: (1) `on-size`/`on-move` feuerten für **alle Nicht-Canvas-Widgets und Panels** nie; (2) **programmatisches `frame%` `resize` ohne Kind-Reflow** — das Fenster wuchs,
+  die Kinder blieben (Canvas 300×240): der native `resizeEvent` ist das Echo des eigenen `set-size`, `remember-size` (§32) sieht den Cache schon gleich → kein `queue-on-size` (§78.4 vermutete das richtig).
+  **Fix** (`wx/qt/window.rkt`, reiner Racket-Code, keine ABI-Änderung): `set-size` merkt, ob sich x/y/w/h wirklich geändert haben (gtks `unless`-Guard), und ruft dann `(queue-on-size)` — Auslösung nur über
+  `queue-window-callback` (Regel 1/2: Posten, nie synchron aus C++). Die Änderungs-Bedingung beendet die Kette `resized`→`correct-size`→`set-size` (kein Endlos-Reflow; 4 s Leerlauf: `on-size` bleibt bei 1).
+  Der bisherige explizite Aufruf in `canvas.rkt` bleibt (redundant, von `wxwindow.rkt` dedupliziert).
+- **Verifikation:** `examples/size-callback-probe.rkt` (Frame → `horizontal-panel%` → `button%`/`message%`/`canvas%`, `(send f resize 500 400)`): **nativ (gtk) == Qt** — Kind-Reflow (Canvas 144→244 bzw. 143→243,
+  1-px-Differenz war schon vorher da) und identische Zähler (panel `on-size`=1, button `on-move`=1, message/canvas je 1/1, frame `on-size`=1); **vorher Qt: alle Zähler 0, kein Reflow** (FAIL). Regression: `func-run.sh qt`
+  (OCR alle Tokens ok), `func-close.sh both` (Qt == gtk), `func-winpos.sh qt` (Position/Größe nach Neustart wiederhergestellt), `gl-canvas.sh qt` (on-size-Zähler, Display-Liste/Textur ok).
+- **`harmless`:** `on-menu-click`/`on-menu-command` (löst Qt in `menu.rkt` aus, Fehlalarm der Closure-Methode), `on-popup` (Combo-Pfeil: Qt-Pfeilstreifen liegt außerhalb der Client-Größe, `wxtextfield.rkt`
+  `pre-on-event` löst das Popup selbst aus), `on-mdi-activate` (kein MDI; gtk/win32 selbst `unimplemented`), `resized` (gtk-`set-menu-bar`-Hack; `examples/menubar-resize-probe.rkt`: Client-/Kindgrößen nativ == Qt).
+- **`backlog`:** `on-drop-file` für Kind-Widgets (nur `frame%` hat `shim_window_set_drop_cb`; `canvas%` `accept-drop-files` bräuchte Drop im `RacketCanvas`, neuer Shim-Export); `display-changed` (Monitorwechsel;
+  bräuchte `QGuiApplication::screenAdded/-Removed` + `QScreen::geometryChanged`-Callback, nur durch Ändern der Bildschirmkonfiguration testbar).
+
+**Neue Shim-Exporte: keine, kein Rebuild.** Windows/macOS: Pull + `raco test tests/callback-audit.rkt` (braucht `git`) + `examples/size-callback-probe.rkt` (`PLT_QT=1`; Erwartung: PASS) und DrRacket-Fenster
+per Hand vergrößern/`resize`-API prüfen (die Wirkung ist plattformunabhängig, auf Windows/macOS ungeprüft).
+
+Tests: `raco test tests/stub-audit.rkt style-audit.rkt api-audit.rkt init-audit.rkt callback-audit.rkt` 24/24, `PLT_QT=1 raco test tests/smoke.rkt` 4/4.
+
+## §81 — Abdeckungsnachweis: Verhaltens-Matrix (`docs/COVERAGE.md`), fünf Fixes (Linux, 2026-10-13)
+
+### 81.1 Methode
+
+Die fünf statischen Audits (§60.9/§64.7/§65/§79/§80) sehen Strukturen, keine **Zustandsübergänge**. Neu: `examples/behavior-matrix-probe.rkt` — pro Sektion (Widget-Klasse, 51 Sektionen:
+`racket examples/behavior-matrix-probe.rkt list`) eine feste Operationsfolge mit Protokoll `<sektion> <schlüssel> => <wert>` auf stdout, und `tests/sweep/behavior-matrix.sh [sektion...]`
+(nativ gtk vs `PLT_QT=1`, jede Sektion ein eigener Prozess, Diff, Exit 1 bei Abweichung; Ausgabe `tests/sweep/out/behavior-matrix-<sektion>.{gtk,qt}`). Schlüssel mit `#px` (rohe Pixel) und
+`#info` (WM-/Referenz-abhängig) werden nicht verglichen; begründete bekannte Abweichungen: `tests/sweep/behavior-matrix-known.txt`. Gesamtlauf ~20 min (Fenster erscheinen kurz; kein xdotool).
+Matrix und Restliste: `docs/COVERAGE.md`. Ergebnis nach den Fixes: **51 von 51 Sektionen Qt == gtk** (Gesamtlauf: 50 OK, `canvas` danach nach `#info`-Umstellung).
+
+### 81.2 Funde und Fixes (alle reiner Racket-Code, keine Shim-Änderung, kein Rebuild)
+
+1. **`check-box%` hatte kein `set-label`** (`no such method`; gtk/win32 erben es von `button%`). Fix `wx/qt/check-box.rkt`: `set-label` über `shim_button_set_label` (QCheckBox und QPushButton teilen
+   `QAbstractButton::setText`, gleiche Zeigeradresse; der Shim castet formal auf `QPushButton*` — funktioniert, formal sauberer wäre `QAbstractButton*`, dann Rebuild nötig, bewusst nicht gemacht).
+2. **`list-box%` (`'multiple`/`'extended`) `set-selection` ließ andere Zeilen selektiert** (Probe: Qt `(0 2 3)`, gtk `(3)`; gtk `set-selection` = `select i #t #f`, exklusiv). `QListWidget::setCurrentRow` räumt
+   im Multi-Modus nicht auf. Fix `wx/qt/list-box.rkt`: `set-selection` ruft `do-select i #t #f` (andere abwählen), dann Current + explizit selektieren (beide Pfade, ein-/mehrspaltig).
+3. **`clipboard%` `get-clipboard-data "TEXT"` lieferte einen String statt Bytes** (gtk/cocoa/win32: UTF-8-Bytes, nur `get-text-data` ist ein String). Fix `wx/qt/platform.rkt` `get-data`.
+4. **`item%`-Hierarchie fehlte** — alle Qt-Steuerelemente erbten direkt von `window%`, der Platform-`item%` war ein nie benutzter Stub. `wxtop.rkt` `handle-traverse-key` prüft `(is-a? o wx:item%)`; für jedes Qt-Steuerelement
+   falsch → Tab-/Pfeil-Traversierung startete bei Position (0,0): programmatisches `on-traverse-char` sprang vorwärts immer zum ersten, rückwärts zum letzten Steuerelement (Probe `tab-order`: Qt `(b1 b1 b1 ...)`,
+   gtk `(tf cb ch b2 b1 tf)`). Reale Wirkung: Pfeiltasten/Tab, die als Racket-Key-Event bei einem fokussierten Nicht-Canvas-Steuerelement ankommen (Qt-eigene Tab-Navigation war nicht betroffen).
+   Fix: `item%` in `wx/qt/window.rkt` (leere Unterklasse von `window%`, bewusst ohne Methoden), `button`/`check-box`/`choice`/`list-box`/`radio-box`/`slider`/`gauge`/`message` erben davon, Stub in `platform.rkt`
+   entfernt (Re-Export aus `window.rkt`). Danach Qt == gtk (Vorwärts, Rückwärts, deaktivierte/versteckte werden übersprungen).
+5. **GC-Use-after-free bei versteckten `frame%`/`dialog%`** (echter Absturz, `invalid memory reference`/`terminated in atomic mode!`; 2 von 3 Läufen von `stress`). Ablauf: `show #f` (Frame aus `register-frame-shown`
+   entfernt, `all-frames` ist schwach) → Objekt unerreichbar → GC gibt die Racket-Closures der `_fun`-Callbacks frei → das nie zerstörte `QMainWindow` hat noch Ereignisse in der Qt-Queue (Hide, Aktivierungswechsel,
+   Fokus-Out, Resize) → beim nächsten Pump ruft Qt freigegebene Callbacks. Isoliert: Frame ohne Kinder, `collect-garbage` je Iteration; Variante „Frames in Liste halten“ lief sauber (`keep`), ebenso ohne GC (`nogc`).
+   gtk zerstört das Widget, daher dort nicht betroffen. Fix `wx/qt/frame.rkt`: 64er-Ringpuffer (`keep-hidden-window!` in `direct-show #f`) hält die zuletzt versteckten Fenster stark erreichbar, bis 64 weitere
+   versteckt wurden (die Ereignisse sind dann längst abgearbeitet). **Kein echtes Zerstören des nativen Fensters** (Leck bleibt wie bisher, jetzt nur 64 Racket-Objekte länger). Ein Frame, der nie gezeigt wurde,
+   und entfernte Kind-Widgets in lebendem Frame (`orphans`: 3 Runden × 12 Klassen, Fokus, GC, Resize) sind unauffällig. Offen: ein echtes `destroy` (Callbacks vorher auf `NULL`, `shim_window_destroy` existiert) — nicht
+   versucht, weil `~QWidget` beim Zerstören eines fokussierten Widgets noch FocusOut-Callbacks auslösen kann.
+
+### 81.3 Messartefakte und bekannte Abweichungen (keine Qt-Befunde)
+
+`radio-box` `focus:moved-to-pre` (gtk bewegt den Fokus vom beschrifteten radio-box% nicht weg; Eintrag in `behavior-matrix-known.txt`), `frame` `focus:button`/`activate:frame-active?` (`#info`, WM nach iconify/maximize),
+`clipboard` `x-sel-roundtrip` (`#info`, gtk `""`), `canvas` `scrollbars:*` (`#info`, gtk wirft nach Reparent). Einmaliges `canvas`-Fokus-`#f` im ersten Gesamtlauf (Qt, 0/4 Wiederholungen danach) = Aktivierungs-Timing
+des WMs; die Probe wartet seither auf `get-top-level-focus-window`. `get-top-level-focus-window` ist der brauchbare Aktiv-Test (`frame%` hat kein `is-active?`). `is-enabled?` ist in beiden Backends das Eigenflag
+(Kaskade nur in der Interaktion): Probe vergleicht deshalb die Flags, nicht die effektive Aktivierung.
+
+### 81.4 Abdeckung, Tests, Plattformen
+
+`docs/COVERAGE.md`: 26 Klassen × 12 Kategorien = 312 Zellen; Stand nach §81: 195 A, 19 T, 2 G, 96 n/a (vorher mit einer konkret benannten Probe/einem Sweep belegt: 34 A + 17 T — konservativ gezählt). „A“ heißt Zustand/Getter/Zähler
+stimmen mit gtk, nicht optische Korrektheit. Restliste (Eingabe an Steuerelementen, Datei-Drop, `display-changed`, Tab-Panel-/Dateidialog-Fokus, Optik, Wayland/Windows/macOS) in COVERAGE.md.
+Regression: `raco test tests/stub-audit.rkt style-audit.rkt api-audit.rkt init-audit.rkt callback-audit.rkt` 24/24, `PLT_QT=1 raco test tests/smoke.rkt` 4/4, `func-run.sh qt` (OCR alle Tokens ok), `func-close.sh both` (Qt == gtk).
+**Neue Shim-Exporte: keine, kein Rebuild.** Windows/macOS: Pull, `raco test` der Audits + Smoke, `racket examples/behavior-matrix-probe.rkt <sektion>` mit und ohne `PLT_QT=1` je Sektion (`behavior-matrix.sh` selbst braucht
+nur bash/`racket`, die gtk-Vergleichsbasis aber Linux; auf Windows/macOS = nativer Lauf, per Hand diffen). Besonders prüfen: `tab-order`, `stress`, `orphans` (Fixes 4+5 sind plattformunabhängig).
