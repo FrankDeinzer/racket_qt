@@ -535,6 +535,21 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
   `behavior-matrix-probe` (v. a. `tab-order`, `stress`, `orphans`) prüfen. **Ehrliche Restliste (COVERAGE.md):** echte Eingabe an Steuerelementen
   (Klick/Slider-Ziehen/Popup-Auswahl) nur indirekt, Datei-Drop nur Registrierung, Fokus in `tab-panel`/Dateidialog, Laufzeit von
   `message-box`/`get-file`/`put-file`, Optik, Wayland, Windows, macOS.
+  **Abdeckung vervollständigt (2026-10-13, §82–§84, Linux, uncommittet; `docs/COVERAGE.md` ist die maßgebliche Matrix):**
+  §82 echte X11-Eingabe an 16 Steuerelement-Gruppen (`examples/input-matrix-probe.rkt`, `tests/sweep/input-controls.sh`; 194 Schritte, 167 identisch, 27 begründet = gtk-Eigenarten):
+  fünf Qt-Bugs gefixt — `text-field%`/`combo-field%` per Tab unerreichbar (`shim_widget_set_tab_focus`), Menü-Accelerator `ctl+shift` bei fokussiertem
+  Control, `list-box%` `'multiple`/`'extended` vertauscht, `tab-panel%` `client->screen` (30 px), Klick auf gewählten Reiter fokussierte nicht.
+  §83 Dialoge zur Laufzeit (`dialog-runtime.sh`, 50 Läufe Qt == gtk): `get-directory`/`get-file-list`/`get-color-from-user` lieferten immer `#f`
+  (`shim_file_dialog_create_ex`, Racket-Farbdialog), `put-file`-`extension`, `get-top-frame` bis zum Besitzer-Frame (`top-level-window?`); echter Datei-Drop
+  (`dnd-drop.sh`, GTK3-Xdnd-Quelle via python-gi; `drag-accept-files` + `on-drop-file` für Kind-Widgets, `shim_widget_set_drop_cb`); `display-changed`
+  (`shim_display_set_changed_cb`; Test schaltete kurz per `xrandr` um und stellte den Modus wieder her). §84 Optik (`visual-matrix.sh`, 26 Szenen, 0 offene
+  Bug-Kandidaten, 22 `theme`): `slider% 'plain` überdeckte Label, `font%`-Familie ignoriert, `radio-box%`-Label am Indikator (+3 px, Shim).
+  **Neue tolerant gebundene Exporte:** `shim_widget_set_tab_focus`, `shim_file_dialog_create_ex`, `shim_widget_set_drop_cb`, `shim_display_set_changed_cb`;
+  ABI-neutral nur nach Rebuild: Tab-Leiste `StrongFocus`, `shim_radio_box_create` linker Rand 3. Windows/macOS: Pull, Shim-Rebuild, Audits + Smoke, dann
+  `behavior-matrix`/`input-matrix`/`visual-matrix`-Proben von Hand (Skripte laufen nur auf Linux/X11). **Ehrliche Restliste:** Optik/Wayland/Windows/macOS/HiDPI
+  ungeprüft; nativer Farbdialog fehlt; put-file-Überschreib-Rückfrage, `get-font` mit Auswahl, Dolphin-Drop, Monitor hinzufügen/entfernen nicht automatisiert;
+  Slider-Mitte-Ziehen nicht testbar; Backlog klein: `tab-panel%`-Minimum ohne Reiterbreite, `frame%`-Breite ignoriert Menüleiste (67 vs 127 px), `list-box%`
+  `min-height` unter dem 6-Zeilen-Deckel; `font` für `slider%`/`gauge%`/`tab-panel%`.
   **Shim-ABI (alle tolerant gebunden, außer Link-Abhängigkeit):** `shim_widget_set_font`, `shim_window_set_icon`, `shim_widget_reparent`, acht `shim_gl_*`/`shim_canvas_gl_create`-Exporte; ABI-neutrale Änderungen in `shim.cpp` (NavKeyFilter, Fokus-Restore, `shim_is_xcb`-Gate, Menü-`transientParent`). **Neue harte Link-Abhängigkeit `Qt6OpenGL`** — fehlt sie auf Windows/macOS, lädt das ganze Backend nicht (CMake-Zeile „canvas% 'gl support ON" prüfen). Prüfpunkte nach Rebuild: Find-Leiste Schrift, F5 direkt nach Dialog, Ctrl+D in Choose Language, Fenster-Icons, GL-Canvas (`tests/sweep/gl-canvas.sh`, `examples/gl-canvas-probe.rkt`), `canvas%`-`on-size`. Offen: `make-gl-bitmap`, FBO-Grenzen (`glBindFramebuffer 0`), `share-context`/`stereo`/`accum`, `on-size`/`on-move` für Nicht-Canvas-Widgets, programmatisches `frame%` `resize` ohne Kind-Reflow, `slider%`/`gauge%`/`tab-panel%` ohne `font`.
 
 ### Reklassifiziert (kein Produktbefund)

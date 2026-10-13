@@ -1,0 +1,7 @@
+mb-yes-no/click-no info =>
+mb-yes-no/click-yes info =>
+mb-yes-no/escape info =>
+mb-yes-no/return info =>
+mb-yes-no/return rescued =>
+color/escape info =>
+color/return info =>

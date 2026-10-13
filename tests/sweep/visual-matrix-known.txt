@@ -1,0 +1,21 @@
+# Bekannte, begruendete Abweichungen der Optik-Matrix (visual-matrix.sh, HACKING §84).
+# Format: <szene|*> <pfad-glob|class=<klasse>>[@<art>] | Begruendung     (art = size-w, size-h, size, align, gap, ...)
+# Groessen < max(6 px, 10 %) gelten ohne Eintrag als gleich.  Hoehen/Breiten der Steuerelemente haengen vom
+# Theme ab: gtk laeuft hier mit dem Breeze-GTK-/Adwaita-aehnlichen Stil (Polster ~4 px je Seite), Qt mit Fusion.
+* class=button%@size-h | theme: gtk-Button 33 px (Stil-Polster), Qt-Fusion 25 px; Beschriftung/Breite stimmen (+-10 %)
+* class=choice%@size-h | theme: wie button% (gtk 33, Qt 25)
+* class=combo-field%@size | theme: gtk-Combo 133x33 (inkl. Pfeil-Chrome), Qt 113x21 (= Hoehe des text-field%, Breite = Textfeld + Pfeilstreifen)
+* class=text-field%@size | theme: Zeilenhoehe gtk 25, Qt 21; Breite folgt der Schrift
+* class=slider%@size | theme: gtk-Slider-Spur dicker (Hoehe 49 vs 41, Plain 30 vs 17; vertikal Breite 76/30 vs 87/15), Wertzahl/Label an anderer Stelle
+* class=gauge%@size | theme: Fusion-ProgressBar ist 20-25 px dick, gtk 6 px (bekannt seit §64.9)
+* class=gauge%@align | Folge der Gauge-Dicke (theme)
+* class=radio-box%@size-h | theme: Fusion-Radio-Indikator 22 px (gtk 19) + Layout-Rand 4/4 (§71c auf Mehrzeilen-Stapel kalibriert); Einzelzeile 30 vs 23
+* class=editor-canvas%@size-h | gtk meldet Minimum inkl. Scrollbalken (57-59), Qt nur die gewuenschte min-height 50
+* class=list-box%@size | bewusst: RacketListWidget/-TreeWidget::sizeHint-Deckel 180 px/6 Zeilen (§60.4/§71f); gtk meldet 72x41. Natuerliche Fenster mit Listen sind ~100 px breiter; explizites min-height < Deckel wird nicht unterschritten
+* class=group-box-panel%@size | gtk meldet das Titelminimum (484 px), das gtk-Fenster ignoriert es aber (Fenster 82 px breit); Titel in beiden Modi abgeschnitten
+* class=group-box-panel%@align | Folge davon
+* class=tab-panel%@size-w | BACKLOG: gtk-Minimum enthaelt die Breite aller Reiter, Qt-Minimum nicht (QTabBar zeigt Scrollpfeile bei schmalem Fenster); nur natuerlich grosse Fenster mit schmalen Tab-Panels betroffen
+* class=tab-panel%@align | Folge davon
+* class=message%@size-h | theme: Schrift tiny-control-font gtk 13 px, Qt 11 px
+* class=message%@size-w | theme: Schriftmetrik (tiny-control-font)
+frame-menubar frame | gtk: Fenster mindestens so breit wie die Menueleiste (127 px); Qt-Fenster nur so breit wie der Inhalt (67 px) - Titel klein, nur bei winzigen Fenstern sichtbar (Backlog)

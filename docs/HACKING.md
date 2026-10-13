@@ -9045,3 +9045,156 @@ stimmen mit gtk, nicht optische Korrektheit. Restliste (Eingabe an Steuerelement
 Regression: `raco test tests/stub-audit.rkt style-audit.rkt api-audit.rkt init-audit.rkt callback-audit.rkt` 24/24, `PLT_QT=1 raco test tests/smoke.rkt` 4/4, `func-run.sh qt` (OCR alle Tokens ok), `func-close.sh both` (Qt == gtk).
 **Neue Shim-Exporte: keine, kein Rebuild.** Windows/macOS: Pull, `raco test` der Audits + Smoke, `racket examples/behavior-matrix-probe.rkt <sektion>` mit und ohne `PLT_QT=1` je Sektion (`behavior-matrix.sh` selbst braucht
 nur bash/`racket`, die gtk-Vergleichsbasis aber Linux; auf Windows/macOS = nativer Lauf, per Hand diffen). Besonders prüfen: `tab-order`, `stress`, `orphans` (Fixes 4+5 sind plattformunabhängig).
+
+## §82 — Echte Eingabe an Steuerelemente (`tests/sweep/input-controls.sh`, Linux, 2026-10-13)
+
+### 82.1 Methode
+
+Die Verhaltens-Matrix (§81) ruft `command` direkt auf und prüft damit nicht den Signalpfad Qt-Ereignis → Shim-Callback → `queue-event` → `on-…`/`callback`. Neu:
+`examples/input-matrix-probe.rkt <sektion>` zeigt ein Fenster (`imx-<sektion>`) mit den Steuerelementen einer Klasse und protokolliert nur, was Racket sieht; die Eingabe kommt von
+außen (`tests/sweep/input-controls.sh [gtk|qt|both] [abschnitt…]`, xdotool: Klick, Doppel-/Strg-/Shift-Klick, Ziehen, Rad, Tasten, Tippen). Steuerung der Probe über stdin (FIFO):
+`P` (Positionen auf stdout), `S <label>` (Schritt abschließen: je Schritt **eine** Zeile `<sektion> <label> => (<Ereignisse> <Zustand>)` auf stderr; aufeinanderfolgende gleiche Ereignisse
+und `collapse`-Ereignisse – Slider/Text – werden verdichtet, gtk meldet z. B. `radio-box%`-Klicks doppelt), `Q n` (Zustand für die Kalibrierung), `Z`, `X`. Positionen kommen aus
+`client->screen`; Zeilenhöhen der Listen und Tab-Breiten werden pro Lauf per Probe-Klicks kalibriert (`calib_rows`, Tab-Scan). Tasten gehen nur nach `windowactivate` an das verifiziert aktive
+Testfenster (nie Konsole/Terminal, `func-lib.sh`), Popups mit `safe_key`. Diff nach Abzug von `tests/sweep/input-controls-known.txt` (grep -F, Zeilenpräfixe; Zustand `init` wird nie
+verglichen). 16 Sektionen: button, check-box, radio-box, choice, slider, list-single/-multiple/-extended, list-columns, text-field, combo-field, tab-panel, tab-order, menu, popup, canvas.
+Ergebnis: **194 Schritte, 167 identisch Qt == gtk, 27 als bekannte Abweichung** (s. COVERAGE.md „Bekannte Abweichungen der Eingabe-Matrix“); alle 16 Sektionen `OK`.
+Dauer ~25 min für `both` (Fenster erscheinen; kein racket-Prozess nebenher laufen lassen – das Skript bricht sonst ab).
+
+### 82.2 Funde und Fixes
+
+1. **`combo-field%`/`text-field%`-Editor-Canvas war nicht per Tab erreichbar** (Tab von einem Button übersprang das Feld, Tippen ging ins Leere; gtk: Fokus im Feld). Ursache: `RacketCanvas`
+   hat `ClickFocus` (bewusst, Block D), tabbare Canvases (`gets-focus?` = `accept-tab-focus`, Glue-Klasse, erst nach der Konstruktion gesetzt) kamen so nie in Qts Tab-Kette. Fix: neuer **tolerant
+   gebundener** Shim-Export `shim_widget_set_tab_focus(widget, on)` (`StrongFocus`/`ClickFocus`), `canvas.rkt` `set-size` führt die Policy nach (`gets-focus?`). Tab *aus* dem fokussierten
+   Canvas bleibt bei Racket (`focusNextPrevChild=false`). **Neuer Shim-Export → Windows/macOS: Rebuild** (ohne Rebuild: altes Verhalten, kein Startfehler).
+2. **Menü-Accelerator mit `'(ctl shift)` feuerte nie, wenn der Fokus auf einem nativen Steuerelement lag** (Strg+Shift+D: gtk ja, Qt nein; Strg+A ging). `nav-key-cb` (window.rkt) baute das
+   `key-event%` ohne `other-shift-key-code`, die Keymap-Bindung `s:c:d` gleicht dagegen ab (Canvas-Pfad setzt ihn). Fix (reiner Racket-Code): für Shift+Buchstabe `other-shift-key-code`
+   = Kleinbuchstabe.
+3. **`list-box%` `'multiple`/`'extended` vertauscht**: win32 (`win32/list-box.rkt`: „Win32 sense of multiple and extended is backwards“) bildet `'multiple` auf Klick-ersetzt/Strg+Shift-erweitert
+   ab (Qt `ExtendedSelection`, gtk ebenso), `'extended` auf Klick-schaltet-um (`MultiSelection`); Qt hatte es umgekehrt (Klick auf Zeile 5 hielt Zeile 2 selektiert, Probe `list-multiple`:
+   gtk `(5)`, Qt `(2 5)`). Fix `list-box.rkt` `kind-int` (reiner Racket-Code, die Shim-Codes 1/2 bleiben). `'extended`: gtk kennt den Umschalt-Modus nicht und verhält sich wie `'multiple`
+   → Abweichung bewusst (win32-Semantik), `list-extended` vergleicht nur die Eckpunkte.
+4. **`tab-panel%` `client->screen`**: (0,0) bildete auf die Oberkante des ganzen Widgets ab, gtk/win32 liefern den Ursprung des Inhaltsbereichs (unter der Leiste, wie `get-client-size` und die
+   Kind-Koordinaten); Differenz = Leistenhöhe (30 px, Popup-Menüs/`warp-pointer` relativ zu Kindern). Fix `tab-panel.rkt` `client-to-screen` über `content-handle` (reiner Racket-Code).
+5. **Klick auf den bereits gewählten Reiter fokussierte die Leiste nicht** (gtk ja; `QTabBar` hat nur `TabFocus`, Fokus kam bisher nur über den Auswahl-Callback). Fix `shim_tab_panel_create`:
+   `tabbar->setFocusPolicy(Qt::StrongFocus)` (ABI-neutral, **wirksam erst nach Rebuild**; ohne Rebuild bleibt die Leiste unfokussiert, Tab-Reihenfolge unverändert).
+
+### 82.3 Messartefakte (kein Qt-Befund) und Methodenlehren
+
+- Erste `combo-field`-Klick-Versuche „wirkten nicht“: der Klick lag in der Mitte des Feldes, das Qt-Popup ist aber nur 120 px breit (`PLT_QT_DEBUG`: `popup APPEARED … frameGeom=(122,142 120x75)`) – Klick
+  außerhalb. Zeilen-/Popup-Positionen immer gegen die Popup-Geometrie prüfen, nicht gegen die Steuerelementbreite.
+- `list-box` Kalibrierung: gtk 24 px, Qt 18 px je Zeile → Klickpositionen werden pro Lauf gemessen. `tab-panel` `client->screen` s. o. (Fund 4) – die Tab-Leiste liegt bei gtk *über* `PY`.
+- Modifier-Flags von Modifier-Tasten selbst und Release-Ereignissen: gtk meldet den Zustand vor, Qt (wie win32) nach dem Ereignis; die Probe protokolliert dort nur den Code
+  (`get-key-release-code`). `other-shift-key-code` für Nicht-Buchstaben: gtk = der Code selbst, Qt `#f` (harmlos, nicht verglichen).
+- Hover-Bewegung ohne Ziehen wird nicht protokolliert (gtk sendet vor einem Klick eine synthetische Bewegung).
+- gtk-Abweichungen (bekannte Liste): Pfeile/Bild an `radio-box%`/`slider%` gehen an die Fokus-Traversierung, Slider-Schienenklick +1 statt Seitenschritt, `list-box%`-Leertaste = Aktivierung, Combo-Liste über dem Feld.
+
+### 82.4 Tests, Plattformen
+
+`raco test tests/stub-audit.rkt style-audit.rkt api-audit.rkt init-audit.rkt callback-audit.rkt` 24/24, `PLT_QT=1 raco test tests/smoke.rkt` 4/4, `behavior-matrix.sh` (Sektionen list-box, list-box-multi,
+list-box-columns, tab-panel, tab-order, canvas, combo-field, text-field, menu) alle OK, `func-run.sh qt` (OCR alle Tokens ok). **Neuer Shim-Export (tolerant): `shim_widget_set_tab_focus`; ABI-neutrale Shim-Änderung
+(`setFocusPolicy` der Tab-Leiste).** Windows/macOS: Pull, **Shim-Rebuild**, `raco test` der Audits + Smoke, dann `racket examples/input-matrix-probe.rkt <sektion>` per Hand prüfen (`input-controls.sh` ist
+Linux/X11). Prüfpunkte: Tab von einem Button in ein `text-field%`/`combo-field%`; Strg+Shift-Accelerator mit Fokus auf einem Button; `'multiple`-Liste (Klick ersetzt) und `'extended` (Klick schaltet um).
+Reiner Racket-Code (ohne Rebuild wirksam): Funde 2–4.
+Ehrliche Restliste: Ziehen der Slider-Mitte (ein Versuch lieferte in beiden Toolkits 2–3, Ursache ungeklärt, Schritt entfernt), Tab-[x]/Drag, Popup-Submenüs per Maus, Ctrl+Bild↑/↓ am Tab-Panel (Qt nicht), `shim_widget_set_tab_focus`/Tab-Leiste
+auf Windows/macOS ungeprüft, Wayland ungeprüft.
+
+## §83 — Dialoge zur Laufzeit, echter Datei-Drop, `display-changed` (Linux, 2026-10-13)
+
+### 83.1 Dialoge zur Laufzeit (`tests/sweep/dialog-runtime.sh`, `examples/dialog-runtime-probe.rkt`)
+
+**Methode.** Die Probe (`drt-main`: ein Knopf `pre`, ein Canvas mit Fokus) öffnet je Befehl `R <szenario> <tag>` einen Dialog und protokolliert (stderr, je Zeile `<szenario>/<tag> <schlüssel> => <wert>`):
+`focus-before` (Fokus des Hauptfensters), `info` (nach 1,3 s: Titel, Button-Reihenfolge links→rechts, `message%`-Inhalte inkl. Icon-Symbol, Fokus-Button des Dialogs; der Dialog wird per
+`get-top-level-windows` und rekursivem `get-children` durchsucht, dadurch programmatisch statt per Screenshot), `result` (Rückgabewert, Pfade relativ zur Fixture), `after` (0,7 s nach Rückkehr:
+Fokus, `is-enabled?`, Klicks auf `pre` während des Dialogs, Dialogfenster weg?). Der Treiber `dialog-runtime.sh [gtk|qt|both] [szenario…]` bedient den Dialog mit xdotool (Enter, Escape, Tippen von Pfaden,
+echter Mausklick auf die von der Probe gemeldeten Dialog-Buttons, Leertaste, Klick auf das gesperrte Hauptfenster) und diffed gtk gegen `PLT_QT=1` (je eigener Prozess, eigene `XDG_CONFIG_HOME`/`PLTADDONDIR`;
+Tasten nur nach `windowactivate` an das verifiziert aktive, nie-Konsole-Fenster, `func-lib.sh`). Hängt ein Dialog (siehe unten), klickt der Treiber den ersten Button und vermerkt `rescued`. Bekannte Abweichungen:
+`tests/sweep/dialog-runtime-known.txt`. 50 Läufe (Szenario × Bedienung): `message-box` ok/ok-cancel/yes-no/caution/stop (ohne Parent, mit Parent), `message-box/custom` (default=2, Schließen-Ergebnis, ohne),
+`get-text-from-user`, `get-choices-from-user`, `get-color-from-user`, `get-font-from-user`, `get-file` (Escape, Pfad tippen, Filter, Name), `put-file` (Name, Extension, Namen ersetzen), `get-directory`, `get-file-list`.
+Ergebnis nach den Fixes: **196 Protokollzeilen (+1 Sanity-Zeile) identisch Qt == gtk** (Endlauf `OK dialog-runtime (197 Zeilen)`), 7 Zeilen-Präfixe als bekannte Abweichung (unten); Fokus des Hauptfensters vor wie nach jedem Dialog = Canvas in allen 50 Läufen beider Modi
+(Fokus-Restore §74); Modalität: echter Klick auf `pre` bei offenem `message-box` und offenem Dateidialog → 0 Klicks in beiden Modi, Sanity-Klick ohne Dialog → 1 (der große Qt-Dateidialog verdeckt `pre`; der Treiber
+schiebt ihn dann per `windowmove` zur Seite).
+
+**Funde (echte Qt-Bugs, alle gefixt):**
+1. **`get-directory` und `get-file-list` lieferten unter Qt immer `#f`** (`filedialog.rkt`: `[(or (memq 'dir style) (memq 'multi style)) #f]`, „nicht verdrahtet“ seit §19). Fix: neuer **tolerant gebundener**
+   Export `shim_file_dialog_create_ex` (Modus 0 öffnen, 1 speichern, 2 Verzeichnis = `QFileDialog::Directory`+`ShowDirsOnly`, 3 mehrere Dateien = `ExistingFiles`, Rückgabe mehrerer Pfade durch `\n` getrennt);
+   `shim_file_dialog_create` behält seinen 0/1-Vertrag (gemeinsame Implementierung `file_dialog_create_impl`). Ohne neuen Shim bleibt es beim alten `#f`.
+2. **`get-color-from-user` lieferte immer `#f`**: `color-from-user-platform-mode` war `'dialog`, `get-color-from-user` ein Stub `#f` (jeder Aufruf = „Abbruch“). Fix: Modus `#f` → `moredialogs.rkt` zeigt
+   den portablen Racket-Dialog (RGB-Regler, Vorschau, OK/Cancel); mit Startfarbe liefert OK sie zurück (`(10 120 200 1.0)`, wie gtk). Ein nativer `QColorDialog` bleibt möglich (nicht gemacht: Rückgabewert-Vertrag war
+   das Defizit, nicht die Optik).
+3. **`put-file` hängte `extension` an** (`QFileDialog::setDefaultSuffix`): die Doku sagt „On Unix, `extension` is ignored“, gtk tut es so. Fix: `filedialog.rkt` übergibt unter Unix `""`; Windows/macOS-Verhalten
+   unverändert (dort dokumentiert angehängt).
+4. **`get-top-frame` der Steuerelemente stieg bis zum Besitzer-Frame eines `dialog%`** (button/choice/check-box/canvas/list-box/radio-box/slider: Schleife über `get-parent`, ein Dialog mit `parent` hat den
+   Besitzer als Eltern). Folge: der Fokus-Button eines Dialogs wurde beim **Besitzer** als Fokuskind vermerkt; `get-focus-window` des Dialogs war `#f` (gtk: der Button), und der Besitzer galt
+   als „Kind hat Fokus“ (`on-activate`-Zustand, `handle-traverse-key`). Gemessen mit `info.focus-in-dialog` (gtk `"OK"`, Qt `#f` in 21 Läufen). Fix: neue `window%`-Methode `top-level-window?` (`#f`), von
+   `frame%` (damit `dialog%`) als `#t` überschrieben; die Schleifen hören dort auf. Reiner Racket-Code. Regression: `dialog-return-matrix.sh` (nur die dokumentierten §73.2c-Zeilen weichen ab), `func-run.sh qt`,
+   `func-close.sh both`, `input-controls.sh button tab-order`, Smoke 4/4.
+
+**Bekannte Abweichungen (kein Fix, in `dialog-runtime-known.txt`):** `message-box` `'yes-no`: gtk setzt keinen Anfangsfokus (Return/Escape tun nichts, der Dialog schließt nur per Klick — der Treiber „rettet“
+ihn), Qt fokussiert wie jedes `QDialog` den ersten Button (`&No`), Return antwortet `no`; harmlos (sichere Antwort), `info`/`rescued`-Zeilen daher ausgenommen. `get-color-from-user`: gtk nativer
+`GtkColorSelectionDialog` (kein Racket-Fenster, `info` = `native-or-no-dialog-window`), Qt Racket-Dialog „Choose Color“; Rückgabewerte werden verglichen und sind gleich.
+Nebenbefund (kein Qt-Befund): beim Racket-`get-font-from-user` bleibt „OK“ deaktiviert, solange keine Schriftfamilie in der Liste gewählt ist; Return/Klick auf OK schließt daher in gtk wie Qt nicht (`font/click-ok` wird in beiden Modi gerettet = `#f`). Die Rückgabe einer echten Auswahl ist nicht abgedeckt.
+
+**Messartefakte beim Aufbau:** (a) erster Modalitätstest „bestanden“ ohne dass der Klick je ankam (Dialog verdeckte `pre`) → Sanity-Klick + Verschieben eingeführt; (b) zwei Treiberläufe gleichzeitig (ein
+liegengebliebener Hintergrundlauf) zerstörten sich die Fenstersuche → der Treiber bricht bei laufendem `racket` ab, Läufe immer einzeln; (c) Probe-Absturz durch `(send icon get-width)` (das `message%`-Label
+kann ein Symbol sein) — Probe, nicht Backend.
+
+**Nicht erreicht:** `put-file` mit Überschreib-Rückfrage (zweites Fenster; der Treiber findet den Dialog danach nicht zuverlässig, Eintrag entfernt), Mehrfachauswahl per Maus, Filterwechsel per Maus,
+Windows/macOS (dort native Dialoge/`QFileDialog` mit anderen Regeln).
+
+### 83.2 Datei-Drop echt (`tests/sweep/dnd-drop.sh`, `examples/drop-probe.rkt`, `tests/sweep/dnd-source.py`)
+
+**Quelle.** Nur lesend geprüft: `xdotool` vorhanden, `dragon-drop`/`xdnd`/`python-xlib` nicht; aber systemweit `python3` mit **PyGObject/GTK3** (`import gi; Gtk 3.0` läuft) — damit ist ein GTK3-Fenster eine echte
+Xdnd-Quelle (`drag_source_set`, `text/uri-list`, wie Dolphin). Es wurde nichts installiert (Regel 9). `dnd-source.py` ist ein Testskript im Repo; der Treiber zieht per `xdotool mousedown/mousemove/mouseup`
+(XTEST) von `dnd-src` auf die Ziele der Probe (frame% mit `accept-drop-files`, `canvas%` mit eigener `on-drop-file`, `canvas%` ohne Drop-Ziel, `message%`).
+
+**Ergebnis:** je vier Drops mit zwei Dateien; gtk und Qt **identisch** (8 `drop`-Zeilen je Modus + 4 `step`): Drop auf den akzeptierenden Canvas → `on-drop-file` des Canvas (a.txt, b.txt, in dieser Reihenfolge);
+Drop auf den nicht akzeptierenden Canvas und auf das `message%` → Rückfall auf das `on-drop-file` des Frames (gtk wie Qt: Qt-Ereignisse wandern vom Kind ohne `acceptDrops` zum Elternteil).
+
+**Fix (§80-Backlog „on-drop-file für Kind-Widgets“):** neuer **tolerant gebundener** Export `shim_widget_set_drop_cb(widget, cb, ud)` (`DropFilter`, ein Event-Filter als Kindobjekt `plt_drop_filter`:
+`DragEnter`/`DragMove` für URL-Drags akzeptieren, `Drop` meldet jede lokale Datei; `cb` NULL = aus + `setAcceptDrops(false)`; der Callback postet nur, Regel 2). `window.rkt` `drag-accept-files` (vorher No-op) bindet ihn;
+`frame.rkt` behält die Fenstervariante. Einträge `on-drop-file` (callback-audit) und `drag-accept-files` (stub-audit, harmlos) aus den Allowlists entfernt.
+
+**Manueller Prüfpunkt (Dolphin statt GTK-Quelle, optional):** `racket examples/drop-probe.rkt` bzw. mit `PLT_QT=1 QT_PLUGIN_PATH=…`; zwei Dateien aus Dolphin auf den linken Canvas ziehen → `drop canvas-accept => <name>` je Datei,
+auf den rechten Canvas oder die Beschriftung → `drop frame => <name>`. Bewusst nicht automatisiert: Dolphin-Fensteranordnung. Keine Nutzer-Anforderung offen.
+
+### 83.3 `display-changed` (`tests/sweep/display-changed.sh`, `examples/display-changed-probe.rkt`)
+
+Neuer **tolerant gebundener** Export `shim_display_set_changed_cb(cb, ud)`: einmalig verdrahtet auf `QGuiApplication::screenAdded/screenRemoved/primaryScreenChanged` und `QScreen::geometryChanged` jedes Bildschirms
+(neue Bildschirme werden beim Hinzufügen angeschlossen); `availableGeometryChanged` bewusst nicht (Panel-Änderungen sind kein Bildschirmwechsel; gtk meldet `monitors-changed`/`size-changed`). `frame.rkt`
+(`ensure-display-watch!` beim ersten `direct-show`, wie gtks `connect-monitor-changed-signal`): der atomare Callback postet pro gezeigtem `frame%`/`dialog%` (`all-frames`) ein `(send f display-changed)` in dessen
+Eventspace — der augmentierbare öffentliche Hook feuert. Test: das System ist eine VM mit einem Ausgang (`Virtual1`, Ausgangsmodus 2086x1040); der Treiber liest den Ausgangsmodus, setzt per `xrandr --output Virtual1 --mode
+1920x1080`, wartet, stellt per `--mode 2086x1040` (auch per `trap EXIT`) wieder her und verifiziert den Modus am Ende. Ergebnis: gtk 2 Aufrufe je Wechsel (`monitors-changed` + `size-changed`), Qt 1 Aufruf je Wechsel,
+`get-display-size` im Hook meldet jeweils den neuen Wert ((1920 1080), danach (2086 1040)); Modus nach den Läufen = Ausgangsmodus (2×, gtk und Qt). Allowlist-Eintrag `display-changed` (callback-audit) durch einen
+`harmless`-Eintrag für die verbleibenden Dateinamen-Fehlalarme (`dialog.rkt`/`platform.rkt`; `dialog%` erbt von `frame%`) ersetzt. Nicht prüfbar: Hinzufügen/Entfernen eines Monitors (nur ein virtueller Ausgang).
+
+### 83.4 Tests, Plattformen, Neues
+
+`raco test tests/stub-audit.rkt style-audit.rkt api-audit.rkt init-audit.rkt callback-audit.rkt` 24/24, `PLT_QT=1 raco test tests/smoke.rkt` 4/4, `dialog-runtime.sh both` identisch (nach Known), `dnd-drop.sh both` OK,
+`display-changed.sh both` (gtk 2/Qt 1 Aufrufe je Wechsel), `func-run.sh qt` (OCR alle Tokens ok), `func-close.sh both`, `input-controls.sh button tab-order` OK. **Neue Shim-Exporte (alle tolerant gebunden, ein altes
+Binary startet weiter und verliert nur die Features): `shim_file_dialog_create_ex`, `shim_widget_set_drop_cb`, `shim_display_set_changed_cb`.** Windows/macOS: Pull, **Shim-Rebuild**, Audits + Smoke; Prüfpunkte:
+`get-directory`/`get-file-list` liefern Pfade, `get-color-from-user` zeigt den Racket-Dialog und liefert die Startfarbe (dort ggf. gewünscht: natives Panel), Drop auf `canvas%`, `display-changed` bei
+Auflösungswechsel. Reiner Racket-Code (ohne Rebuild wirksam): `put-file`-Extension unter Unix, `top-level-window?`-Fix. Die Treiber (`dialog-runtime.sh`, `dnd-drop.sh`, `display-changed.sh`) sind Linux/X11.
+**Ehrliche Restliste:** s. COVERAGE.md („Nicht abgedeckt“): nativer Farbdialog, Überschreib-Rückfrage, Mehrfachauswahl per Maus, Dolphin als Drop-Quelle, Monitor hinzufügen/entfernen, Wayland, Windows/macOS.
+
+## §84 — Optik-Abdeckung je Widget-Klasse (`tests/sweep/visual-matrix.sh`, Linux/X11, 2026-10-13)
+
+**Lücke.** Die Verhaltens-/Eingabe-Matrizen (§81/§82) belegen Zustandswerte, nicht das Aussehen. Die Screenshot-Sweeps (§64.9/§64.10) decken nur `gallery` und DrRacket-Dialoge ab.
+
+**Werkzeuge.**
+- `examples/visual-matrix-probe.rkt <szene>|list`: 26 Szenen, je ein Fenster `vm-<szene>` in natürlicher Größe (feste Inhalte, keine Animation): `button` (normal, deaktiviert, `'border`, langes Label, Bitmap, Bitmap+Text, stretch), `check-box`, `radio-box` (h/v, mit/ohne Label, `vertical-label`, deaktiviert), `choice`, `slider` (h/v, `'plain`, deaktiviert), `gauge` (h/v, 0/50/100 %), `message` (lang, deaktiviert, Farbe, `'caution/'stop/'app`, Bitmap, fett), `text-field` (single/multi/`'password`/hscroll/deaktiviert/`vertical-label`), `combo-field`, `list-box` (einspaltig/multi/Spalten+Header/deaktiviert), `tab-panel` (`'can-close 'can-reorder`, langes Label), `group-panel`, `panel-border`, `canvas` (`'border`/`'control-border`/`vscroll`/`hscroll`/beide, `editor-canvas%`), `layout-align`, `layout-spacing` (spacing/border/Margins), `layout-stretch`, `frame-menubar`, `frame-plain`, `frame-explicit`, `frame-nocaption`, `dialog`, `fonts` (small/normal/view/tiny-control-font, fett 14, serif 9, mono 18), `popup-menu` und `menubar-open` (geöffnete Menüs im Screenshot). Nach 1,8 s schreibt die Probe das **Geometrie-Protokoll** auf stderr: `<szene> <pfad> <klasse> "<label>" x y w h minw minh shown` je Fenster/Kind (rekursiv, diffbar).
+- `tests/sweep/visual-matrix.sh [gtk|qt|both] [szene…]`: je Szene nativ und `PLT_QT=1` (frisches `XDG_CONFIG_HOME`/`PLTADDONDIR`, Abbruch bei laufendem racket, Fensterausschnitt via xdotool+spectacle+Pillow, Klick auf den Menütitel nur nach Active-Window-Check, Escape nie an die Konsole), danach `tests/sweep/visual-matrix-diff.py`: Fenstergröße Δ, Bounding-Box der Blätter, je Knoten Größe (Toleranz max(6 px, 10 %), je Achse), **Clipping** (Kind ragt aus dem Elternteil, nur Qt), **Überlappung** unter Geschwistern, **Ausrichtung** (Mittelpunkt relativ zum Elternteil), **Abstände** zwischen Geschwistern (Spacing/Border), **Breite < eigenes Minimum** (abgeschnittenes Label), fehlende/zusätzliche Elemente; Container-Größen, die ihre Kinder erklären, werden als `casc` geführt. Das Pixelmaß (Anteil abweichender Graustufen > 48 nach Größenangleichung) ist nur ein Hinweis. Ausgabe: `tests/sweep/out/vm-<szene>-{gtk,qt,side}.png`, `.proto`. Bekanntes mit Begründung: `tests/sweep/visual-matrix-known.txt` (Klasse/Achse); Exit 1 bei Bug-Kandidaten.
+
+**Ergebnis (nach den Fixes, 2 volle Läufe identisch): 26 Szenen, 0 Bug-Kandidaten** — 4 `ok` (Geometrie gleich: check-box, message, frame-explicit, popup-menu), 22 `theme` (jede Abweichung steht begründet in der Known-Datei). Erster Lauf vor Known-Datei: 22 Szenen mit Kandidaten, davon nach Bildkontrolle 3 echte Bugs (unten); alle Abstände, Überlappungen und Clipping-Prüfungen waren in allen 26 Szenen ohne Fund. Geöffnete Popup-Menü- und Menüleisten-Aufnahmen: Einträge, Häkchen, deaktivierter Eintrag, Trennlinie, Submenü-Pfeil, Shortcuts vorhanden (Stil Fusion statt Breeze = Theme).
+
+**Echte Befunde, gefixt (alle ohne neuen Shim-Export).**
+1. `slider%` mit `'plain`: das Steuerelement wurde bei jedem `set-size` auf (0,0) des Elternteils gesetzt (`slider.rkt`: `shim_widget_set_geometry slider-handle 0 0 …`, aber `slider-handle` ist im Plain-Fall `qt-handle`) und überdeckte das Item-Label („No v[Regler]alue"). Fix: Plain-Zweig macht nichts mehr. Reiner Racket-Code. Unsichtbar im Geometrieprotokoll (Labels sind Teil des Items), nur im Bild gefunden.
+2. `font%` mit Familie statt Face (`'modern`, `'roman`, `'swiss`, `'script`, `'decorative`): `apply-control-font!` ignorierte die Familie (Face `#f`), „mono 18" war proportional. Fix in `wx/qt/utils.rkt`: Familie → fontconfig-Generikname (Monospace/Serif/Sans Serif/Cursive/Fantasy). Reiner Racket-Code.
+3. `radio-box%` mit Label: Label berührte den Radio-Indikator (gtk ~4 px Luft). Fix `shim_radio_box_create`: linker Layoutrand 3 statt 0. **ABI-neutral, Shim-Rebuild nötig** (kein neuer Export).
+
+**Theme/bewusst (Details je Eintrag in der Known-Datei).** Steuerelementhöhen (gtk-Polster: Button/Choice 33 statt 25, Textfeld 25 statt 21, Combo 33 statt 21, Editor-Canvas-Minimum inkl. Scrollbalken), Slider-/Gauge-Dicke (Fusion-ProgressBar 20–25 px, gtk 6 px), Radio-Indikator 22 statt 19 px (Einzelzeile 30 vs 23), Listen-Sizehint-Deckel (180 px/6 Zeilen, Fenster mit Listen natürlich ~100 px breiter, gtk meldet 72×41; §60.4/§71f), Scrollbalken immer sichtbar statt Overlay, Menüstil.
+**Backlog (echte, kleine Abweichungen, nicht gefixt):** (a) `tab-panel%`-Minimum enthält nicht die Breite aller Reiter (QTabBar zeigt Scrollpfeile in einem schmalen natürlichen Fenster; gtk-Fenster ist so breit wie die Reiter) — bräuchte Einfluss auf das generische `do-graphical-size` (Chrome-Delta kennt nur Konstanten); (b) `frame%` mit Menüleiste: natürliche Breite ignoriert die Menüleistenbreite (Qt 67 px, gtk 127 px); (c) explizites `list-box%`-`min-height` unter dem Qt-Deckel wird nicht unterschritten.
+
+**Grenzen.** Labels innerhalb von Items (Position relativ zum Steuerelement) stehen nicht im Protokoll — nur im Bild/Pixelhinweis sichtbar (so wurde Befund 1 gefunden). Unter Windows/macOS/Wayland/HiDPI nicht gelaufen (das Skript ist X11/xdotool-spezifisch; die Probe selbst läuft überall und nutzt keine Skalierung, also HiDPI-neutral, aber ungeprüft). Qt läuft hier mit Fusion, gtk mit dem KDE-/Breeze-GTK-Stil: Farben/Rundungen werden bewusst nicht bewertet.
+
+**Tests.** `raco test` der fünf Audits 24/24, `PLT_QT=1 tests/smoke.rkt` 4/4, `behavior-matrix.sh button canvas slider radio-box` OK, `func-run.sh qt` (Marker/OCR ok), `dr-dialogs.sh both` Maße unverändert (Preferences 756×635 vs 752×647 wie §74.2). **Windows/macOS:** Pull + Shim-Rebuild (Radio-Rand ändert Layoutbreite um 3 px), `visual-matrix-probe.rkt` je Szene nativ/`PLT_QT=1` von Hand vergleichen (Geometrieprotokoll diffen).

@@ -447,6 +447,37 @@ public:
     }
 };
 
+// File drop on an arbitrary widget (canvas% 'accept-drop-files, HACKING §83.2): an event filter instead of a
+// subclass hook, so it works for every RacketCanvas/native control.  Accepts only URL drags; every local
+// file of a drop is reported through `cb` (Racket posts one on-drop-file event per file, Regel 2).
+class DropFilter : public QObject {
+public:
+    shim_drop_cb_t cb; void* ud;
+    DropFilter(QObject* parent, shim_drop_cb_t c, void* u) : QObject(parent), cb(c), ud(u) {}
+    bool eventFilter(QObject*, QEvent* ev) override {
+        switch (ev->type()) {
+        case QEvent::DragEnter:
+        case QEvent::DragMove: {
+            auto* de = static_cast<QDropEvent*>(ev);
+            if (de->mimeData()->hasUrls()) { de->acceptProposedAction(); return true; }
+            return false;
+        }
+        case QEvent::Drop: {
+            auto* de = static_cast<QDropEvent*>(ev);
+            if (!de->mimeData()->hasUrls()) return false;
+            for (const QUrl& u : de->mimeData()->urls()) {
+                if (!u.isLocalFile()) continue;
+                QByteArray b = u.toLocalFile().toUtf8();
+                if (cb) cb(ud, b.constData());
+            }
+            de->acceptProposedAction();
+            return true;
+        }
+        default: return false;
+        }
+    }
+};
+
 // Debug only (PLT_QT_DEBUG): who actually receives mouse presses.  Installed on
 // the QApplication in shim_app_init.
 class DebugMouseFilter : public QObject {
@@ -753,6 +784,23 @@ void shim_window_set_drop_cb(void* win, shim_drop_cb_t cb, void* ud)
     rw->setAcceptDrops(cb != nullptr);
 }
 
+// Enables/disables accepting dropped files on a child widget (canvas%): cb null = off.  One DropFilter per
+// widget (child object "plt_drop_filter"); a top-level frame uses shim_window_set_drop_cb instead.
+void shim_widget_set_drop_cb(void* w, shim_drop_cb_t cb, void* ud)
+{
+    auto* widget = static_cast<QWidget*>(w);
+    if (auto* old = widget->findChild<QObject*>("plt_drop_filter", Qt::FindDirectChildrenOnly)) {
+        widget->removeEventFilter(old);
+        delete old;
+    }
+    widget->setAcceptDrops(cb != nullptr);
+    if (cb) {
+        auto* f = new DropFilter(widget, cb, ud);
+        f->setObjectName("plt_drop_filter");
+        widget->installEventFilter(f);
+    }
+}
+
 // Window-manager size limits (frame% enforce-size).  max < 0 = unbounded.
 void shim_window_set_size_limits(void* win, int min_w, int min_h, int max_w, int max_h)
 {
@@ -885,6 +933,14 @@ void shim_widget_set_geometry(void* widget, int x, int y, int w, int h)
 void shim_widget_set_no_focus(void* widget)
 {
     static_cast<QWidget*>(widget)->setFocusPolicy(Qt::NoFocus);
+}
+
+// canvas% mit accept-tab-focus (text-field%/combo-field%-Editor-Canvas): Teil der Qt-Tab-Kette
+// (StrongFocus), sonst bleibt es bei RacketCanvas' ClickFocus.  Tab *aus* dem fokussierten Canvas
+// geht weiter ueber Racket (focusNextPrevChild=false mit key_cb).  Sektion 82.
+void shim_widget_set_tab_focus(void* widget, int on)
+{
+    static_cast<QWidget*>(widget)->setFocusPolicy(on ? Qt::StrongFocus : Qt::ClickFocus);
 }
 
 // Gives keyboard focus to a widget (called by editor-canvas% grab-caret).
@@ -1851,6 +1907,30 @@ int shim_screen_geometry(int num, int* out)
     return 1;
 }
 
+// Screen-configuration changes (display-changed, HACKING §83.3): screen added/removed, primary screen changed,
+// geometry (resolution/position/orientation) of any screen changed.  gtk reports monitors-changed/size-changed
+// the same way.  The callback only posts (Regel 2).  availableGeometry (panel moves) is deliberately not wired:
+// gtk's size-changed is about the screen size, and DrRacket re-places windows on it.
+typedef void (*shim_display_cb_t)(void* ud);
+static shim_display_cb_t s_display_cb = nullptr;
+static void*             s_display_ud = nullptr;
+static void display_fire() { if (s_display_cb) s_display_cb(s_display_ud); }
+static void display_watch_screen(QScreen* sc)
+{
+    QObject::connect(sc, &QScreen::geometryChanged, sc, [](const QRect&) { display_fire(); });
+}
+void shim_display_set_changed_cb(shim_display_cb_t cb, void* ud)
+{
+    s_display_cb = cb; s_display_ud = ud;
+    static bool wired = false;
+    if (wired) return;
+    wired = true;
+    for (QScreen* sc : QGuiApplication::screens()) display_watch_screen(sc);
+    QObject::connect(qApp, &QGuiApplication::screenAdded, qApp, [](QScreen* sc) { display_watch_screen(sc); display_fire(); });
+    QObject::connect(qApp, &QGuiApplication::screenRemoved, qApp, [](QScreen*) { display_fire(); });
+    QObject::connect(qApp, &QGuiApplication::primaryScreenChanged, qApp, [](QScreen*) { display_fire(); });
+}
+
 void shim_menu_popup(void* menu, int x, int y)
 {
     auto* m = static_cast<QMenu*>(menu);
@@ -2695,7 +2775,9 @@ void* shim_radio_box_create(void* parent_widget, int horizontal,
     // §71: default layout margins/spacing (9/6 px under Fusion) made each radio row
     // ~28 px against gtk's ~23 and inflated dialogs with several radio-boxes
     // (Choose Language: 630 vs gtk 604 px; now ~600).  The container is a bare control substitute.
-    layout->setContentsMargins(0, 4, 0, 4);
+    // left 3: gtk keeps a few px between the item label and the radio indicator; QRadioButton
+    // has none (label touched the indicator, visual matrix §84)
+    layout->setContentsMargins(3, 4, 0, 4);
     layout->setSpacing(4);
 
     auto* group = new QButtonGroup(container);
@@ -2807,7 +2889,10 @@ static void install_enter_accepts_filter(QDialog* dlg)
 // normal shim_pump() call; the Racket side turns that into a synchronous
 // return via the same yield-on-semaphore mechanism as dialog% (docs/
 // HACKING.md §16/§18.3). mode: 0 = open existing file, 1 = save.
-void shim_file_dialog_create(void* parent_widget, int mode,
+// mode: 0 = open existing file, 1 = save, 2 = choose directory (get-directory), 3 = open several files
+// (get-file-list; the callback gets the paths joined by '\n').  Modes 2/3 are only reachable through
+// shim_file_dialog_create_ex (HACKING §83.1); the old export keeps its 0/1 contract.
+static void file_dialog_create_impl(void* parent_widget, int mode,
                              const char* caption, const char* directory,
                              const char* filename, const char* extension,
                              const char* filter,
@@ -2828,12 +2913,19 @@ void shim_file_dialog_create(void* parent_widget, int mode,
     if (mode == 1) {
         dlg->setAcceptMode(QFileDialog::AcceptSave);
         dlg->setFileMode(QFileDialog::AnyFile);
+    } else if (mode == 2) {
+        dlg->setAcceptMode(QFileDialog::AcceptOpen);
+        dlg->setFileMode(QFileDialog::Directory);
+        dlg->setOption(QFileDialog::ShowDirsOnly, true);
+    } else if (mode == 3) {
+        dlg->setAcceptMode(QFileDialog::AcceptOpen);
+        dlg->setFileMode(QFileDialog::ExistingFiles);
     } else {
         dlg->setAcceptMode(QFileDialog::AcceptOpen);
         dlg->setFileMode(QFileDialog::ExistingFile);
     }
 
-    QObject::connect(dlg, &QDialog::finished, [dlg, cb, ud](int result) {
+    QObject::connect(dlg, &QDialog::finished, [dlg, cb, ud, mode](int result) {
         if (plt_qt_debug()) {
             fprintf(stderr, "[PLT_QT_DEBUG] file_dialog finished result=%d\n", result);
             fflush(stderr);
@@ -2846,7 +2938,7 @@ void shim_file_dialog_create(void* parent_widget, int mode,
                 fflush(stderr);
             }
             if (!sel.isEmpty()) {
-                QByteArray path = sel.first().toUtf8();
+                QByteArray path = (mode == 3 ? sel.join(QLatin1Char('\n')) : sel.first()).toUtf8();
                 if (plt_qt_debug()) {
                     fprintf(stderr, "[PLT_QT_DEBUG] file_dialog path='%s' calling cb=%p\n",
                             path.constData(), (void*)cb);
@@ -2902,6 +2994,24 @@ void shim_file_dialog_create(void* parent_widget, int mode,
                 filter ? filter : "");
 
     dlg->open();
+}
+
+void shim_file_dialog_create(void* parent_widget, int mode,
+                             const char* caption, const char* directory,
+                             const char* filename, const char* extension,
+                             const char* filter,
+                             shim_file_dialog_cb_t cb, void* ud)
+{
+    file_dialog_create_impl(parent_widget, mode == 1 ? 1 : 0, caption, directory, filename, extension, filter, cb, ud);
+}
+
+void shim_file_dialog_create_ex(void* parent_widget, int mode,
+                                const char* caption, const char* directory,
+                                const char* filename, const char* extension,
+                                const char* filter,
+                                shim_file_dialog_cb_t cb, void* ud)
+{
+    file_dialog_create_impl(parent_widget, mode, caption, directory, filename, extension, filter, cb, ud);
 }
 
 // ---- printer (printer-dc% / show-print-setup) ----------------------------
@@ -3108,6 +3218,7 @@ void* shim_tab_panel_create(void* parent_widget, shim_callback_t changed_cb, voi
     auto* parent = static_cast<QWidget*>(parent_widget);
     auto* container = new QWidget(parent);
     auto* tabbar = new QTabBar(container);
+    tabbar->setFocusPolicy(Qt::StrongFocus); // Klick auf den Reiter fokussiert die Leiste (gtk), auch ohne Auswahlwechsel (§82)
     tabbar->setExpanding(false); // compact, left-aligned tabs like gtk (sweep finding)
     auto* content = new RacketTabContent(container);
     tabbar->show();

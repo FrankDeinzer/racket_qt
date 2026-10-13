@@ -57,7 +57,6 @@
  (skip-pre-paint? ("canvas.rkt") harmless "canvas.rkt: gtk und win32 liefern hier ebenfalls hartcodiert #f, identisch zu qt. Nur cocoa hat zusätzliche Logik, aber ausschließlich für den GL-Canvas-Zweig (is-gl?); qt implementiert keine GL-Canvases -- kein für qt erreichbarer Unterschied. Tool-Fehlalarm gegen cocoa (§61).")
  (get-dialog-level ("frame.rkt") harmless "frame.rkt: Folgefund NACH dem §61-Fix von window.rkts get-dialog-level (das jetzt an parent delegiert statt hartcodiert 0 zu sein) -- das Tool vergleicht frame.rkts trivialen Override gegen qts eigenes jetzt-substantielles window.rkt (Basisklassen-Spezialfall) und meldet ihn als neuen Gap. Ist aber korrekt und beabsichtigt: gtk/frame.rkt:330, win32/frame.rkt:507 und cocoa/frame.rkt:369 haben ALLE identisch (define/override (get-dialog-level) 0) -- ein Frame terminiert die Delegationskette immer bei 0, sein eigener Dialog-Level wird (falls er zugleich ein dialog% ist) separat über common/dialog.rkts eigenen Override geführt, nicht über den Parent-Chain-Mechanismus. Tool-Fehlalarm, kein Bug (§61).")
 
- (drag-accept-files ("window.rkt") harmless "window.rkt: Basisklassen-Platzhalter; frame.rkt implementiert es real (Block D §2.3, setAcceptDrops + shim_window_set_drop_cb). DrRacket ruft accept-drop-files nur auf Frames; Drops auf Kind-Widgets sind kein genutzter Pfad.")
 
  ;; ---- backlog: bereits bekannte, offene Gaps ----
  ;; (leer seit §75.1: set-icon, get/set-label-position, adopt-child, refresh, register-child gefixt)

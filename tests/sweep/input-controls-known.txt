@@ -1,0 +1,22 @@
+ init => 
+radio-box key-
+slider key-right
+slider key-left
+slider key-up
+slider key-down
+slider page-
+slider key-end
+slider click-track
+choice popup-keys-down2-return
+radio-box end
+list-single key-space
+list-multiple key-space
+list-extended click-row5
+list-extended click-row1
+list-extended double
+list-extended end
+list-extended click-pre
+combo-field arrow-
+tab-panel ctrl-page
+combo-field end
+canvas keys-ctrl-alt
