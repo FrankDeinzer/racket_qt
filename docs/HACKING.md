@@ -8701,3 +8701,217 @@ Artefakt der Matrix: `CLICKROW`-Zeilen treffen wegen des Layoutunterschieds in Q
 **Dateien:** `wx/qt/frame.rkt`, `wx/qt/list-box.rkt`, `wx/qt/utils.rkt`, `qt-shim/src/shim.cpp` (`shim_list_box_set_activate_cb`), neue Skripte/Proben s. o.,
 `examples/dialog-radio-return-probe.rkt` (Radio-Fokus + Default-Button; war unter gtk und Qt schon grün, da die Probe kein Eltern-Frame hat — der Fehler braucht `parent`).
 **ABI:** ein neuer, tolerant gebundener Export (`shim_list_box_set_activate_cb`); der Frame-Fix ist reiner Racket-Code. Windows/macOS: Pull + Rebuild, `func-return`-Äquivalent prüfen (Return im Choose-Language-Dialog).
+
+## §74 — Steuerelement-Schrift (`font`-Initargument) — Find-Leiste „0 Matches" (Linux, 2026-10-12)
+
+### 74.1 Befund und Fix
+
+**Nativ-Vergleich** (`tests/sweep/func-nomatch.sh both 1`, Aufnahmen `out/func-nomatch-r1-gtk|qt.png`): gtk zeigt die Trefferanzeige „0 / Matches" bewusst
+zweizeilig in `small-control-font` (kleine Schrift, Find-Leiste niedrig, Next/Prev/Show Replace ebenfalls klein). Qt zeigte dieselben Controls in der
+Standardschrift (größer): „Matches" breit, Leiste höher, Umbruch wirkte wie ein Fehler. **Ursache:** alle Qt-Steuerelemente (`message%`, `button%`, `check-box%`,
+`choice%`, `radio-box%`, `list-box%`) nahmen das `font`-Initargument entgegen und verwarfen es (gtk: `install-control-font`). DrRacket übergibt `small-control-font`
+u. a. an Find-Leiste, Statuszeile, Tooltips.
+
+**Fix:** neuer, **tolerant** gebundener Shim-Export `shim_widget_set_font(widget, face, size, size_in_pixels, bold, italic, underline)` (`QWidget::setFont`,
+`updateGeometry`). Racket-Seite: `apply-control-font!` in `wx/qt/utils.rkt` (font% -> Face/Größe/Bold/Italic/Underline; **No-op bei `#f` oder wenn das font% dem
+Standard-Steuerelementfont entspricht** — Layout der Default-Controls bleibt unverändert), aufgerufen vor `seed-size-from-native-hint` in `message.rkt`, `button.rkt`,
+`check-box.rkt`, `choice.rkt`, `radio-box.rkt`, `list-box.rkt`. `slider%`/`gauge%` bewusst nicht (Slider-Value-Label separat, kein Symptom). Ergebnis: Qt-Find-Leiste
+entspricht gtk (kleine Schrift, „0 / Matches" zweizeilig wie nativ, Leistenhöhe gleich). Rosa-Probe weiter grün (8933 px Qt).
+
+**Tests:** `raco test tests/stub-audit.rkt style-audit.rkt api-audit.rkt` 16/16, `PLT_QT=1 raco test tests/smoke.rkt` 4/4. **ABI:** ein neuer tolerant gebundener Export
+(`shim_widget_set_font`): mit altem Binary startet alles, Schrift bleibt Standard. Windows/macOS: Pull + Rebuild, Find-Leiste per Screenshot gegen nativ prüfen.
+**Offen:** `slider%`/`gauge%`/`tab-panel%`-Schrift; `get-font`-Rückgabe der Qt-Controls nicht implementiert (wie gtk: unimplemented).
+
+### 74.2 Regressionsprüfung nach dem `font`-Fix (Linux, 2026-10-12)
+
+`tests/sweep/dr-dialogs.sh both` (frischer `PLTADDONDIR`/`XDG_CONFIG_HOME`, Shim mit `shim_widget_set_font`) und `tests/sweep/func-close.sh both`, Aufnahmen in `tests/sweep/out/dlg-*-side.png`, `func-close-dialog-side.png`. Ergebnis: **keine Regression**.
+Alle 9 Preferences-Seiten (Font, Colors, Editing, Warnings, General, Profiling, Browser, Tools, Background Expansion): kein Clipping, keine abgeschnittenen Labels, Layout wie gtk (Fenster 756x635 vs. gtk 752x647). Find-Leiste: kleine Schrift wie gtk. Choose Language: 380x600 vs. gtk 383x604 (vorher 767 hoch — die Schrift-Angleichung hat die Höhendifferenz aus §64.10 beseitigt); alle Buttons sichtbar. „Not saved"-Rückfrage: 385x81 vs. 423x89, Labels/Buttons vollständig. Configure Search: 500x252 vs. gtk 302 (bekannter Theme-Unterschied §64.10), nichts abgeschnitten. Kein Code geändert.
+
+### 74.3 `combo-field%`-Stand (Linux, 2026-10-12)
+
+CLAUDE.md-Block-D-Eintrag „combo-field%-Dropdown offen" ist veraltet: seit §64.6 implementiert (`wx/qt/canvas.rkt`: Pfeilstreifen, `popup-combo`/`append-combo-item`/`clear-combo-items`; `set-combo-text` No-op wie gtk). Erneut geprüft: `examples/combo-field-probe.rkt` unter `PLT_QT=1`, Klick auf Pfeil öffnet Menü alpha/beta/gamma unterhalb des Felds (Qt-Aufnahme `combo-qt-open.png` im Scratchpad); echter „Search in Files"-Dialog zeigt den Pfeil am Dir-Feld (`dlg-search-qt.png`). gtk-Vergleichsaufnahme per synthetischem Klick misslang (`Gtk-WARNING: no trigger event for menu popup`, Automatisierungsartefakt); der gtk-Vergleich aus §64.6 bleibt maßgeblich (gleiches Verhalten, gtk legt die Liste über das Feld). Keine Lücke gefunden, kein Code geändert. Restpunkte unverändert: Windows/macOS ungeprüft (HiDPI-Streifenbreite).
+
+### 74.4 Funktions-Sweep Preferences-Browser-Tab (Linux, 2026-10-12)
+
+`tests/sweep/func-prefs.sh [gtk|qt|both]` (frischer `PLTADDONDIR`/`XDG_CONFIG_HOME`, Aufnahmen `out/func-prefs-browser-{0..3}-side.png`). Ablauf: Preferences (Ctrl+;) → Tab Browser → „Firefox" wählen → „Use proxy" → Host `proxy.invalid`, Port `8080` tippen → OK; Prüfung der Wirkung an `$XDG_CONFIG_HOME/racket/racket-prefs.rktd`; Dialog erneut öffnen (Werte stehen noch, OCR + Aufnahme); Port auf `9999` ändern → „Undo Changes and Close".
+**Ergebnis Qt == gtk:** Prefs-Datei nach OK identisch (`external-browser firefox`, `plt:framework-pref:external-browser firefox`, `plt:framework-pref:plt:http-proxy ("http" "proxy.invalid" 8080)`); Wiederöffnen zeigt Firefox/Use proxy/Host/Port in beiden; nach „Undo Changes and Close" bleibt die Datei unverändert (`8080`), nach Beenden ebenfalls. Kein Befund, kein Code geändert. Grenze: Der Undo-Pfad wird nur über die Prefs-Datei belegt (nicht, dass der Dialog die 9999 beim nächsten Öffnen verwirft). Hinweis Artefakt: `findwin '^Preferences$'` findet auch das versteckte Fenster nach OK („offen" in beiden Modi) — kein Qt-Befund.
+
+### 74.5 Funktions-Sweep Help Desk (Linux, 2026-10-12)
+
+`tests/sweep/func-help.sh`: F1 auf `string-append` (Cursor per Ctrl+End hinter den Identifier) und Help → „Racket Documentation". Der externe Browser wird per Prefs auf ein Skript umgebogen (`(external-browser ("sh <skript> " . ""))`, die `custom`-Form ist ein Paar zweier Strings, kein `(custom …)`-Term), das URL + Trampolin-HTML in eine Marker-Datei schreibt — es startet keine echte Browserinstanz (die Voreinstellung „Ask Later" würde auf dieser Maschine Konqueror öffnen).
+**Ergebnis Qt == gtk:** F1 → `file:///…/doc/search/index.html?q=string-append` (identisch); Menüpunkt → `file:///…/doc/index.html`; Help-Menü hat dieselben Einträge/Reihenfolge. Einzige Abweichung: bei Tastaturöffnung (Alt+H) ist in Qt der erste Eintrag vorselektiert, gtk markiert nichts — Qt-Menü-Konvention, harmlos. Kein Code geändert.
+
+### 74.6 Funktions-Sweep Debugger (Linux, 2026-10-12)
+
+`tests/sweep/func-debugger.sh` (Programm `files/dbg.rkt`, Marker je `note`): Debug-Knopf → Debug-Leiste (Pause/Go/Step/Over/Out), 3× Step, Stack-/Variables-Spalte (`(note ...)`, `mk1 => …`, `s => "start"`), Rechtsklick auf `(f 2)`.
+**Ergebnis Qt == gtk:** Leiste, Schrittfolge (Marker-Fortschritt), Stack/Variables-Inhalt und der Rechtsklick-Treffer (Debugger-Menü „Pause at this point / Continue to this point" statt Standardmenü, nur an der öffnenden Klammer, x=144 im Fenster in beiden Toolkits; Treffer an benachbarten x-Positionen identisch: Rename-/Tack-Menü) stimmen überein. Go ohne Breakpoint läuft in beiden bis `end 102 104`.
+**Nicht belegt:** Das tatsächliche Setzen des Breakpoints (Klick auf „Pause at this point" → Halt vor `(f 2)`) gelang in **keinem** Toolkit zuverlässig — der Rechtsklick-Treffer wechselt zwischen Debugger- und Standardmenü (Zeit-/Positionsabhängigkeit der Automatisierung, identisch in gtk und Qt), sodass dieser Teil als Automatisierungsartefakt/inkonklusiv gewertet wird, nicht als Qt-Bug. Skript meldet es ehrlich („Breakpoint NICHT gehalten"). Offen für manuellen Test: Breakpoint per Hand setzen.
+
+### 74.7 Funktions-Sweep Profiler / Choose Language — zwei echte Qt-Bugs (Linux, 2026-10-12)
+
+`tests/sweep/func-profile.sh`: Choose Language (Statuszeile → Popup → Eintrag) → Ctrl+D (Details), Ctrl+P („Debugging and profiling") → Return (OK) → F5 (Run); Marker `prof.rkt` (fib-Summe 53133) + Aufnahmen. In DrRacket 9.3 erscheint weder nativ noch unter Qt ein „Profile"-Knopf (Symbolleiste unverändert) — der Profiler-UI-Teil ist ohne weitere Installation nicht erreichbar; geprüft ist die Errortrace-Sprachoption und der Lauf damit.
+
+**Bug A: Dialog-Chords (Ctrl+D/R/T/O/P/B…) mit Fokus in einem nativen Steuerelement gingen verloren.** Choose Language schaltet „Show Details" per `on-subwindow-char` auf `Ctrl+D` (die Beschriftungen „(Ctrl+D)", „(Ctrl+P)" …). Unter Qt blieb Ctrl+D wirkungslos (gtk: Dialog klappt auf). Ursache: `NavKeyFilter` (shim.cpp) leitete von nativen Steuerelementen (Radio/Button/Check/…) nur Escape/Return an Racket weiter; Ctrl+<Zeichen> erreichte die `pre-on-char`-Kette des Dialogs nie. **Fix:** `NavKeyFilter` leitet jetzt zusätzlich Ctrl+<druckbares Zeichen> (Qt-Key 0x20–0x7e) weiter (unverändertes Callback-Format `cb(ud, key, mods)`, kein neuer Export, nie konsumiert); `window.rkt` `nav-key-cb` setzt daraus `key-code` (Buchstaben klein, außer mit Shift), `alt-down`, `meta-down`. Menü-Shortcuts bleiben unberührt (QAction-ShortcutOverride kommt vor KeyPress). ABI-neutral, **wirksam erst nach Shim-Rebuild**; alter Shim: Verhalten wie bisher (nur Escape/Return).
+
+**Bug B: Nach jedem modalen Dialog waren Tastatur-Shortcuts im Hauptfenster tot (F5, Ctrl+S, Tippen) bis zum nächsten Mausklick.** Messung: `F5` nach Choose Language (OK *und* Abbrechen) startete den Lauf nicht, Klick auf den Run-Knopf ging; `F5` ohne Dialog und nach reinem Popup+Escape ging; Klick in den Editor + `F5` ging. Ursache: `frame%` `modal-enable` → `shim_widget_set_enabled(0)` auf dem Besitzerfenster; `QWidget::setEnabled(false)` verwirft das Fokus-Widget, und ein bei Aktivierung deaktiviertes Fenster wird von Qt nicht aktiviert — nach dem Wiedereinschalten bleibt ohne Fokus-Widget alles stumm (gtk behält das Fokusfenster). **Fix** (`shim_widget_set_enabled`, shim.cpp): beim Deaktivieren eines Top-Levels das Fokus-Widget merken (`QPointer`), beim Aktivieren per `QTimer::singleShot(0)` (nach dem Hide des Dialogs) `activateWindow()` + `setFocus(OtherFocusReason)` auf das gemerkte Widget. Regel 1/2 unberührt (kein Callback, kein eigener Loop; die resultierenden Focus-In/-Out gleichen Racket-Fokus-Events wie nach einem Mausklick aus). Verifiziert: `F5` nach Choose-Language-Abbruch und -OK startet den Lauf; `func-return.sh`/`func-close.sh` weiter Qt == gtk. ABI-neutral, **wirksam erst nach Rebuild**. Windows/macOS: Rebuild, dann „F5/Ctrl+S direkt nach Schließen eines Dialogs" prüfen (dort evtl. gar nicht betroffen, andere Aktivierungsmechanik).
+
+**Ergebnis nach den Fixes Qt == gtk:** Sprachanzeige „racket, with debugging and profiling [custom]; memory limit: 128 MB.", REPL-Ausgabe `53133`, Marker identisch.
+
+### 74.8 Funktions-Sweep Package Manager (nur Anzeige, Linux, 2026-10-12)
+
+`tests/sweep/func-pkg.sh` (`racket -l- pkg/gui`; nie Update/Remove/Install geklickt, Regel 9): Tab „Currently Installed", Filter tippen, Zeile auswählen, Header-Klick-Sortierung.
+**Ergebnis Qt == gtk:** Zähler `213/213 match` initial, Filter „gui" → `8/213 match`, „zzzzq" → `0/213 match` (Qt per Aufnahme belegt, OCR traf nicht), leeren → `213/213`; Zeilenauswahl aktiviert „Demote to Auto-Installed"/„Remove" in beiden (nicht geklickt); Klick auf „Name" sortiert alphabetisch (2d, 2d-doc, …) in beiden; kein Zusatzfenster. Optische Unterschiede (Qt: breitere Spalten ohne gtk-Textclipping, dunkleres Selektionsblau) sind Theme, kein Befund. Kein Code geändert.
+
+### 74.9 Zusammenfassung (2026-10-12)
+
+Tests: `raco test tests/stub-audit.rkt style-audit.rkt api-audit.rkt` 16/16, `PLT_QT=1 raco test tests/smoke.rkt` 4/4. Neue Skripte: `tests/sweep/func-prefs.sh|help.sh|debugger.sh|profile.sh|pkg.sh`, Testdateien `files/help.rkt|dbg.rkt|prof.rkt`. Geänderte Dateien: `qt-shim/src/shim.cpp` (`NavKeyFilter`, `shim_widget_set_enabled`), `third_party/gui/gui-lib/mred/private/wx/qt/window.rkt` (`nav-key-cb`). **Keine neuen Shim-Exporte**, aber zwei ABI-neutrale Verhaltensänderungen im Shim → Windows/macOS: Pull + Rebuild nötig, kein Startfehler ohne Rebuild. Offen: Breakpoint-Setzen im Debugger per Hand prüfen; Profile-Knopf nicht vorhanden (nativ ebenso).
+
+## §75 — Verbleibende `backlog`-Stubs, Border-Flags (Linux, 2026-10-12)
+
+### 75.1 Stubs
+
+| Methode | Ergebnis |
+|---|---|
+| `frame%` `set-icon` | **gefixt.** Neuer tolerant gebundener Export `shim_window_set_icon(win, argb, w, h, add)` (`QWidget::setWindowIcon`, `add=1` haengt eine weitere Groesse an das QIcon). `frame.rkt`: `set-icon bm [mask] [mode]` (small/big/both, Maske wie gtk), plus **Standard-PLT-Icons 16/32/48** fuer jedes Nicht-Dialog-Frame wie gtk (`icon-pixbufs+glist`); `dialog.rkt` ruft `clear-icon!`. Beleg: `xprop _NET_WM_ICON` Qt == gtk (Standard: 16x16 zuerst, identische Bytezahl 75852; mit `SWEEP_ICON=1` 32x32-Icon). Einziger Aufrufer im Bestand: slideshow. |
+| `panel%` `get/set-label-position` | **gefixt** (echter Zustand, `wxlitem.rkt`/`wxtextfield.rkt` lesen ihn fuer `is-horiz?`/Gauge-/Slider-Groesse). Kein Aufrufer in DrRacket/framework gefunden (Grep ueber `~/racket/share/pkgs`), daher ohne sichtbaren Effekt; billig und gtk-konform. |
+| `panel%` `adopt-child` | **gefixt.** Echter Aufrufer: `mrcontainer.rkt` `reparent` (z. B. Package Manager `pkg/gui.rkt:109`, Close-Knopf). Neuer tolerant gebundener Export `shim_widget_reparent(widget, parent, visible)` (`QWidget::setParent` + Sichtbarkeit wiederherstellen); `window%` bekam `set-parent` (setzt `parent`, Position 0/0). `menu%` ueberschreibt `set-parent` (`define/override`, keine Qt-Umhaengung). Probe: `tests/sweep/panel-api.rkt` — Knopf aus Panel A erscheint in Panel B, Qt == gtk (`out/panel-api-side.png`). |
+| `window%` `refresh` / `panel%` `register-child` | **gefixt.** `window%` `show` meldet sich per `register-child-in-parent` beim Eltern-Panel (frame/dialog ueberschreiben `show`, melden sich nicht an), `panel-mixin` fuehrt die Kinderliste, `refresh` -> `refresh-all-children` -> `refresh` aller Kinder. Probe: `(send panel refresh)` loest `on-paint` des Kind-Canvas aus (Qt 2->3, gtk 4->5). |
+| `drag-accept-files` / `enforce-size` | schon seit §64 erledigt (`drag-accept-files` bleibt `harmless` in `window.rkt`, `frame.rkt` real). |
+| `do-canvas-backing-flush` | **harmless.** `schedule-periodic-backing-flush` wird unter Qt nie geplant (`qt-dc%` blittet in `queue-backing-flush` selbst), der Safety-Net-Hook kann nie zuenden. |
+| `set-combo-text` | **harmless** (gtk hat denselben No-op). |
+
+Allowlist (`stub-audit-allowlist.rktd`): Eintraege fuer die sechs gefixten Methoden entfernt, zwei auf `harmless`; Sektion `backlog` jetzt leer. **ABI:** zwei neue, tolerant gebundene Exporte (`shim_widget_reparent`, `shim_window_set_icon`) — Windows/macOS: Rebuild, ohne Rebuild kein Startfehler, nur Icon fehlt bzw. Reparent bleibt nativ unter dem alten Container (Racket-Seite ist dennoch umgehaengt). Reiner Racket-Teil (Registry/refresh/label-position) wirkt ohne Rebuild. **Tests:** Stub-/Style-/API-Audit 16/16, `PLT_QT=1 raco test tests/smoke.rkt` 4/4, DrRacket-Start (`sweep.sh drracket-main`) ohne Fehler, Menue/Tabs/Toolbar wie vorher.
+
+### 75.2 `'border`/`'control-border`
+
+Die 1-px-Rahmen aus §64.9/§64.10 sind nur noch zu belegen: DrRackets Definitions-`editor-canvas%` (`sweep.sh drracket-main`) hat in gtk und Qt links/oben eine 1-px-Linie (Pixelprofil: gtk (128,128,128), Qt (118,118,118)), also kein Abweichungsbefund; Unterschiede sind Theme-Grau. Das Flag steht im Style-Audit ohnehin nicht mehr als `backlog` (nur `border` fuer `button.rkt`/`tab-panel.rkt` als `harmless`); Kommentar in `style-audit-allowlist.rktd` um den Beleg ergaenzt. Kein Code geaendert.
+
+
+## §76 — Drei offene Beobachtungen nachgemessen (Linux, 2026-10-13)
+
+Kein `wx/qt`-Code, kein Shim-Export, kein Rebuild: reine Messung. Audits/Smoke daher nicht neu gelaufen.
+
+### 76.1 `on-activate` ohne Window-Manager (§69) — nicht gemessen
+
+`which Xvfb Xephyr Xnest xvfb-run Xdummy` -> nichts installiert. `Xorg` und `Xwayland` sind vorhanden, aber nicht ohne Weiteres nutzbar: Xorg braucht ein
+VT/DRM-Geraet (die installierten Treiber sind nur vesa/fbdev/modesetting/hardware-spezifisch, kein `dummy`), Xwayland braucht einen Wayland-Compositor. Regel 9 -> nichts installiert,
+Punkt uebersprungen. **Offene Nutzer-Anforderung (optional):** `Xvfb` (Paket `xvfb`, apt, Ubuntu 24.04-Repo), Zweck: kopfloser X-Server ohne WM, danach
+`DISPLAY=:99 racket examples/on-activate-probe.rkt` (gtk vs `PLT_QT=1`) vergleichen; Pruefung durch Claude Code: `which Xvfb`, `Xvfb -version`.
+Erwartung ohne Messung (Hypothese, nicht belegt): ohne WM gibt es keine `_NET_ACTIVE_WINDOW`/`FocusIn`-Zuteilung, `isActiveWindow()` bleibt `false`, `on-activate` feuert unter Qt nie; gtk analog.
+
+### 76.2 §33.7 Tab-2-Zeilennummern — nicht reproduziert, n=39 gueltig (+1 Artefakt)
+
+Neues Skript `tests/sweep/func-tab2lines.sh [gtk|qt|both] [Laeufe]` (Datei `files/tab2.rkt`, 16 Zeilen `;; LINEnn ...`): frisches DrRacket (`one.rkt`), F5, Ctrl+T, Ctrl+O + getippter Pfad,
+Aufnahme, OCR (Schwellwert + `tesseract --psm 6`): je Zeile muss Gutter-Nummer == `nn` sein; `PLT_QT_SCROLL_DEBUG=1` je Lauf (Log `out/func-tab2-r<N>-qt.log`). Tasten nur mit Active-Window-Check.
+Qt, 40 Laeufe: **39 PASS** (15 Zeilen gelesen, 0 falsche Nummern, Tab 2 korrekt: 1..17), **1 BAD (#37) = Messartefakt**: die Aufnahme zeigt das Konsole-Fenster des Nutzers ueber dem DrRacket-Bereich
+(Fenster nicht im Vordergrund, `spectacle` nimmt den ganzen Bildschirm auf). Das Skript aktiviert das Fenster jetzt vor der Aufnahme. Der Scroll-Tracer zeigte in keinem Lauf eine Auffaelligkeit.
+**Gesamtrate §33.7: 1 historischer Fund in 18 + 39 = 57 gueltigen Versuchen (<= 1/57); in dieser Session 0/39.** Bleibt offen/nicht reproduzierbar; kein Fix (keine belegte Ursache). Kein gtk-Lauf noetig (kein Befund).
+
+### 76.3 Qt -> gtk Bild-Zwischenablage (§2.7/§55.3) — heute funktioniert es, Klipper-Verdacht nicht bestaetigt
+
+Methode (nur lesend, nichts konfiguriert; Klipper laeuft, `qdbus org.kde.klipper` nur zur Anzeige): Schreiber = Racket-Skript (`PLT_QT=1`, 20x20 Bitmap rot/blau,
+`set-clipboard-bitmap`, haelt 40 s); Leser = (1) Python `Gtk.Clipboard` (Targets, `wait_for_image`) und (2) natives gtk-Racket `get-clipboard-bitmap`, Pixel geprueft.
+Ergebnis: Qt-Schreiber **6/6**: beide gtk-Leser bekommen 20x20, rot@(2,2)=(255,0,0), blau@(15,15)=(0,0,255) pixelgenau. gtk-Schreiber (kontrolle) 3/3 identisch.
+Qt bietet Targets `application/x-qt-image, image/png, image/bmp, image/jpeg, ... BITMAP, PIXMAP, TARGETS, MULTIPLE, TIMESTAMP, SAVE_TARGETS`; Klipper-Target `application/x-kde-onlyReplaceEmpty` war diesmal nicht sichtbar.
+Nach Ende/Kill des Schreibers ist das Bild weg (bei Qt **und** gtk gleich: Klipper uebernimmt keine Bilder) — erwartetes Selection-Verhalten, kein Befund.
+**Messfallen:** (a) der gtk-Racket-Leser braucht ~8,8 s Startzeit; ein Schreiber mit 8 s Haltezeit war schon weg -> sechs scheinbare Fehlschlaege (`#f`), reines Artefakt (und ein Skript, das nach dem Schreiben nicht `(exit)` ruft, haengt, weil das offene Frame den Prozess haelt);
+(b) vermutlich waren auch die Fehlschlaege von 2026-09-22 zeitlich bedingt oder Klipper-Zustand — nicht mehr rekonstruierbar. **Einstufung:** kein racket-qt-Bug, Linux-Bild-Interop Qt->gtk als funktional gemessen; Klipper-Hypothese weder bestaetigt noch widerlegt, aber gegenstandslos.
+
+## §77 — Wayland-Testlauf (Linux, 2026-10-13)
+
+**Moeglichkeit:** Session ist X11 (`XDG_SESSION_TYPE=x11`, `DISPLAY=:0`), aber `/usr/bin/kwin_wayland` (5.27.11) und `libqwayland.so` (+ shell-/decoration-Integrationen in
+`~/Qt/6.11.1/gcc_64/plugins`) sind vorhanden. Option (2): `kwin_wayland --virtual --socket wl-test --no-lockscreen --width 1280 --height 800` als temporaerer Nutzerprozess
+(`XDG_CONFIG_HOME` auf Scratch-Verzeichnis, keine Konfigaenderung, nichts installiert; Ende per `kill`). Clients: `env -u DISPLAY WAYLAND_DISPLAY=wl-test QT_QPA_PLATFORM=wayland ...`
+(ohne `DISPLAY` ist xcb ausgeschlossen -> der Lauf ist sicher Wayland); zusaetzlich mit `DISPLAY=:0` (XWayland-aehnlich: X vorhanden, Qt trotzdem Wayland).
+**Grenze:** der virtuelle Compositor hat kein Eingabegeraet und `xdotool` erreicht ihn nicht (X-Tool) -> keine Tasten/Maus/Klick-Tests, kein Screenshot; Fokus-/Popup-Grab-Verhalten
+mit echtem Input bleibt ungemessen. Probe: `examples/wayland-probe.rkt` (je Risiko eine `R <name> <wert>`-Zeile).
+
+**Ergebnis:** `tests/smoke.rkt` unter Wayland 4/4 (auch X11 4/4); Probe laeuft in beiden Wayland-Varianten ohne Absturz durch; echtes DrRacket (`racket -l drracket`) startet unter Wayland,
+40 s ohne Ausgabe/Fehler, endet sauber auf SIGTERM.
+
+| Risiko | Befund unter Wayland |
+|---|---|
+| `shim_get_x11_display` / `register-collecting-blit` | NULL -> `x11-gc-available?` #f, sauberer No-op (Probe `ok`, mit GC dazwischen). Kein Crash. |
+| `shim_widget_get_x11_window` | wird nur nach gelungenem Display-Check gerufen; harmlos. |
+| `shim_key_keysym` (XKB) | **Fix:** nutzte eine eigene `XOpenDisplay`-Verbindung; mit XWayland-`$DISPLAY` waere das ein fremder (nicht der echte) Zustand. Jetzt nur bei `platformName()=="xcb"`, sonst 0 -> `other-*-key-code` = #f (Qt-Keymap des Compositors ist ueber oeffentliche Qt-API nicht abfragbar; libxkbcommon mit Default-Layout waere bei z. B. QWERTZ falsch -> bewusst nicht). **Offen/Degradierung:** Ctrl+Shift+<Buchstabe>-Alternativen fehlen unter Wayland (§64-Symptom koennte dort zurueckkehren; nicht messbar ohne Input). |
+| `get-current-mouse-state` | **Fix:** XQueryPointer auf dem X-Display gilt nur fuer xcb. Unter Wayland jetzt `QGuiApplication::mouseButtons()` (Position = `QCursor::pos`, ohne Fenster-Hover 0,0; Caps-Lock-Bit fehlt). |
+| `warp-pointer` (`shim_cursor_set_pos`) | Qt meldet "requires pointer warp v1 protocol support" (kwin 5.27 virtual: nicht vorhanden), Aufruf kehrt ohne Fehler zurueck, Pointer bewegt sich nicht (wie §70 erwartet). |
+| `move`/`get-x`/`get-y` | Compositor positioniert nicht; `get-x/get-y` melden den zuletzt *angeforderten* Wert (Cache), `on-move` feuert. Initial 0,0 (Konstruktor-x/y 100,100 wirkungslos). Tooltip-Frame (`no-caption float`, x/y) wird angezeigt, aber nicht positioniert -> unter Wayland erscheinen Check-Syntax-Tooltips an Compositor-Position (nicht beseitigbar mit Qt-API; gtk/Wayland identisch eingeschraenkt). |
+| `display-size`/`-count` | 1280x800 / 1 korrekt (`shim_screen_*`). |
+| Zwischenablage | Text (`"wl-text"`) und Bild (20x20) Round-trip im eigenen Prozess OK; `has-x-selection?` meldet #t (Qt-Wert). Cross-Client nicht gemessen. |
+| Popup-Menues | Qt: "Failed to create grabbing popup ... needs transientParent / parent has received input". **Fix (nicht verifiziert):** `shim_menu_popup` setzt unter Wayland das aktive (sonst irgendein sichtbares) Top-Level als `transientParent` des QMenu (`winId()`+`setTransientParent`). Die Warnung bleibt im Test, weil der Probe-Client nie Input empfing (xdg_popup-Grab braucht eine Eingabe-Serial) -> echter Popup-Test braucht reales Wayland mit Input. Kein Crash. |
+| Fokus/`on-activate` | `(#t #f)` -> Aktivierung/Deaktivierung kommt an; `maximize` -> `is-maximized?` #t. |
+| Drag&Drop | `accept-drop-files` ok; echter Drop nicht automatisierbar. |
+| `bell`, `key-event%` | ok (`other-shift-key-code` #f s. o.). |
+
+**Dateien:** `qt-shim/src/shim.cpp` (`shim_is_xcb`, `shim_x11_display` gegated, `get-mouse-state`-Wayland-Zweig, `shim_menu_popup` transientParent, `#include <QWindow>`), `examples/wayland-probe.rkt`.
+Kein neuer Shim-Export, kein `wx/qt/*.rkt`-Aenderung; Shim-Rebuild noetig (ABI-neutral, kein Startfehler ohne Rebuild). Tests: `stub-/style-/api-audit` 16/16, Smoke X11 4/4, Smoke Wayland 4/4.
+**Offene Punkte:** echter Wayland-Lauf mit Input (Popup-Grab, Tastatur/other-key-codes, Cross-Client-Clipboard, Drop, Hover-Tooltips) braucht eine Wayland-Sitzung (z. B. Login-Screen-Auswahl "Plasma (Wayland)", Nutzeraktion); Windows/macOS unberuehrt (`__linux__`-gated bzw. `platformName`-Laufzeitpruefung).
+
+## §78 — `canvas%` mit Style `'gl` (Linux, 2026-10-13)
+
+### 78.1 Machbarkeit (nur lesend geprüft)
+Alles vorhanden, nichts installiert: Qt 6.11.1 `libQt6OpenGL`/`libQt6OpenGLWidgets` + CMake-Pakete (`~/Qt/6.11.1/gcc_64/lib/cmake/Qt6OpenGL*`),
+`QT_FEATURE_opengl 1` (Desktop-GL, kein ES), xcb-GLX/EGL-Integrationsplugins, `/usr/include/GL/gl.h`/`glx.h`, `libGL.so.1`/`libEGL.so.1`/`libOpenGL.so.0` (GLVND),
+`libGLU.so.1`, Paket `sgl` installiert (`~/racket/share/pkgs/sgl`, Beispiele `gears.rkt`, `gl-frame.rkt`). Treiber in dieser VM: Mesa 25.2.8 SVGA3D, GL 4.3 Compatibility.
+
+### 78.2 Entwurf — zwei verworfene Zwischenstände (gemessen)
+1. **`QOpenGLWidget`-Kind im `RacketCanvas`, Racket zeichnet direkt in dessen FBO:** `glReadPixels` im FBO lieferte das Dreieck, sichtbar war aber nur die
+   Löschfarbe — auch ein Scissor-Clear war weg. Gegenprobe: Löschfarbe nach dem Zeichnen auf Gelb gesetzt (ohne `glClear`) -> ganzes Fenster gelb. Qt löscht
+   den Widget-FBO also selbst (mit dem vom Nutzer hinterlassenen Zustand), auch mit `PartialUpdate`; unabhängig von GLX/EGL und Software-GL.
+2. **`QOpenGLWidget` + eigene back/front-FBOs, `paintGL` blittet front:** sichtbar korrekt, aber zwei strukturelle Probleme: vor dem ersten `show` existiert kein
+   Kontext (sgls `gl-frame.rkt` fragt `get-gl-context`/`ok?` *vor* `show` -> `(send #f ok?)`), und Qt baut den Widget-Kontext bei Reparent/Top-Level-Neuerzeugung
+   neu (Display-Listen/Texturen des Nutzers wären weg). Zusätzlich schaltet ein `QOpenGLWidget` das ganze Top-Level auf GL-Komposition.
+
+### 78.3 Umsetzung (endgültig)
+- **Shim** (`qt-shim/src/shim.cpp`, `RacketGL`, QObject-Kind des `RacketCanvas`): eigener `QOpenGLContext` + `QOffscreenSurface`, sofort bei der Canvas-Erzeugung
+  (=> `ok?` vor `show` echt, Kontext lebt so lange wie das Canvas). Racket zeichnet in ein eigenes `back`-FBO (Depth/Stencil kombiniert, optional MSAA);
+  `swap-buffers` = Blit back -> front (löst MSAA auf) + `glReadPixels` (`GL_BGRA`/`8_8_8_8_REV`, Alpha auf 255, vertikal gespiegelt) in `RacketCanvas::backing`
+  + `update()`; angezeigt beim nächsten `shim_pump` vom normalen `paintEvent`. Scissor-Test und Pack-Zustand (`GL_PACK_*`, PBO-Bindung) des Nutzers werden gesichert/
+  wiederhergestellt. Neue FBOs (erste Nutzung, Größenänderung) starten schwarz und setzen den Viewport auf volle Größe (wie ein frisches natives GL-Fenster).
+  `legacy?` -> Compatibility-Profil (sgl braucht `glBegin`), sonst 3.2 Core. Keine Qt->Racket-Callbacks (Regel 1/2), Eingabe unverändert (kein Kind-Widget).
+- **Neue Exporte (alle tolerant gebunden, `wx/qt/utils.rkt`):** `shim_canvas_gl_create`, `shim_gl_is_valid`, `shim_gl_make_current`, `shim_gl_done_current`,
+  `shim_gl_swap`, `shim_gl_pixel_width`, `shim_gl_pixel_height`, `shim_gl_get_handle`.
+- **CMake:** `find_package(Qt6 OPTIONAL_COMPONENTS OpenGL)`; nur wenn gefunden: Link `Qt6::OpenGL` + `RQT_HAVE_GL`. Ohne Modul bauen die Exporte als Stubs.
+  **Neue Laufzeitabhängigkeit `Qt6OpenGL` (Windows: `Qt6OpenGL.dll` aus `C:\Qt\6.11.0\msvc2022_64\bin`, macOS: `QtOpenGL.framework`)** — beides Teil der
+  Standard-Kits; vorhanden prüfen beim Rebuild (`cmake`-Meldung „canvas% 'gl support ON"). `std::max` in der Hausform `(std::max)(…)` (MSVC-Makros).
+- **Racket:** neues `wx/qt/gl-context.rkt` (`qt-gl-context%` erbt `racket/draw/private/gl-context`s `gl-context%`, überschreibt `do-call-as-current`
+  (make-current/done-current per `dynamic-wind`), `do-swap-buffers`, `ok?`, `get-handle`; bei `double-buffered? #f` wird nach jedem `call-as-current`
+  präsentiert). `canvas.rkt`: GL-Zustand bei `'gl` (ohne `'transparent`), `qt-dc%` `get-gl-context` liefert ihn (Nicht-GL-Canvas: `#f`), Raster-Backing-Flush
+  für GL-Canvases unterdrückt (wie gtk `queue-backing-flush` `unless for-gl?`), `get-gl-client-size` = FBO-Größe in Gerätepixeln.
+- **Degradation:** altes Shim / Shim ohne `Qt6::OpenGL` / kein Kontext erzeugbar -> Handle `#f` -> normaler Raster-Canvas, `get-gl-context` `#f` (wie gtk bei
+  Fehlschlag). Gemessen mit `QT_XCB_GL_INTEGRATION=none`: Warnung von Qt, Probe läuft durch, `ok?`/Kontext `#f`, kein Absturz.
+
+### 78.4 Nebenbefunde
+- **`canvas%` `on-size` feuerte unter Qt nie** (unabhängig von `'gl`): gtk ruft am Ende jedes `window%` `set-size` `queue-on-size`, Qt nicht. sgl-Programme setzen
+  dort Viewport/Projektion und bauen Display-Listen (gears: schwarzes Bild). **Gefixt nur für `canvas%`** (`base-canvas%` `set-size` -> `queue-on-size`;
+  `wxwindow.rkt` dedupliziert). Regressionsprüfung: `func-run.sh qt` (Run + REPL, OCR alle Tokens ok), Smoke 4/4, Audits 16/16. **Offen:** andere Widgets/Panels
+  bekommen weiterhin kein `on-size`/`on-move` (gtk: alle) — eigener Punkt, breitere Wirkung, nicht angefasst.
+- **Programmatisches `frame%` `resize` re-layoutet die Kinder unter Qt nicht** (auch ohne `'gl`; `get-width` meldet den neuen Wert, X-Fenster wird größer, Canvas
+  bleibt 300×240; Resize per Window-Manager funktioniert). Vermutlich §32-Dedup (`remember-size` sieht die bereits gecachte Größe). Nicht gefixt.
+- **gtk (upstream-Code — Datei im Fork nur von Upstream-Commits berührt, nicht angefasst):** `canvas%` `'gl` ohne `gl-config` stürzt nativ ab (`prepare-widget-gl-context` reicht `#f` an `choose-glx-fbconfig`
+  -> `send #f get-double-buffered`). Betrifft u. a. `sgl/examples/gears.rkt` nativ; unter Qt läuft gears (`#f` -> Default-`gl-config%`).
+
+### 78.5 Verifikation (Linux/X11, KWin)
+- `examples/gl-canvas-probe.rkt` (rohes `ffi/unsafe`-libGL, kein sgl nötig) + `tests/sweep/gl-canvas.sh` (gtk und Qt; Screenshot je Phase, Pixelprüfung Ecke =
+  Phasenfarbe, Mitte = rotes Dreieck; Resize per `xdotool windowsize`; Klick nur per Maus, keine Tasten): **gtk 3/3 PASS, Qt 3/3 PASS** (initial 300×240,
+  resized 460×330, hide+show). Qt == gtk außerdem für: Kontext + `ok?` vor `show` (#t/#t), Display-Liste + Textur aus `on-size` überleben Hide/Show und ein
+  zweites, nachträglich ins sichtbare Fenster eingefügtes `'gl`-Canvas, Nicht-GL-Canvas `get-gl-context` = `#f`, Mausklick erreicht das GL-Canvas (1).
+- sgl: `gears.rkt` unter Qt rendert korrekt (Tiefentest, Licht), nach „Start" ~400 fps; `gl-frame.rkt` `gl-run` (ok?-Prüfung vor `show`) läuft.
+- Kosten des Readbacks pro `swap-buffers` (Mesa SVGA3D, VM): 300×300 ≈ 0,8 ms, 800×600 ≈ 2,4 ms, 1400×900 ≈ 4,4 ms. gtk-Swap ist vsync-gebunden (≈ 16 ms);
+  unter Qt gibt es **kein vsync** (`set-sync-swap` wirkungslos) — Animationen laufen ungebremst (CPU-Last), aber ohne Tearing (Anzeige über QImage).
+- Audits 16/16 (`'gl`-Eintrag aus `tests/style-audit-allowlist.rktd` entfernt, jetzt umgesetzt), Smoke (Qt) 4/4.
+- Teardown: 3 Runden „GL-Frame in eigenem Custodian/Eventspace zeichnen -> `custodian-shutdown-all` -> GC", danach neues GL-Frame + `exit 0`: sauber
+  (Exit 0, kein `invalid memory reference`). Abhängigkeiten Linux: Shim lädt jetzt zusätzlich `libQt6OpenGL.so.6` und `libOpenGL.so.0` (GLVND; `libQt6Gui`
+  selbst zieht nur `libGLX`/`libEGL`) — **harte** Ladezeit-Abhängigkeiten des Shims (fehlen sie, lädt das ganze Backend nicht), anders als die toleranten Exporte.
+
+### 78.6 Grenzen / Restarbeiten
+- FBO-Semantik: `glBindFramebuffer(…, 0)` zielt auf die Offscreen-Surface, nicht aufs Fenster; `glDrawBuffer(GL_BACK)`/`GL_FRONT` sind im FBO ungültig;
+  `swap-buffers` bindet `back` wieder (eine vom Nutzer gebundene FBO-Bindung geht dabei verloren). sgl/gears nutzen nichts davon.
+- `gl-config` `share-context`, `stereo`, `accum-size`, `sync-swap`, `hires-mode` ignoriert; Depth/Stencil immer kombiniert 24/8 wenn angefordert.
+- `make-gl-bitmap` (`qt/platform.rkt`) weiter `#f` (sgl `gears-bitmap.rkt`): mit derselben Maschinerie (Offscreen-Kontext + FBO + Readback in die Bitmap)
+  ca. 1–2 Tage.
+- HiDPI: FBO in Gerätepixeln, `backing` mit `devicePixelRatio` — auf Linux (Faktor 1) geprüft, macOS-Retina/Windows-Skalierung ungeprüft.
+- Windows/macOS: Rebuild nötig (sonst nur alter Zustand: `'gl` ignoriert, kein Startfehler). macOS: Legacy-Profil = GL 2.1 (FBO-Blit via EXT), 3.2-Core
+  bei `legacy? #f`; Prüfpunkte: `tests/sweep/gl-canvas.sh`-Äquivalent manuell, `sgl/examples/gears.rkt`.
+- Wayland: `QOffscreenSurface` braucht dort EGL-pbuffer/surfaceless — ungeprüft (§77-Umgebung hätte es, kein Lauf in dieser Sitzung).

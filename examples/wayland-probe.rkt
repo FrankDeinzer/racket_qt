@@ -1,0 +1,52 @@
+#lang racket/gui
+;; Probe (docs/HACKING.md §77): X11-spezifische Pfade unter QT_QPA_PLATFORM=wayland.
+;; Gibt je Risiko eine Zeile "R <name> <ergebnis>" aus; Absturz = Befund.  Keine xdotool-Tasten.
+(define (r name v) (printf "R ~a ~s\n" name v) (flush-output))
+(define-syntax-rule (try name e) (r name (with-handlers ([void (lambda (x) (list 'EXN (if (exn? x) (exn-message x) x)))]) e)))
+(define acts '())
+(define f (new (class frame%
+                 (define/override (on-activate a?) (set! acts (cons a? acts)) (super on-activate a?))
+                 (define/override (on-move x y) (printf "R on-move ~a ~a\n" x y) (flush-output) (super on-move x y))
+                 (super-new [label "wl-probe"] [width 320] [height 220] [x 100] [y 100]))))
+(define c (new canvas% [parent f]))
+(send f show #t)
+(sleep/yield 1.5)
+(try 'pos0 (list (send f get-x) (send f get-y)))
+(try 'move (begin (send f move 400 300) (sleep/yield 1) (list (send f get-x) (send f get-y))))
+(try 'display-size (call-with-values (lambda () (get-display-size)) list))
+(try 'display-count (get-display-count))
+(try 'mouse-state (let-values ([(pt l) (get-current-mouse-state)]) (list (send pt get-x) (send pt get-y) l)))
+(try 'warp (begin (send c warp-pointer 50 40) (sleep/yield 0.5)
+                  (let-values ([(pt l) (get-current-mouse-state)]) (list (send pt get-x) (send pt get-y) l))))
+(try (quote has-x-selection) ((dynamic-require (quote mred/private/wx/platform) (quote has-x-selection?) (lambda () (lambda () 'n/a)))))
+(try 'clip-text (begin (send the-clipboard set-clipboard-string "wl-text" 0) (sleep/yield 0.5)
+                       (send the-clipboard get-clipboard-string 0)))
+(try 'clip-image
+     (let ([bm (make-object bitmap% 20 20)])
+       (define dc (new bitmap-dc% [bitmap bm]))
+       (send dc set-brush "red" 'solid) (send dc draw-rectangle 0 0 20 20) (send dc set-bitmap #f)
+       (send the-clipboard set-clipboard-bitmap bm 0) (sleep/yield 0.5)
+       (let ([b (send the-clipboard get-clipboard-bitmap 0)]) (and b (list (send b get-width) (send b get-height))))))
+(try 'collecting-blit
+     (let ([bm (make-object bitmap% 10 10)])
+       (register-collecting-blit c 0 0 10 10 bm bm 0 0 0 0)
+       (collect-garbage) (sleep/yield 0.3)
+       (unregister-collecting-blit c) 'ok))
+(try 'popup
+     (let ([m (new popup-menu%)])
+       (new menu-item% [parent m] [label "one"] [callback void])
+       (send f popup-menu m 20 20) (sleep/yield 1) 'ok))
+(try 'tooltip-frame
+     (let ([t (new frame% [label ""] [style '(no-caption float)] [width 120] [height 40] [x 500] [y 400])])
+       (new message% [parent t] [label "tip"])
+       (send t show #t) (sleep/yield 1)
+       (begin0 (list (send t is-shown?) (send t get-x) (send t get-y)) (send t show #f))))
+(try 'key-event
+     (let ([ke (new key-event% [key-code #\a])]) (send ke get-other-shift-key-code)))
+(try 'drag-accept (begin (send f accept-drop-files #t) 'ok))
+(try 'activate-log (reverse acts))
+(try 'bell (begin (bell) 'ok))
+(try 'maximize (begin (send f maximize #t) (sleep/yield 0.8) (begin0 (send f is-maximized?) (send f maximize #f))))
+(send f show #f)
+(r 'done #t)
+(exit 0)

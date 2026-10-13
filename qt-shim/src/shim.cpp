@@ -1,5 +1,6 @@
 #include <QApplication>
 #include <QGuiApplication>
+#include <QWindow>
 #include <QMainWindow>
 #include <QWidget>
 #include <QPushButton>
@@ -19,6 +20,7 @@
 #include <QSignalBlocker>
 #include <QMenuBar>
 #include <QTimer>
+#include <QHash>
 #include <QPointer>
 #include <QMenu>
 #include <QAction>
@@ -62,6 +64,19 @@
 #include <cstdlib>
 #include <chrono>
 #include <algorithm>
+
+// canvas% 'gl (HACKING §78): own QOpenGLContext + QOffscreenSurface + FBOs,
+// frames read back into RacketCanvas::backing.  Only when CMake found
+// Qt6::OpenGL (RQT_HAVE_GL); otherwise the shim_gl_* exports below are stubs
+// that report "no GL".  Included before the X11 headers on purpose (Xlib's
+// None/Bool/Status macros vs. Qt's GL headers).
+#ifdef RQT_HAVE_GL
+#include <QOpenGLContext>
+#include <QOpenGLFunctions>
+#include <QOpenGLFramebufferObject>
+#include <QOffscreenSurface>
+#include <QSurfaceFormat>
+#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -197,6 +212,9 @@ public:
     void*           focus_ud  = nullptr;
     shim_wheel_cb_t wheel_cb  = nullptr;
     void*           wheel_ud  = nullptr;
+    // canvas% 'gl: the RacketGL state object (shim_canvas_gl_create,
+    // HACKING §78), a QObject child of this canvas; nullptr for raster canvases.
+    QObject*        gl_state  = nullptr;
 
     // Tab / Shift+Tab must reach Racket as ordinary key events (editor
     // indentation; racket/gui's own handle-traverse-key decides whether to
@@ -393,7 +411,10 @@ public:
             auto* ke = static_cast<QKeyEvent*>(ev);
             int k = ke->key();
             bool ret = (k == Qt::Key_Return || k == Qt::Key_Enter);
-            if (k == Qt::Key_Escape || (ret && !qobject_cast<QPushButton*>(o)))
+            // Ctrl+<printable> chords (dialog shortcuts such as Choose Language's Ctrl+D/R/T/O) must also
+            // reach racket/gui's pre-on-char chain; with focus in a native control they were lost (§74.7).
+            bool chord = (ke->modifiers() & Qt::ControlModifier) && k >= 0x20 && k <= 0x7e;
+            if (k == Qt::Key_Escape || chord || (ret && !qobject_cast<QPushButton*>(o)))
                 {
                     Qt::KeyboardModifiers m = ke->modifiers();
                     int bits = (m & Qt::ShiftModifier ? 1 : 0) | (m & Qt::ControlModifier ? 2 : 0)
@@ -887,7 +908,30 @@ void shim_widget_set_focus(void* widget)
 // top-level handle, not per-child (docs/HACKING.md §18.3).
 void shim_widget_set_enabled(void* widget, int enabled)
 {
-    static_cast<QWidget*>(widget)->setEnabled(enabled != 0);
+    auto* w = static_cast<QWidget*>(widget);
+    // Modal dialogs disable their owner windows (frame% modal-enable).  Disabling a window drops its focus
+    // widget, and a window that is disabled when the X11 activation arrives is never activated by Qt, so
+    // after the dialog closed menu shortcuts (F5, Ctrl+S ...) and typing stayed dead until the next click
+    // (gtk keeps the focus window).  Remember the focus widget on disable; on enable activate the window
+    // and give the widget focus back once the dialog is gone (next pump cycle).  HACKING 74.7.
+    static QHash<QWidget*, QPointer<QWidget>> s_modal_focus;
+    const bool was = w->isEnabled();
+    if (!enabled && was && w->isWindow()) {
+        QWidget* fw = QApplication::focusWidget();
+        if (fw && (fw == w || w->isAncestorOf(fw))) s_modal_focus[w] = fw;
+        else s_modal_focus.remove(w);
+    }
+    w->setEnabled(enabled != 0);
+    if (enabled && !was && w->isWindow()) {
+        QPointer<QWidget> g(w);
+        QPointer<QWidget> saved = s_modal_focus.value(w);
+        s_modal_focus.remove(w);
+        QTimer::singleShot(0, w, [g, saved]() {
+            if (!g || !g->isVisible() || !g->isEnabled()) return;
+            g->activateWindow();
+            if (saved && saved->isVisible() && saved->isEnabled()) saved->setFocus(Qt::OtherFocusReason);
+        });
+    }
 }
 
 // QWidget::setVisible() -- toggles the actual native widget's visibility.
@@ -901,6 +945,39 @@ void shim_widget_set_enabled(void* widget, int enabled)
 void shim_widget_set_visible(void* widget, int visible)
 {
     static_cast<QWidget*>(widget)->setVisible(visible != 0);
+}
+
+// subwindow<%> reparent (panel%'s adopt-child -> window%'s set-parent, §75.1): QWidget::setParent
+// moves the child under another container widget.  setParent hides the widget, so the caller's
+// desired visibility is re-applied; the position is kept (Racket re-places the child right after).
+void shim_widget_reparent(void* widget, void* new_parent, int visible)
+{
+    auto* w = static_cast<QWidget*>(widget);
+    w->setParent(static_cast<QWidget*>(new_parent));
+    w->setVisible(visible != 0);
+}
+
+// frame%'s set-icon (§75.1).  `src` = tightly packed straight-alpha (A,R,G,B) bytes, w*h*4.
+// add 0: replace the window icon by this image; 1: add this image as a further size of the
+// current icon (gtk's gtk_window_set_icon_list with several sizes); w <= 0: clear the icon.
+// Returns 1.
+int shim_window_set_icon(void* win, const uint8_t* src, int w, int h, int add)
+{
+    auto* rw = static_cast<QWidget*>(win);
+    if (w <= 0 || h <= 0 || !src) { rw->setWindowIcon(QIcon()); return 1; }
+    QImage img(w, h, QImage::Format_ARGB32);
+    for (int y = 0; y < h; y++) {
+        auto*          dst_row = reinterpret_cast<uint32_t*>(img.scanLine(y));
+        const uint8_t* src_row = src + (std::ptrdiff_t)y * w * 4;
+        for (int x = 0; x < w; x++) {
+            dst_row[x] = (uint32_t(src_row[x * 4 + 0]) << 24) | (uint32_t(src_row[x * 4 + 1]) << 16)
+                       | (uint32_t(src_row[x * 4 + 2]) <<  8) |  uint32_t(src_row[x * 4 + 3]);
+        }
+    }
+    QIcon icon = add ? rw->windowIcon() : QIcon();
+    icon.addPixmap(QPixmap::fromImage(img));
+    rw->setWindowIcon(icon);
+    return 1;
 }
 
 // Translates a point in widget-local coordinates to global screen coordinates
@@ -1027,9 +1104,18 @@ void shim_widget_unset_cursor(void* widget)
 // ever issue read-only global pointer/keyboard queries here, independent of
 // any window. Kept open for the process lifetime (same pattern as e.g.
 // xdotool), not tied to shim_app_quit's QApplication teardown.
+//
+// Only under the xcb platform plugin: under Wayland an XWayland $DISPLAY may exist, but its
+// pointer/keyboard state only tracks X clients' windows, i.e. is stale/wrong for our native
+// Wayland windows (HACKING §77).  Returns null there; callers degrade (Qt-API fallback).
+static bool shim_is_xcb()
+{
+    static const bool xcb = QGuiApplication::platformName() == QLatin1String("xcb");
+    return xcb;
+}
 static Display* shim_x11_display()
 {
-    static Display* dpy = XOpenDisplay(nullptr);
+    static Display* dpy = shim_is_xcb() ? XOpenDisplay(nullptr) : nullptr;
     return dpy;
 }
 #endif
@@ -1091,6 +1177,12 @@ void shim_get_mouse_state(int* out_x, int* out_y, int* out_flags)
             // same bit XQueryPointer already returns, no separate Xkb call.
             if (mask & LockMask)    flags |= 0x80;
         }
+    } else {
+        // Wayland (no global pointer query): Qt's own last-known button state.
+        Qt::MouseButtons mb = QGuiApplication::mouseButtons();
+        if (mb & Qt::LeftButton)   flags |= 0x01;
+        if (mb & Qt::MiddleButton) flags |= 0x02;
+        if (mb & Qt::RightButton)  flags |= 0x04;
     }
 #endif
 
@@ -1182,6 +1274,292 @@ int shim_canvas_get_width(void* canvas_ptr)
 int shim_canvas_get_height(void* canvas_ptr)
 {
     return static_cast<RacketCanvas*>(canvas_ptr)->height();
+}
+
+// ---- canvas% 'gl (HACKING §78) -------------------------------------------
+// The GL context is our own QOpenGLContext on a QOffscreenSurface, created
+// right away (so gl-context<%> ok? is meaningful before the first show, as
+// sgl's gl-frame.rkt expects) and never recreated by Qt (QOpenGLWidget drops
+// and rebuilds its context on reparent/top-level recreation, which would lose
+// the user's display lists and textures).  Racket draws synchronously between
+// shim_gl_make_current/_done_current into our `back` FBO (depth/stencil,
+// optional MSAA).  shim_gl_swap blits back -> `front` (resolving MSAA), reads
+// `front` back and stores it as the canvas' QImage backing, which the normal
+// RacketCanvas::paintEvent shows.  No Qt -> Racket callbacks (Regel 1/2), no
+// change to how the top-level window is composited, input untouched.
+// Measured on the way (§78.2): drawing straight into a QOpenGLWidget's FBO
+// does not work -- Qt clears it on its own schedule with the user's clear colour.
+#ifdef RQT_HAVE_GL
+#ifndef GL_BGRA
+#define GL_BGRA 0x80E1
+#endif
+#ifndef GL_UNSIGNED_INT_8_8_8_8_REV
+#define GL_UNSIGNED_INT_8_8_8_8_REV 0x8367
+#endif
+#ifndef GL_PACK_ROW_LENGTH
+#define GL_PACK_ROW_LENGTH 0x0D02
+#endif
+#ifndef GL_PACK_SKIP_ROWS
+#define GL_PACK_SKIP_ROWS 0x0D03
+#endif
+#ifndef GL_PACK_SKIP_PIXELS
+#define GL_PACK_SKIP_PIXELS 0x0D04
+#endif
+#ifndef GL_PIXEL_PACK_BUFFER
+#define GL_PIXEL_PACK_BUFFER 0x88EB
+#endif
+#ifndef GL_PIXEL_PACK_BUFFER_BINDING
+#define GL_PIXEL_PACK_BUFFER_BINDING 0x88ED
+#endif
+
+class RacketGL : public QObject {
+public:
+    RacketCanvas*             canvas  = nullptr;
+    QOpenGLContext*           ctx     = nullptr;   // child of this
+    QOffscreenSurface*        surface = nullptr;   // child of this
+    QOpenGLFramebufferObject* back    = nullptr;
+    QOpenGLFramebufferObject* front   = nullptr;
+    int want_depth = 0, want_stencil = 0, want_samples = 0;
+
+    explicit RacketGL(RacketCanvas* c) : QObject(c), canvas(c) {}
+    ~RacketGL() override {
+        // Children (ctx, surface) are deleted after this body, so the
+        // context is still alive here.
+        if (ctx && surface && ctx->makeCurrent(surface)) {
+            delete back;  back = nullptr;
+            delete front; front = nullptr;
+            ctx->doneCurrent();
+        }
+    }
+
+    bool isCurrent() const { return QOpenGLContext::currentContext() == ctx; }
+
+    QSize pixelSize() const {
+        const qreal r = canvas->devicePixelRatioF();
+        return QSize((std::max)(1, qRound(canvas->width() * r)),
+                     (std::max)(1, qRound(canvas->height() * r)));
+    }
+
+    // Context must be current.  (Re)creates back/front when the canvas' pixel
+    // size changed; fresh buffers start black and the viewport is set to the
+    // full size (what a newly created native GL window starts with).
+    bool ensureBuffers() {
+        const QSize sz = pixelSize();
+        if (back && front && back->size() == sz) return true;
+        delete back;  back = nullptr;
+        delete front; front = nullptr;
+        QOpenGLFramebufferObjectFormat bf;
+        bf.setAttachment((want_depth > 0 || want_stencil > 0)
+                         ? QOpenGLFramebufferObject::CombinedDepthStencil
+                         : QOpenGLFramebufferObject::NoAttachment);
+        if (want_samples > 0) bf.setSamples(want_samples);
+        back  = new QOpenGLFramebufferObject(sz, bf);
+        front = new QOpenGLFramebufferObject(sz);
+        if (!back->isValid() || !front->isValid()) {
+            delete back;  back = nullptr;
+            delete front; front = nullptr;
+            return false;
+        }
+        QOpenGLFunctions* f = ctx->functions();
+        GLfloat cc[4];
+        f->glGetFloatv(GL_COLOR_CLEAR_VALUE, cc);
+        const GLboolean scissor = f->glIsEnabled(GL_SCISSOR_TEST);
+        f->glDisable(GL_SCISSOR_TEST);
+        f->glClearColor(0, 0, 0, 1);
+        front->bind();
+        f->glClear(GL_COLOR_BUFFER_BIT);
+        back->bind();
+        f->glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+        f->glClearColor(cc[0], cc[1], cc[2], cc[3]);
+        if (scissor) f->glEnable(GL_SCISSOR_TEST);
+        f->glViewport(0, 0, sz.width(), sz.height());
+        return true;
+    }
+
+    // back -> front (resolves MSAA), then read front into the canvas backing.
+    // Context must be current.  The user's scissor test and pixel-pack state
+    // are restored afterwards; `back` is bound again.
+    void present() {
+        if (!back || !front) return;
+        QOpenGLFunctions* f = ctx->functions();
+        const GLboolean scissor = f->glIsEnabled(GL_SCISSOR_TEST);
+        if (scissor) f->glDisable(GL_SCISSOR_TEST);
+        QOpenGLFramebufferObject::blitFramebuffer(
+            front, QRect(QPoint(0, 0), front->size()),
+            back,  QRect(QPoint(0, 0), back->size()),
+            GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        if (scissor) f->glEnable(GL_SCISSOR_TEST);
+
+        GLint align = 4, rowlen = 0, skiprows = 0, skippix = 0, pbo = 0;
+        f->glGetIntegerv(GL_PACK_ALIGNMENT, &align);
+        f->glGetIntegerv(GL_PACK_ROW_LENGTH, &rowlen);
+        f->glGetIntegerv(GL_PACK_SKIP_ROWS, &skiprows);
+        f->glGetIntegerv(GL_PACK_SKIP_PIXELS, &skippix);
+        f->glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &pbo);
+        f->glPixelStorei(GL_PACK_ALIGNMENT, 4);
+        f->glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+        f->glPixelStorei(GL_PACK_SKIP_ROWS, 0);
+        f->glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
+        if (pbo) f->glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+
+        const QSize sz = front->size();
+        QImage raw(sz, QImage::Format_ARGB32);
+        front->bind();
+        // GL_BGRA + 8_8_8_8_REV = one uint32 0xAARRGGBB per pixel on any
+        // endianness, i.e. QImage::Format_ARGB32's layout.
+        f->glReadPixels(0, 0, sz.width(), sz.height(), GL_BGRA,
+                        GL_UNSIGNED_INT_8_8_8_8_REV, raw.bits());
+
+        f->glPixelStorei(GL_PACK_ALIGNMENT, align);
+        f->glPixelStorei(GL_PACK_ROW_LENGTH, rowlen);
+        f->glPixelStorei(GL_PACK_SKIP_ROWS, skiprows);
+        f->glPixelStorei(GL_PACK_SKIP_PIXELS, skippix);
+        if (pbo) f->glBindBuffer(GL_PIXEL_PACK_BUFFER, (GLuint)pbo);
+        back->bind();
+
+        // GL rows are bottom-up; the window is opaque (like a GLX window), so
+        // alpha is forced to 255 while flipping.
+        QImage img(sz, QImage::Format_ARGB32_Premultiplied);
+        const int h = sz.height(), w = sz.width();
+        for (int y = 0; y < h; y++) {
+            const uint32_t* src = reinterpret_cast<const uint32_t*>(raw.constScanLine(h - 1 - y));
+            uint32_t*       dst = reinterpret_cast<uint32_t*>(img.scanLine(y));
+            for (int x = 0; x < w; x++) dst[x] = src[x] | 0xFF000000u;
+        }
+        img.setDevicePixelRatio(canvas->devicePixelRatioF());
+        canvas->backing = img;
+        canvas->update();
+    }
+};
+#endif
+
+// Creates the GL state for a canvas% with style 'gl.  Arguments mirror
+// gl-config%: depth/stencil/multisample sizes, legacy? (compatibility
+// profile, needed for glBegin & co., i.e. sgl), double-buffered? (single-
+// buffered presentation is done on the Racket side: swap after each
+// call-as-current).  Returns the GL handle, or NULL when this shim was built
+// without Qt OpenGL support or no context could be created -- racket/gui then
+// keeps a plain raster canvas and get-gl-context answers #f (as gtk does).
+void* shim_canvas_gl_create(void* canvas_ptr, int depth, int stencil,
+                            int samples, int legacy, int dbl)
+{
+#ifdef RQT_HAVE_GL
+    (void)dbl;
+    auto* c = static_cast<RacketCanvas*>(canvas_ptr);
+    if (!c) return nullptr;
+    if (c->gl_state) return c->gl_state;
+    QSurfaceFormat fmt = QSurfaceFormat::defaultFormat();
+    fmt.setRenderableType(QSurfaceFormat::OpenGL);
+    if (legacy) {
+        fmt.setProfile(QSurfaceFormat::CompatibilityProfile);
+    } else {
+        // gtk asks for the newest core profile it can get (>= 3.2); ask for
+        // 3.2 core, which drivers satisfy with their newest compatible version.
+        fmt.setVersion(3, 2);
+        fmt.setProfile(QSurfaceFormat::CoreProfile);
+    }
+    auto* g = new RacketGL(c);
+    g->want_depth   = depth;
+    g->want_stencil = stencil;
+    g->want_samples = samples;
+    g->ctx = new QOpenGLContext(g);
+    g->ctx->setFormat(fmt);
+    if (!g->ctx->create()) { delete g; return nullptr; }
+    g->surface = new QOffscreenSurface(nullptr, g);
+    g->surface->setFormat(g->ctx->format());
+    g->surface->create();
+    if (!g->surface->isValid()) { delete g; return nullptr; }
+    c->gl_state = g;
+    return g;
+#else
+    (void)canvas_ptr; (void)depth; (void)stencil; (void)samples;
+    (void)legacy; (void)dbl;
+    return nullptr;
+#endif
+}
+
+// 1 while the context is usable.
+int shim_gl_is_valid(void* gl)
+{
+#ifdef RQT_HAVE_GL
+    auto* g = static_cast<RacketGL*>(gl);
+    return (g && g->ctx && g->ctx->isValid()) ? 1 : 0;
+#else
+    (void)gl; return 0;
+#endif
+}
+
+// Makes the context current with the `back` FBO bound.  0 = not possible.
+int shim_gl_make_current(void* gl)
+{
+#ifdef RQT_HAVE_GL
+    auto* g = static_cast<RacketGL*>(gl);
+    if (!g || !g->ctx || !g->ctx->makeCurrent(g->surface)) return 0;
+    if (!g->ensureBuffers()) return 0;
+    g->back->bind();
+    return 1;
+#else
+    (void)gl; return 0;
+#endif
+}
+
+void shim_gl_done_current(void* gl)
+{
+#ifdef RQT_HAVE_GL
+    auto* g = static_cast<RacketGL*>(gl);
+    if (g && g->ctx && g->isCurrent()) g->ctx->doneCurrent();
+#else
+    (void)gl;
+#endif
+}
+
+// gl-context<%> swap-buffers: present `back` in the canvas.  Works whether or
+// not the context is current; a swap inside call-as-current leaves it current
+// with `back` bound.
+void shim_gl_swap(void* gl)
+{
+#ifdef RQT_HAVE_GL
+    auto* g = static_cast<RacketGL*>(gl);
+    if (!g || !g->ctx) return;
+    const bool was_current = g->isCurrent();
+    if (!was_current && !g->ctx->makeCurrent(g->surface)) return;
+    g->present();
+    if (!was_current) g->ctx->doneCurrent();
+#else
+    (void)gl;
+#endif
+}
+
+// Size of the GL drawing surface in device pixels (get-gl-client-size).
+int shim_gl_pixel_width(void* gl)
+{
+#ifdef RQT_HAVE_GL
+    auto* g = static_cast<RacketGL*>(gl);
+    return g ? g->pixelSize().width() : 0;
+#else
+    (void)gl; return 0;
+#endif
+}
+
+int shim_gl_pixel_height(void* gl)
+{
+#ifdef RQT_HAVE_GL
+    auto* g = static_cast<RacketGL*>(gl);
+    return g ? g->pixelSize().height() : 0;
+#else
+    (void)gl; return 0;
+#endif
+}
+
+// gl-context<%> get-handle: the QOpenGLContext* (opaque to Racket).
+void* shim_gl_get_handle(void* gl)
+{
+#ifdef RQT_HAVE_GL
+    auto* g = static_cast<RacketGL*>(gl);
+    return g ? static_cast<void*>(g->ctx) : nullptr;
+#else
+    (void)gl; return nullptr;
+#endif
 }
 
 void shim_canvas_destroy(void* canvas_ptr)
@@ -1490,6 +1868,20 @@ void shim_menu_popup(void* menu, int x, int y)
         if (x + sz.width() > avail.right() + 1)
             x = std::max(avail.left(), avail.right() + 1 - sz.width());
     }
+    // Wayland: a popup needs a transient parent (xdg_popup), otherwise Qt logs "Failed to
+    // create grabbing popup" and the menu may not appear.  QMenu is created parentless, so
+    // attach the active (or any visible) top-level window's QWindow.  No-op under X11/others.
+    if (QGuiApplication::platformName().startsWith(QLatin1String("wayland"))) {
+        QWidget* par = QApplication::activeWindow();
+        if (!par) {
+            for (QWidget* w : QApplication::topLevelWidgets())
+                if (w != m && w->isVisible() && w->windowHandle()) { par = w; break; }
+        }
+        if (par && par->windowHandle()) {
+            m->winId(); // force native window creation so windowHandle() exists
+            if (m->windowHandle()) m->windowHandle()->setTransientParent(par->windowHandle());
+        }
+    }
     m->popup(QPoint(x, y));
 }
 
@@ -1591,6 +1983,28 @@ int shim_label_set_color(void* label_ptr, int use, int r, int g, int b, int a)
     QPalette pal = lbl->palette();
     pal.setColor(QPalette::WindowText, QColor(r, g, b, a));
     lbl->setPalette(pal);
+    return 1;
+}
+
+// Control font (message%/button%/check-box%/... `font` init argument; gtk: install-control-font).
+// face may be NULL/empty (keep the application font's family); size is in points unless
+// size_in_pixels; weight_bold/italic/underline are 0/1.  Works on any QWidget.  Returns 1.
+int shim_widget_set_font(void* widget_ptr, const char* face, double size, int size_in_pixels,
+                         int bold, int italic, int underline)
+{
+    auto* w = static_cast<QWidget*>(widget_ptr);
+    if (!w) return 0;
+    QFont f = w->font();
+    if (face && *face) f.setFamily(QString::fromUtf8(face));
+    if (size > 0) {
+        if (size_in_pixels) f.setPixelSize((int)(size + 0.5));
+        else                f.setPointSizeF(size);
+    }
+    f.setBold(bold != 0);
+    f.setItalic(italic != 0);
+    f.setUnderline(underline != 0);
+    w->setFont(f);
+    w->updateGeometry();
     return 1;
 }
 
