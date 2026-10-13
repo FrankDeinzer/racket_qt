@@ -549,7 +549,12 @@ protected:
 
     void moveEvent(QMoveEvent* e) override {
         QMainWindow::moveEvent(e);
+#ifdef Q_OS_WIN
+        // Windows: frame position = outer window rect, like the win32 backend (see shim_window_get_pos).
+        if (move_cb) move_cb(move_ud, frameGeometry().x(), frameGeometry().y());
+#else
         if (move_cb) move_cb(move_ud, geometry().x(), geometry().y());
+#endif
     }
 
     // File drag & drop (window%::drag-accept-files, Block D §2.3).  Only local
@@ -748,12 +753,19 @@ int shim_cursor_set_pos(int x, int y)
     return 1;
 }
 
-// Current client-area position (screen coordinates) -> out[0]=x, out[1]=y.  Returns 1.
+// Current window position (screen coordinates) -> out[0]=x, out[1]=y.  Returns 1.  Client-area origin
+// (gtk_window_get_position semantics) everywhere except Windows, where it is the outer frame origin like
+// the win32 backend: with a client origin a default-placed window had its title bar above the screen.
 int shim_window_get_pos(void* win, int* out)
 {
     auto* rw = static_cast<RacketWindow*>(win);
+#ifdef Q_OS_WIN
+    out[0] = rw->frameGeometry().x();
+    out[1] = rw->frameGeometry().y();
+#else
     out[0] = rw->geometry().x();
     out[1] = rw->geometry().y();
+#endif
     return 1;
 }
 
@@ -926,7 +938,18 @@ int shim_window_is_fullscreen(void* win)
 // Called by Racket's layout engine after it computes positions.
 void shim_widget_set_geometry(void* widget, int x, int y, int w, int h)
 {
-    static_cast<QWidget*>(widget)->setGeometry(x, y, w, h);
+    auto* wdg = static_cast<QWidget*>(widget);
+#ifdef Q_OS_WIN
+    // Top-level frames: (x, y) is the outer frame origin (see shim_window_get_pos), so shift by the
+    // frame margins.  winId() creates the native window (not shown) so the margins are known; the
+    // style flags (shim_window_set_style_flags) are already set by then.
+    if (dynamic_cast<RacketWindow*>(wdg)) {
+        wdg->winId();
+        x += wdg->geometry().x() - wdg->frameGeometry().x();
+        y += wdg->geometry().y() - wdg->frameGeometry().y();
+    }
+#endif
+    wdg->setGeometry(x, y, w, h);
 }
 
 // canvas% 'no-focus: the widget never takes keyboard focus (policy 0 = Qt::NoFocus).
@@ -1905,6 +1928,23 @@ int shim_screen_geometry(int num, int* out)
     const QRect g = scr[num]->geometry();
     out[0] = g.x(); out[1] = g.y(); out[2] = g.width(); out[3] = g.height();
     return 1;
+}
+
+// Like shim_screen_geometry but without task bar (QScreen::availableGeometry) -- Windows only, where the
+// win32 backend's display-size without full-screen? is the work area.  Returns 0 (unsupported) elsewhere:
+// gtk reports the whole monitor, and the Racket side then keeps using shim_screen_geometry.
+int shim_screen_available_geometry(int num, int* out)
+{
+#ifdef Q_OS_WIN
+    const QList<QScreen*> scr = QGuiApplication::screens();
+    if (num < 0 || num >= scr.size()) return 0;
+    const QRect g = scr[num]->availableGeometry();
+    out[0] = g.x(); out[1] = g.y(); out[2] = g.width(); out[3] = g.height();
+    return 1;
+#else
+    (void)num; (void)out;
+    return 0;
+#endif
 }
 
 // Screen-configuration changes (display-changed, HACKING §83.3): screen added/removed, primary screen changed,
