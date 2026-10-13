@@ -805,7 +805,7 @@ void shim_widget_set_drop_cb(void* w, shim_drop_cb_t cb, void* ud)
 void shim_window_set_size_limits(void* win, int min_w, int min_h, int max_w, int max_h)
 {
     auto* rw = static_cast<RacketWindow*>(win);
-    rw->setMinimumSize(std::max(0, min_w), std::max(0, min_h));
+    rw->setMinimumSize((std::max)(0, min_w), (std::max)(0, min_h));
     rw->setMaximumSize(max_w < 0 ? QWIDGETSIZE_MAX : max_w,
                        max_h < 0 ? QWIDGETSIZE_MAX : max_h);
 }
@@ -1944,9 +1944,9 @@ void shim_menu_popup(void* menu, int x, int y)
         const QRect avail = scr->availableGeometry();
         const QSize sz = m->sizeHint();
         if (y + sz.height() > avail.bottom() + 1)
-            y = std::max(avail.top(), y - sz.height());
+            y = (std::max)(avail.top(), y - sz.height());
         if (x + sz.width() > avail.right() + 1)
-            x = std::max(avail.left(), avail.right() + 1 - sz.width());
+            x = (std::max)(avail.left(), avail.right() + 1 - sz.width());
     }
     // Wayland: a popup needs a transient parent (xdg_popup), otherwise Qt logs "Failed to
     // create grabbing popup" and the menu may not appear.  QMenu is created parentless, so

@@ -148,7 +148,7 @@
       ;; mred-Methoden (z.B. set-parent), nicht die Plattform-Klasse.
       (send-targets (read-forms f) acc
                     (or (equal? dir (build-path priv "wx" "common"))
-                        (regexp-match? #rx"/wx[^/]*[.]rkt$" (path->string f))))))
+                        (regexp-match? #rx"[/\\]wx[^/\\]*[.]rkt$" (path->string f))))))
   acc)
 
 (define (rkt-files dir)
@@ -164,7 +164,7 @@
   (for ([dir (list priv (build-path priv "wx" "common"))])
     (for ([f (rkt-files dir)]
           #:when (or (equal? dir (build-path priv "wx" "common"))
-                     (regexp-match? #rx"/wx[^/]*[.]rkt$" (path->string f))))
+                     (regexp-match? #rx"[/\\]wx[^/\\]*[.]rkt$" (path->string f))))
       (for ([n (in-set (methods-in (read-forms f)))]) (set-add! acc n))))
   acc)
 
