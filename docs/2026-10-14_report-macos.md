@@ -74,19 +74,56 @@ Funktion wurde stattdessen in echtem DrRacket geprüft (s. §5).
   und Tab verhalten sich dort plausibel (Folgezeile eingerückt, Fokus springt nicht weg). Im
   Definitions-Editor **nicht** getestet.
 
-## 6. Nicht geprüft (offen für macOS)
+## 6. Nachprüfung der zunächst offenen Punkte (später am selben Tag)
 
-- Fokus-Reasons: Edit-Menü öffnen, Eintrag wählen / Menü + Escape + Tippen (§64).
-- Datei-Drop aufs Fenster (`shim_window_set_drop_cb`), Fenster unter Minimalgröße ziehen
-  (`shim_window_set_size_limits`).
-- `setAutoDefault` (Return auf fokussiertem Button), Tab im Definitions-Editor reindentet.
-- Cmd-Shortcuts als §58.1-Regressionstest, echte Ctrl-Emacs-Belegungen (Ctrl+A/Ctrl+E).
-- `message.rkt`/`tab-panel.rkt` `get-top-frame` (beschriftete Controls melden Fokus) — nur indirekt
-  über `set-focus-probe` und Fokus-Zähler der Matrix abgedeckt.
-- `shim_screen_available_geometry`: auf macOS laut Banner Rückgabe `0` (Stub) — nicht separat
-  geprüft; Fenster liegt trotzdem korrekt unterhalb der Menüleiste.
-- Die Linux-/X11-Sweeps (`tests/sweep/func-*.sh`, `sweep.sh`, `visual-matrix.sh`, `input-matrix.sh`)
-  brauchen `xdotool`/`spectacle` und sind auf macOS nicht lauffähig.
+Prefs-Datei vorher gesichert (`org.racket-lang.prefs.rktd`); danach nur automatisch geschriebene
+Einträge geändert (Splash-Breite, `most-recent-lang-line`, Fensteranteil, `last-opened-files`),
+Fensterposition unverändert. Vor jedem Tastendruck wurde geprüft, dass `racket` im Vordergrund ist.
+
+| Punkt | Ergebnis |
+|---|---|
+| Datei-Drop (`shim_window_set_drop_cb`) | **PASS.** `examples/drop-probe.rkt`, echter Maus-Drag aus einem Finder-Fenster (`cliclick dd/dm/du`). Nativ und Qt identisch: `drop canvas-accept => a.txt`, `drop frame => b.txt` (Rückfall auf den Frame). |
+| Fenstergrenzen (`shim_window_set_size_limits`) | **PASS.** Eigene Probe (Canvas `min 500×300`, nicht dehnbares Fenster `300×200`), per Accessibility auf `200×150` bzw. `900×700` gezogen: nativ und Qt klemmen identisch auf `500×328` / `300×228` (inkl. 28 px Titelleiste). |
+| `setAutoDefault` / Return im Dialog | **Teilweise abweichend, s. Befund B.** Tippen + Return → `BUTTON OK` (nativ = Qt). Escape → schließt (nativ = Qt). Fokus auf *Cancel* + Return → **nativ `BUTTON OK`, Qt `BUTTON Cancel`.** |
+| Fokus-Reasons (Menü) | **PASS.** Edit-Menü per Klick geöffnet, nach 4 s weiterhin offen und vollständig; Escape schließt; anschließendes Tippen landet im Editor. Einen Eintrag nach ≥ 3 s anzuklicken wurde **nicht** getestet. |
+| Tab im Definitions-Editor | **PASS.** Unformatierter Text (per Cmd+V eingefügt), Cmd+A, Tab → `(define (f x)` / `  (let ([y x])` / `    y))` korrekt eingerückt. |
+| Cmd-Shortcuts (§58.1-Regression) | **PASS.** Cmd+A (Auswahl/Ersetzen), Cmd+V (Einfügen), Cmd+C (Zwischenablage per `pbpaste` geprüft). |
+| Ctrl-Emacs-Belegungen | **PASS.** Ctrl+A / Ctrl+E bewegen auf Zeilenanfang/-ende (`XabcY`). |
+| `get-top-frame` (beschriftete Controls) | Nur indirekt: In der Matrix melden `choice`/`list-box-columns` unter Qt `frame-focus-window-eq #t` (nativ `#f`, vgl. §4). Keine eigene Prüfung. |
+| `shim_screen_available_geometry` | Auf macOS laut Banner Stub (`0`). Fenster liegt unterhalb der Menüleiste (`77,30`), nicht separat geprüft. |
+| Linux-/X11-Sweeps (`func-*.sh`, `sweep.sh`, `visual-matrix.sh`, `input-matrix.sh`) | Nicht lauffähig (brauchen `xdotool`/`spectacle`). |
+
+### Befund A (neu, offen): Cmd+Q beendet ohne Rückfrage bei ungespeichertem Inhalt
+
+- **Reproduktion:** DrRacket unter `PLT_QT=1`, Text tippen (Titel `Untitled - DrRacket*`), Cmd+Q →
+  Prozess beendet sich innerhalb 1 s mit `exit=0`, **kein** „The file ‚Untitled' is not saved."-Dialog.
+  Nativ (gleiche Schritte) erscheint der Dialog (Don't Save / Cancel / Save). 2/2 reproduziert.
+- **Cmd+W ist nicht betroffen:** Schließen des Fensters fragt unter Qt wie nativ.
+- **Folge:** Die ungespeicherte Arbeit liegt nur noch als Autosave vor; der nächste *native* Start zeigte
+  den Wiederherstellungs-Dialog („Original file / Backup file").
+- **Hypothese (nicht verifiziert):** Das „Quit racket" im macOS-App-Menü ist Qts Standardeintrag und umgeht
+  Racket-seitig `can-close?`/`application-quit-handler`. Im Qt-Backend kommt `application-quit-handler` nirgends
+  vor (`platform.rkt:235` `cancel-quit` ist ein No-op), alle DrRacket-eigenen `QAction`s haben `NoRole` (§22),
+  Cocoa dagegen hängt `terminate:` an den Racket-Handler (`wx/cocoa/menu-bar.rkt:144`). Auf Windows/Linux
+  liegt Quit im File-Menü und läuft durch das Framework — dort vermutlich nicht betroffen (nicht geprüft).
+- **Status:** nicht gefixt, geparkt. Ein Fix bräuchte die App-Menü-Quit-Aktion an den Racket-Quit-Handler zu binden.
+
+### Befund B (neu, offen): Return auf fokussiertem Nicht-Default-Button
+
+`QPushButton::setAutoDefault(true)` (Block D, Linux-motiviert) lässt Return den **fokussierten** Button
+auslösen (gtk/win32-Verhalten). Cocoa dagegen löst bei Return stets den Default-Button aus. Betrifft
+macOS-Dialoge, in denen per Tab ein anderer Button als OK fokussiert wurde. Kein Datenverlust, aber
+Abweichung von der nativen Konvention. Nicht gefixt (Kandidat: `#ifdef Q_OS_MACOS`).
+
+### Beobachtung C (kein Befund): Shortcut-Spalte im Edit-Menü ohne ⌘
+
+Im Screenshot zeigt die Shortcut-Spalte nur den Buchstaben (`Z`, `X`, `C` …), auch im **nativen** DrRacket —
+Darstellungsartefakt der Aufnahme, kein Qt-Unterschied.
+
+### Beobachtung D (kein Befund, Test-Artefakt): Reihenfolge Menü-Shortcut vs. Zeichen
+
+Wurden Cmd+A und anschließende Zeichen per AppleScript ohne Pause gesendet, wirkte Cmd+A erst *nach* den
+Zeichen. Mit 0,5–0,7 s Pause korrekt. Bei Handeingabe nicht erreichbar; nicht weiter verfolgt.
 
 ## 7. Methodik-Fehler und Nebenwirkungen
 
@@ -101,6 +138,25 @@ Funktion wurde stattdessen in echtem DrRacket geprüft (s. §5).
 - `pgrep -x` schlägt in dieser Shell mit „illegal byte sequence" fehl (Locale) — Prozessprüfung
   stattdessen über `ps -axo pid,lstart,command | grep`.
 
+Weitere Methodik-Funde aus der Nachprüfung (§6):
+
+- **Unbeabsichtigter Drop ins Terminal:** Ein Drag-Versuch landete im Eingabefeld der Claude-Code-Sitzung
+  (Pfad `…/dropfix/a.txt`), weil iTerm statt Finder aktiv war. `AXRaise` allein aktiviert eine App nicht;
+  `set frontmost to true` auf Finder + `AXRaise` auf dem Probe-Fenster ist die funktionierende Reihenfolge.
+- **Echter Drag braucht `cliclick dd:` + `dm:` + `du:`** — `m:` sendet nur Bewegungs-, keine Drag-Events
+  (es wurde nur markiert, kein Drag-Session gestartet).
+- **`pkill`/`pgrep -x`/`kill` per Muster:** `pkill` scheitert an der Locale („illegal byte sequence"); ein
+  `grep`-Muster, das im eigenen Aufruf vorkommt (`[d]ialog-keys-probe`), tötet die eigene Shell (Exit 144).
+  Abhilfe: Skript in eine Datei, Prozess über `$!` beenden.
+- **Zwei `racket`-Prozesse:** `System Events` adressiert beide als `racket`; Fenster-Operationen treffen
+  dann das falsche Fenster. Vor Tests alte Probes beenden.
+- Test-Aufruf mit mehreren Prozessen: Steuer-Pipe (`mkfifo`) braucht einen dauerhaft offenen Schreiber
+  (`(sleep 900 > pipe &)`), sonst ist der Dateideskriptor im nächsten Bash-Aufruf weg.
+
 ## 8. Befunde
 
-Keine neuen Qt-Defekte. Kein Fix, keine ABI-Änderung in dieser Session; Repo-Änderungen nur Doku.
+- **Befund A (offen):** Cmd+Q ohne Speichern-Rückfrage bei ungespeichertem Inhalt (Datenverlust-Risiko, nur macOS
+  untersucht) — s. §6.
+- **Befund B (offen):** Return auf fokussiertem Nicht-Default-Button löst unter Qt diesen Button aus, nativ den
+  Default — s. §6.
+- Sonst keine neuen Qt-Defekte. Kein Fix, keine ABI-Änderung in dieser Session; Repo-Änderungen nur Doku.
