@@ -273,6 +273,16 @@ Aufgabe:
 > Rebuild, **auf Linux/macOS gegen die dortige Referenz prüfen:** `message.rkt` (Fokus-Callback + `get-top-frame`) und
 > `tab-panel.rkt` (`get-top-frame`) — beschriftete `slider%`/`choice%`/`list-box%`/`radio-box%` melden Fokus (`set-focus-probe`,
 > `behavior-matrix`). Windows-Matrix-Skript: `tests/sweep/behavior-matrix.ps1` (nativ win32 gegen Qt).
+>
+> **macOS nachgebaut+validiert 2026-10-14** (`docs/2026-10-14_report-macos.md`): Pull auf Umbrella `f535b40` +
+> gui `1efb2c03`, Shim-Rebuild ohne Build-Fix, 205 `shim_*`-Exporte (`nm -gU`, vier neue stichprobenartig bestätigt).
+> Alle Suiten grün (stub/api/callback/init/style-audit, `key-map` 56/56, Smoke 4/4). Echtes DrRacket: Titelleiste
+> sichtbar, Fensterposition überlebt Neustart, Tab-[x] schließt per echtem Mausklick. **Damit sind auf macOS alle
+> Rebuild-Pflichten aus den Bannern seit 2026-09-30 abgeschlossen.** Offen für macOS bleiben die nicht geprüften
+> Punkte (Fokus-Reasons, Datei-Drop, `size_limits`, `setAutoDefault`, Cmd-/Ctrl-Shortcut-Regression) — Liste in §6
+> des Reports. **Methodik:** `PLTADDONDIR` isoliert die Prefs auf macOS **nicht** (`~/Library/Preferences/
+> org.racket-lang.prefs.rktd`) — Prefs-Datei vorher sichern. AppleScript-`click at` löst auf dem Tab-[x] nur
+> AX-Press des Tabs aus (Artefakt, vgl. §51.2), `cliclick c:x,y` verwenden.
 
 **Windows:**
 ```powershell
