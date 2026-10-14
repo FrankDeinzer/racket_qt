@@ -160,3 +160,46 @@ Weitere Methodik-Funde aus der Nachprüfung (§6):
 - **Befund B (offen):** Return auf fokussiertem Nicht-Default-Button löst unter Qt diesen Button aus, nativ den
   Default — s. §6.
 - Sonst keine neuen Qt-Defekte. Kein Fix, keine ABI-Änderung in dieser Session; Repo-Änderungen nur Doku.
+
+## 9. Fixes für Befund A und B (2026-10-14, macOS)
+
+### Fix A — Cmd+Q fragt wieder nach (ABI: ein neuer, tolerant gebundener Export)
+
+- **Erste Hypothese widerlegt:** Ein `QEvent::Quit`-Event-Filter auf der `QApplication` (analog zu Cocoas
+  `applicationShouldTerminate:` → `queue-quit-event`, dann Cancel) wurde nie erreicht. Messung: bei Cmd+Q
+  kommt **kein** `QEvent::Quit` (Typ 20) im App-Filter an; Qt 6.11s Cocoa-Delegate beendet ohne dieses
+  Event (AppKit `terminate:` → `exit`). Der Filter wurde wieder entfernt.
+- **Lösung:** Eine `QAction` mit `QuitRole` (`Quit`, `QKeySequence::Quit`), die `shim_menubar_add_menu` beim
+  **ersten** Menü je Menüleiste unter `#ifdef Q_OS_MACOS` in dieses Menü legt (Property `plt_quit_role`
+  markiert die Leiste). Qts Cocoa-Integration verlegt sie in den App-Menü-Eintrag „Quit racket" und leitet
+  Cmd+Q/Dock/Menü auf `QAction::triggered`. Das ruft den neuen Callback `s_quit_cb`, der nur postet (Regel 2)
+  und in Racket `queue-quit-event` auslöst — also genau den `application-quit-handler`, den Cocoa auch
+  benutzt. Kein zusätzliches Top-Level-Menü (Menüleisten-Aktionen werden anderswo per Index angesprochen).
+- **Neuer Export** `shim_app_set_quit_cb(cb, ud)`, in `wx/qt/utils.rkt` **tolerant** gebunden (alter Shim:
+  No-op, Qt beendet wie bisher sofort). Registrierung in `qt-init!` (`wx/qt/queue.rkt`).
+- **Verifiziert (echtes DrRacket, `PLT_QT=1`):** Text tippen, Cmd+Q → „The file ‚Untitled' is not saved."
+  (Don't Save / Cancel / Save), App läuft weiter. *Cancel* → App und Text bleiben. Erneutes Cmd+Q →
+  *Don't Save* → `exit=0`. Cmd+Q ohne ungespeicherten Inhalt → sofort `exit=0`. Ctrl+Q löst **keinen** Quit aus
+  (Emacs-Belegung unberührt, trotz `AA_MacDontSwapCtrlAndMeta`). File-Menü unverändert (endet bei „Close Tab",
+  kein Quit-Rest), neun Menüs wie zuvor.
+- **Nicht geprüft:** Dock-Menü „Quit"/Logout (nehmen denselben AppKit-Pfad); Windows/Linux (der Code ist
+  `#ifdef Q_OS_MACOS`, dort ohne Wirkung); Mehrfenster-Szenarien mit mehreren Menüleisten.
+
+### Fix B — Return im Dialog löst den Default-Button aus (ABI-neutral, nur Verhalten nach Rebuild)
+
+- `shim_button_create`: `setAutoDefault(true)` jetzt `#ifndef Q_OS_MACOS`. Damit lässt ein `QPushButton`
+  Return durch.
+- **Folgefehler dabei gefunden und behoben:** Der `NavKeyFilter` schloss Return auf `QPushButton` bewusst
+  aus (Überlassen an `autoDefault`). Ohne `autoDefault` passierte bei Fokus auf einem Button **gar nichts**
+  (`shown` ohne `BUTTON …`). Auf macOS wird Return von Buttons jetzt ebenfalls an Racket weitergeleitet
+  (`#ifdef Q_OS_MACOS`), Racket-seitig läuft die Dialog-Traversal zum Default-Button.
+- **Verifiziert (`dialog-keys-probe`):** Fokus auf *Cancel*, *OK* und Textfeld + Return → in allen drei Fällen
+  `BUTTON OK closed`, identisch zu nativ. Escape schließt (nativ = Qt). Space auf fokussiertem *Cancel* löst
+  unter Qt *Cancel* aus (Qt-/Cocoa-Konvention); nativ ging Space in dieser Automatisierung ins Textfeld,
+  weil `focus` auf einem Cocoa-Button ohne „Full Keyboard Access" keinen Tastaturfokus setzt — dieselbe
+  Eigenart wie bei den Fokus-Sektionen der Verhaltensmatrix (§4).
+- **Linux/Windows unverändert:** `setAutoDefault(true)` und der bisherige Return-Ausschluss bleiben dort.
+
+### Tests nach den Fixes
+`stub-audit` 9/9, `api-audit` 4/4, `callback-audit` 5/5, `init-audit` 3/3, `style-audit` 3/3,
+`key-map` 56/56, `smoke` 4/4 mit **und** ohne `PLT_QT`.

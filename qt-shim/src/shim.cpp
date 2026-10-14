@@ -401,7 +401,8 @@ protected:
 // radio, slider, choice or button, Escape (dialog cancel) and Return (default
 // button) never reached racket/gui's dialog traversal.  The filter forwards
 // just those keys and never consumes them.  Return on a QPushButton is left to
-// the button (autoDefault clicks *that* button, like gtk).
+// the button (autoDefault clicks *that* button, like gtk) -- except on macOS,
+// where Cocoa's Return always fires the dialog's default button.
 class NavKeyFilter : public QObject {
 public:
     shim_nav_key_cb_t cb; void* ud;
@@ -414,7 +415,14 @@ public:
             // Ctrl+<printable> chords (dialog shortcuts such as Choose Language's Ctrl+D/R/T/O) must also
             // reach racket/gui's pre-on-char chain; with focus in a native control they were lost (§74.7).
             bool chord = (ke->modifiers() & Qt::ControlModifier) && k >= 0x20 && k <= 0x7e;
-            if (k == Qt::Key_Escape || chord || (ret && !qobject_cast<QPushButton*>(o)))
+#ifdef Q_OS_MACOS
+            // macOS: buttons are not autoDefault (see shim_button_create), so Return on a
+            // focused button must reach racket/gui's dialog traversal -> default button.
+            const bool ret_button_ok = true;
+#else
+            const bool ret_button_ok = false;
+#endif
+            if (k == Qt::Key_Escape || chord || (ret && (ret_button_ok || !qobject_cast<QPushButton*>(o))))
                 {
                     Qt::KeyboardModifiers m = ke->modifiers();
                     int bits = (m & Qt::ShiftModifier ? 1 : 0) | (m & Qt::ControlModifier ? 2 : 0)
@@ -585,6 +593,14 @@ protected:
 
 // ---- lifecycle ----------------------------------------------------------
 
+// Application-level "quit" request callback (macOS app-menu Quit / Cmd+Q).  Racket
+// registers it; the QuitRole action added in shim_menubar_add_menu calls it.  The
+// callback only posts (Regel 2).  Not a QEvent::Quit filter: Qt 6.11's Cocoa
+// delegate ends the process without ever sending that event to the app.
+typedef void (*quit_cb_t)(void*);
+static quit_cb_t s_quit_cb = nullptr;
+static void* s_quit_ud = nullptr;
+
 void shim_app_init(void)
 {
     if (s_app) return;
@@ -620,6 +636,13 @@ void shim_app_quit(void)
     delete s_app;
     s_app = nullptr;
 }
+
+void shim_app_set_quit_cb(quit_cb_t cb, void* ud)
+{
+    s_quit_cb = cb;
+    s_quit_ud = ud;
+}
+
 
 void shim_pump(int max_ms)
 {
@@ -1695,8 +1718,13 @@ void* shim_button_create(void*           parent_widget,
     auto* btn = new RacketButton(QString::fromUtf8(label), parent);
     // Return/Enter on a *focused* button clicks it (gtk does; Qt only does so
     // when autoDefault is set, which it defaults to false outside a QDialog).
-    // Block D §2.2.
+    // Block D §2.2.  Not on macOS: Cocoa's Return always fires the *default*
+    // button, whichever button has focus (measured 2026-10-14, dialog-keys-probe:
+    // focus on Cancel + Return -> native OK, Qt Cancel).  Without autoDefault the
+    // button ignores Return and it reaches the dialog's default-button handling.
+#ifndef Q_OS_MACOS
     btn->setAutoDefault(true);
+#endif
     if (click_cb) {
         QObject::connect(btn, &QPushButton::clicked,
                          [click_cb, ud]() { click_cb(ud); });
@@ -1859,6 +1887,26 @@ void shim_menubar_add_menu(void* menubar, void* menu)
     // this, a top-level bar action can be silently reclassified/relocated by
     // Qt's Cocoa integration based on its title text alone.
     a->setMenuRole(QAction::NoRole);
+#ifdef Q_OS_MACOS
+    // App-menu "Quit racket" / Cmd+Q.  Qt's default ends the process immediately
+    // (AppKit terminate: -> exit), bypassing Racket's application-quit-handler and
+    // with it the unsaved-changes prompt (QEvent::Quit never reaches the app --
+    // measured 2026-10-14).  A QuitRole action makes Qt's Cocoa integration route
+    // the app-menu item to it instead; it is moved out of this menu into the app
+    // menu, so nothing shows here.  One per menu bar, in the first menu added (bar
+    // actions are addressed by position elsewhere, so no extra top-level menu).
+    // The callback only posts (Regel 2), as cocoa's applicationShouldTerminate: does.
+    QMenuBar* mb = static_cast<QMenuBar*>(menubar);
+    if (s_quit_cb && !mb->property("plt_quit_role").toBool()) {
+        mb->setProperty("plt_quit_role", true);
+        QMenu* qm = static_cast<QMenu*>(menu);
+        QAction* q = new QAction(QStringLiteral("Quit"), qm);
+        q->setMenuRole(QAction::QuitRole);
+        q->setShortcut(QKeySequence::Quit);
+        QObject::connect(q, &QAction::triggered, [] { if (s_quit_cb) s_quit_cb(s_quit_ud); });
+        qm->addAction(q);
+    }
+#endif
 }
 
 // Sets a menu's title. Needed for top-level bar menus: QMenuBar::addMenu(QMenu*)

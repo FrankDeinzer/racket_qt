@@ -280,11 +280,16 @@ Aufgabe:
 > sichtbar, Fensterposition überlebt Neustart, Tab-[x] schließt per echtem Mausklick. **Damit sind auf macOS alle
 > Rebuild-Pflichten aus den Bannern seit 2026-09-30 abgeschlossen.** Die zunächst offenen Punkte sind nachgeprüft
 > (Report §6): Datei-Drop, `size_limits`, Fokus-Reasons (Menü), Tab-Reindent, Cmd-Shortcuts und Ctrl-Emacs-Belegungen
-> **PASS**. **Zwei neue offene Befunde:** (A) **Cmd+Q beendet DrRacket unter Qt ohne „not saved"-Rückfrage** bei
-> ungespeichertem Inhalt (nativ fragt; Cmd+W fragt auch unter Qt) — Datenverlust-Risiko, Hypothese: Qts Standard-„Quit"
-> im App-Menü umgeht den Racket-Quit-Handler (`application-quit-handler` kommt in `wx/qt` nirgends vor), ungefixt;
-> (B) Return auf fokussiertem Nicht-Default-Button löst unter Qt diesen Button aus (`setAutoDefault`), nativ den
-> Default — ungefixt. **Methodik:** `PLTADDONDIR` isoliert die Prefs auf macOS **nicht** (`~/Library/Preferences/
+> **PASS**. **Zwei Befunde gefunden und am selben Tag behoben** (Report §6/§9): (A) **Cmd+Q beendete DrRacket unter Qt ohne
+> „not saved"-Rückfrage** (Datenverlust-Risiko; Cmd+W fragte schon) — Qt 6.11s Cocoa-Delegate beendet ohne `QEvent::Quit`
+> (App-Filter nie erreicht, Hypothese widerlegt); Fix: `QAction` mit `QuitRole` im ersten Menü jeder Menüleiste
+> (`#ifdef Q_OS_MACOS`, `shim_menubar_add_menu`), Callback → `queue-quit-event` → `application-quit-handler`. **ABI:** ein neuer,
+> **tolerant** gebundener Export `shim_app_set_quit_cb` (alter Shim: Qt beendet wie bisher sofort, kein Startfehler);
+> **Windows/Linux:** ohne Wirkung (macOS-only), Rebuild nur für ABI-Gleichstand. (B) Return auf fokussiertem Button löste
+> unter Qt diesen Button statt des Default-Buttons aus — Fix: `setAutoDefault(true)` nur noch `#ifndef Q_OS_MACOS`, plus
+> Return-Weiterleitung von Buttons im `NavKeyFilter` auf macOS (ohne sie reagierte der Button gar nicht). ABI-neutral,
+> nur nach Shim-Rebuild wirksam, Linux/Windows unverändert. Beides am echten DrRacket bzw. `dialog-keys-probe` verifiziert
+> (Cancel/Don't Save/Ctrl+Q-Gegenprobe; Return auf Cancel/OK/Textfeld = nativ). **Methodik:** `PLTADDONDIR` isoliert die Prefs auf macOS **nicht** (`~/Library/Preferences/
 > org.racket-lang.prefs.rktd`) — Prefs-Datei vorher sichern. AppleScript-`click at` löst auf dem Tab-[x] nur
 > AX-Press des Tabs aus (Artefakt, vgl. §51.2), `cliclick c:x,y` verwenden; echte Drags brauchen `cliclick dd:/dm:/du:`.
 
@@ -600,8 +605,6 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
 
 ### Offene Befunde (künftige Session nötig)
 
-- **macOS: Cmd+Q beendet ohne „not saved"-Rückfrage** (2026-10-14, `docs/2026-10-14_report-macos.md` §6, Befund A) — 2/2 reproduziert, nativ fragt, Cmd+W fragt auch unter Qt. Datenverlust-Risiko (nur Autosave bleibt). Hypothese: Qts Standard-„Quit" im App-Menü umgeht den Racket-Quit-Handler. Windows/Linux nicht geprüft (dort liegt Quit im File-Menü).
-- **macOS: Return auf fokussiertem Nicht-Default-Button löst diesen aus** (Befund B, `setAutoDefault`, Block D) — nativ Cocoa löst den Default-Button aus. Kandidat `#ifdef Q_OS_MACOS`.
 - §33.7 — einmaliger, seither in 17 Wiederholungen nicht reproduzierter Tab-2-Zeilennummern-Defekt (Linux, `editor-canvas%`), Rate ≤1-in-18, `PLT_QT_SCROLL_DEBUG=1` für künftige Diagnose vorbereitet
 - Bild-Zwischenablage Cross-Toolkit (Qt→gtk) auf **Linux weiterhin ungeklärt fehlgeschlagen** (§2.7/§55.3, vermutete KDE-Klipper-Interferenz, nicht bestätigt) — auf Windows **und** macOS lief derselbe Test (Qt→nativ) sauber durch (§56.3/§57.3), stützt die Klipper-Hypothese 2:1, beweist sie aber nicht (andere Qt-Platform-Plugins auf Windows/macOS als auf Linux). Nur noch Linux offen.
 - `register-/unregister-collecting-blit` ist bewusst **nur für X11 implementiert** (§55.5) — Wayland/Windows/macOS bleiben ohne GC-Indikator-Sichtbarkeit (kein Regressionsschaden, aber auch kein neuer Fortschritt dort); ein echter macOS/Windows-Pfad wäre ein eigener künftiger Block. Auf macOS zusätzlich strukturell bestätigt: sauberer No-op auch bei installierter/laufender XQuartz (§57.4, Compile-Guard `#ifdef __linux__`).
