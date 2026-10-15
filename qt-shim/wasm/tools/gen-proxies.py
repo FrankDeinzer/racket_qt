@@ -29,6 +29,10 @@ for m in re.finditer(r"^typedef\s+void\s*\(\*\s*(\w+)\)\s*\(([^)]*)\)\s*;", text
 
 
 def split_args(s):
+    # comments inside a parameter list (`int kind, // 0=single ...`) would end up in the parameter text and hide a
+    # callback type from the generator (the raw Racket function pointer then reached Qt: "table index is out of bounds")
+    s = re.sub(r"//[^\n]*", "", s)
+    s = re.sub(r"/\*.*?\*/", "", s, flags=re.S)
     s = s.strip()
     if s in ("", "void"):
         return []
@@ -206,6 +210,9 @@ for ret, name, args in funcs:
     if name in SPECIAL:
         continue
     typed = [parse_param(p, i) for i, p in enumerate(args)]
+    for t, n in typed:
+        if re.search(r"_cb_t\b|_callback_t\b", t) and t.replace("const ", "").strip() not in cb_types:
+            raise SystemExit("%s: parameter %r looks like a callback but its type %r is not a known callback typedef" % (name, n, t))
     decl = ", ".join("%s %s" % (t, n) for t, n in typed) if typed else "void"
     call = []
     pre, post = [], []

@@ -9406,3 +9406,21 @@ Callback-Leck (und die `QMainWindow`s) verschwinden? Befunde:
   deshalb in der Praxis fast nie (1 von 200 Frames mit Kindern) und wurde wieder entfernt: Nutzen null, Absturzrisiko auf drei Plattformen.
 - **Konsequenz:** Verstecke Fenster sind unter allen Backends ein (kleines) Dauerleck. Ein echtes Freigeben bräuchte einen deterministischen Auslöser
   (z. B. `on-close` ohne Wiederöffnen) und eine Klärung, wer die Frames festhält — eigener Block, nicht Teil der WASM-Arbeit.
+
+### 85.13 Kitchen-Sink im Browser (gemessen, 2026-10-15)
+
+`qt-shim/wasm/test/kitchen-sink.rkt`: Menüleiste (Untermenü, Checkable, Shortcut), `tab-panel%`, `text-field%`, `choice%`, `slider%`, `gauge%`,
+`check-box%`, `radio-box%`, `button%`, `editor-canvas%`/`text%`, `canvas%`, `list-box%`, Popup-Menü, `message-box` und `dialog%` (modal, per
+Thread geschlossen). Jeder Schritt loggt `CHK <name> OK|FAIL`, Callbacks loggen `NOTE …`.
+- **Programmatisch:** 25 von 25 Schritten OK (Werte setzen/lesen, Callbacks, Resize, Tab-Wechsel, modaler Dialog). Screenshot: alle Widgets sauber
+  gerendert (dunkles Qt-Theme folgt dem Browser).
+- **Echte Maus/Tastatur (DevTools):** Menü öffnen (Eintrag, Häkchen, Shortcut-Text „Ctrl+O"), Choice-Dropdown, Tab-Klick (`(tab 1)`), Listenklick
+  (`(list (1))`, `(list (3))`), Tippen ins Textfeld (`"wasm ok"` Zeichen für Zeichen). Ein `NOTE`/Callback pro Aktion.
+- **Fehler gefunden und behoben (`gen-proxies.py`):** Stand ein Zeilenkommentar in der Parameterliste direkt vor dem Callback-Parameter
+  (`shim_list_box_create(parent, int kind, // 0=single …\n shim_callback_t sel_cb, …)`), erkannte der Generator den Callback-Typ nicht und reichte den
+  **rohen Racket-Funktionszeiger** an Qt durch; der erste Klick in eine `list-box%` endete mit `RuntimeError: table index is out of bounds`
+  (aus Qts `itemSelectionChanged`-Lambda). Jetzt werden Kommentare vor dem Parsen entfernt, und der Generator bricht ab, wenn ein Parameter nach
+  Callback aussieht (`*_cb_t`/`*_callback_t`), dessen Typ aber nicht als Callback-Typedef bekannt ist. (Diagnose: Link mit `--profiling-funcs` —
+  Achtung, der Linker faltet identische Funktionen, die Namen im Stack können täuschen.)
+- **Beobachtungen, kein Defekt:** `select-all` im Editor löst im Browser die Warnung `Clipboard.write … Document is not focused` aus (Qt schreibt die
+  Auswahl in die Zwischenablage; ohne Fokus im Headless-Chrome verweigert); `popup-menu%` hat keine `dismiss`-Methode (Testfehler, nicht Backend).
