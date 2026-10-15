@@ -95,6 +95,5 @@ und `racket/gui/base` braucht ~90 s statt 0,6 s.
 - Preload-Verzeichnisse und das Programm sind für Ninja unsichtbar; `links.rktd` der Nutzlast und `RACKET_QT_MAIN` sind
   deshalb als `LINK_DEPENDS` gesetzt (neue Nutzlast ⇒ Relink).
 
-**Achtung nach Änderungen an `third_party/gui`:** Der Orchestrator erkennt geänderte lokale Pakete nicht zuverlässig (veraltete `.zo`,
-HACKING §85.11). Vor dem App-Build `.work/pkg-catalog/*local-*`, `.work/consume-work/*/final-*` und den passenden
-`.work/app-payload-cache/<hash>` im Submodul löschen.
+Der Orchestrator verwirft seine wiederverwendeten Final-Pass-Schatten selbst, wenn sich lokale Pakete (`third_party/gui`) ändern, und
+prüft, dass jedes Modul ein `.zo` hat (HACKING §85.11); manuelles Cache-Löschen ist nicht nötig.

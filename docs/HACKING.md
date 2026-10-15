@@ -9355,9 +9355,12 @@ und die Forks `third_party/gui`/`third_party/draw` müssen als lokale Pakete in 
 - **Chrome mit GPU (Punkt 2):** `CHROME_GPU=1` in `serve-and-run.mjs` (ohne SwiftShader-Flags; loggt den WebGL-Renderer):
   `ANGLE Metal Renderer: Apple M1` statt SwiftShader. Ergebnis gleich (Tasten 2–4 ms, `on-paint` 18–26 ms), Ladezeit
   1,8 s (GPU) vs. 2,7 s (SwiftShader). Der Pfad ist CPU-/Racket-gebunden; die GPU ändert die Bedienbarkeit nicht.
-- **Fund für Punkt 3 (Orchestrator):** Der Payload-Cache-Schlüssel (`app-payload-cache/<hash>`) und der Final-Pass-Arbeitsordner
-  (`consume-work/*/final-{xtgt,hostzo,addon}`) berücksichtigen den **Inhalt lokaler Pakete nicht**: nach einer Änderung an `gui-lib`
-  landeten veraltete `.zo` (alte Quell-SHA in `compiled/*.dep`) im Image → `instantiate-linklet: reference to a variable that is not
-  exported`. Abhilfe vor jedem App-Build nach Änderung lokaler Pakete: `.work/pkg-catalog/*local-*`,
-  `.work/consume-work/*/final-*` und den betroffenen `app-payload-cache/<hash>` löschen (Skript im Scratchpad, s. u.).
-  Prüfung: `compiled/utils_rkt.dep` im entpackten Image darf nicht vorhanden sein bzw. muss die aktuelle Quell-SHA tragen.
+- **Fund für Punkt 3 (Orchestrator) — behoben:** Der Payload-Cache-Schlüssel enthält den Inhalt lokaler Pakete bereits; schuld waren
+  die für Geschwindigkeit wiederverwendeten Final-Pass-Schatten `consume-work/*/final-{xtgt,hostzo}`: `harvest!` kopierte daraus
+  veraltete `.zo` (alte Quell-SHA in `compiled/*.dep`) ins Image → `instantiate-linklet: reference to a variable that is not
+  exported`. Fix im Fork (`build/consume.rkt`): (1) Marker `final-local-hash` — ändert sich der Inhalt der lokalen Pakete, werden
+  `final-xtgt`/`final-hostzo`/`final-addon` verworfen (Meldung „local package content changed: dropping the reused final-pass
+  shadows"); (2) strengere Prüfung: **jedes** `.rkt`-Modul eines lokalen Pakets muss ein `compiled/*_rkt.zo` im Image haben
+  (Ausnahmen `local-zo-exempt`: `tests/examples/scribblings/doc`, `embedded-gui`, `info.rkt`), sonst bricht `cross-install` ab. Getestet:
+  geänderter Inhalt → Wipe + Prüfung besteht (424 `.zo`); unverändert → kein Wipe. Der Negativfall der Modulprüfung (fehlendes `.zo`)
+  wurde nicht künstlich erzeugt. Manuelles Löschen der Caches ist nicht mehr nötig.
