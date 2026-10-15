@@ -9393,3 +9393,16 @@ und legt sie in `PKG_CONFIG_PATH`; `freetype.sh` nutzt `-Dzlib=system` und den S
 `draw`-Gruppe (libpng … pango) baut offline in 5 min durch. **Offen:** Der Produktivbaum ist noch nicht neu gebaut — die Rezept-Änderung ändert den
 Manifest-Hash von Freetype und damit den Runtime-Cache-Schlüssel; der nächste Runtime-Build baut Freetype (und, laut Hinweis in `deps.sh`, manuell
 auch dessen Verbraucher Cairo/Pango) neu und sollte danach `racket/draw` kurz prüfen.
+
+**Versuch „echtes `destroy`" (2026-10-15, verworfen, nichts eingebaut).** Frage: kann das Backend Fenster tatsächlich zerstören, damit das
+Callback-Leck (und die `QMainWindow`s) verschwinden? Befunde:
+- gtk implementiert `frame%` `destroy` ebenfalls nur als `(direct-show #f)`; das Widget stirbt dort per GC-Deallocator. Die Referenz-Backends
+  zerstören also nicht „auf Befehl".
+- **Gemessen (macOS, 100 Frames, Weak-Boxes nach `collect-garbage`):** unter dem Qt-Backend bleiben gezeigte und wieder versteckte `frame%`
+  **alle** erreichbar (100/100, auch 300/300); nie gezeigte ohne Kinder werden eingesammelt (97/100); schon ein `button%` + `canvas%` als Kinder hält
+  den Frame am Leben. **Unter dem nativen Cocoa-Backend ebenfalls 100/100** — kein Qt-Sonderfall, die Frames werden irgendwo in mred/Backend
+  festgehalten.
+- Ein Will-Executor, der das `QMainWindow` bei Unerreichbarkeit zerstört (geprüft mit einem Diagnose-Export `shim_top_level_count`), lief
+  deshalb in der Praxis fast nie (1 von 200 Frames mit Kindern) und wurde wieder entfernt: Nutzen null, Absturzrisiko auf drei Plattformen.
+- **Konsequenz:** Verstecke Fenster sind unter allen Backends ein (kleines) Dauerleck. Ein echtes Freigeben bräuchte einen deterministischen Auslöser
+  (z. B. `on-close` ohne Wiederöffnen) und eine Klärung, wer die Frames festhält — eigener Block, nicht Teil der WASM-Arbeit.
