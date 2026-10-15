@@ -9313,10 +9313,15 @@ und die Forks `third_party/gui`/`third_party/draw` müssen als lokale Pakete in 
 (Layout von `racket/gui`, Zeichnen von Qt), drei echte Mausklicks ergeben `CLICK 1/2/3` und das Label wechselt auf
 `clicked 3 times`. Damit läuft `racket/gui` mit `wx/qt` in WASM, Backend-Wahl über `PLT_QT=1` (`setenv` in `main.cpp`).
 
-- **Ladezeit: `(require racket/class racket/gui/base)` dauert ~90 s** (89,9 s und 92,1 s in zwei Läufen), gegen ~2 s Start der
-  Boot-Images. Ursache: pbchunk kompiliert nur die Boot-Images; der Bibliothekscode (~700 `.zo`) wird als einfacher `tpb32l`-
-  Bytecode interpretiert. Das ist der größte offene Punkt für die Nutzbarkeit (Hebel: Paketschicht ebenfalls chunken, `raco demod`
-  + Beschneiden von `racket/gui/base`, Splash/lazy `require`; alle ungetestet).
+- **Ladezeit: zuerst ~90 s, nach der Korrektur 0,6 s.** `(require racket/class racket/gui/base)` dauerte 86,8 s (`test/load-profile.rkt`:
+  Dateizugriff 96 ms für 23 MB, GC 2,6 s, `racket/class`/`draw`/`snip`/`wxme` je unter 0,3 s, alles andere in den großen Modulen
+  `wxme/text.rkt` 13 s, `pasteboard.rkt` 5,4 s, `editor.rkt` 4,2 s ...). **Ursache war kein Interpreterproblem:** 363 von 364
+  `gui-lib`-Modulen hatten im Image **kein `.zo`** und wurden beim `require` aus dem Quelltext expandiert und kompiliert. Der
+  Orchestrator hatte lokale Pakete in Pass 2 gegen gestrippte (quelltextlose) Abhängigkeiten kompiliert (690× „cannot open module
+  file", von `raco setup` als „non-fatal" gemeldet und toleriert). Korrektur im Fork (Details `build-wasm.md`): lokale Pakete werden in
+  Pass 1 mit dem vollständigen Baum kompiliert, eine gleichnamige Katalogversion wird vorher entfernt, die veraltete gestrippte
+  Kopie verworfen. **Danach: `racket/gui/base` 0,6 s (204 Module), Stapel gesamt ~1,2 s, `hello-gui.rkt` in 23 s Gesamtlauf mit
+  Seitenladen.** Prüfung nach jedem App-Build: `.zo` je Paket im entpackten Image zählen.
 - **Fehler unterwegs:** (1) `fasl-read: incompatible fasl-object machine-type 'tarm64osx` — lokale Pakete brachten hostnative
   `compiled/*.zo` mit; Orchestrator stagt jetzt ohne `compiled/` (und hasht ohne). (2) Ninja relinkte nach Änderung der
   Preload-Nutzlast/-Datei nicht; `LINK_DEPENDS` ergänzt. (3) Test brauchte `racket/class` (`racket/gui/base` exportiert `new`

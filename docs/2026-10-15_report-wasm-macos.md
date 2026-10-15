@@ -118,9 +118,12 @@ funktioniert damit. Nächster Schritt: `wx/qt` (`racket/gui`) im Image (S4d).
 Image mit unserer `gui-lib` (lokal aus `third_party/gui`, 30 Pakete, 29,7 MB Nutzlast) im kombinierten Modul; `PLT_QT=1` wählt
 das Qt-Backend, `utils.rkt` nutzt unter WASM `(ffi-lib #f)`. `hello-gui.rkt` (`frame%`, `message%`, `button%`): Fenster erscheint,
 drei echte Mausklicks (Chrome DevTools) → `CLICK 1/2/3`, Label `clicked 3 times`. **Ladezeit `racket/class` + `racket/gui/base`:
-~90 s** (89,9/92,1 s), bedingt durch den interpretierten Bibliotheks-Bytecode (pbchunk deckt nur die Boot-Images ab). Das ist der
-größte Hinderungsgrund für die Praxis und der nächste Hebel (Paketschicht chunken, `raco demod`, lazy Laden). Der Rest der
-GUI-Kette (Layout, Zeichnen, Ereignisse, Rückschreiben) ist damit funktional belegt.
+zuerst ~90 s, nach Korrektur 0,6 s.** Die erste Messung (86,8 s) kam nicht vom Interpreter, sondern von fehlendem Bytecode: 363 von
+364 `gui-lib`-Modulen waren ohne `.zo` im Image und wurden zur Laufzeit kompiliert (Orchestrator-Fehler bei lokalen Paketen, siehe
+`HACKING.md` §85.9). Nach der Korrektur: `racket/gui/base` 0,6 s, Stapel gesamt ~1,2 s, Dateizugriff (23–36 MB `.zo`) ~0,1 s,
+GC unter 0,2 s. Die Interpretergeschwindigkeit (9–30× gegenüber nativ, Abschnitt 3a) bleibt die relevante Größe für laufende
+Programme, nicht für das Laden. Damit ist die GUI-Kette (Layout, Zeichnen, Ereignisse, Rückschreiben) funktional belegt und
+das Laden unkritisch.
 
 ## 4. Hindernisse im Detail
 
@@ -218,7 +221,7 @@ B bleibt Messlatte für Interpreter-Speed und Draw-Pfad.
 | S4a | Qt im Proxy-Thread? | **erledigt, negativ** (Abschnitt 3b): Qt-`main()` muss auf dem Hauptthread laufen |
 | S4b | Qt und Racket in einem Modul (Qt-`main` Hauptthread, Racket im pthread) | **erledigt** (Abschnitt 3c) |
 | S4c | Shim im Modul: Symboltabelle für `shim_*`, Proxy auf den Hauptthread, Callback-Queue | **erledigt** (Abschnitt 3d) |
-| S4d | `wx/qt` (`racket/gui`): Mini-`frame%` + `button%` über Qt-WASM | **erledigt** (Abschnitt 3e), Ladezeit ~90 s offen |
+| S4d | `wx/qt` (`racket/gui`): Mini-`frame%` + `button%` über Qt-WASM | **erledigt** (Abschnitt 3e), Ladezeit 0,6 s |
 
 ## 9. Auswirkungen auf die Projektregeln (zur Entscheidung)
 

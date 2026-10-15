@@ -1,8 +1,8 @@
 # qt-shim/wasm — Qt-WASM und Racket CS 9.3 in einem Modul
 
 Status: **S4d erreicht**: ein echtes `racket/gui`-Programm (`frame%`, `message%`, `button%`) läuft auf dem Qt-Backend im Browser,
-echte Mausklicks erreichen den Racket-Callback und `set-label` schreibt zurück (`test/hello-gui.rkt`). Offen: die Ladezeit von
-`racket/gui/base` (~90 s im Interpreter). **S4c**: der Shim (`../src/shim.cpp`, unverändert) ist im Modul; Racket ruft ihn über die FFI
+echte Mausklicks erreichen den Racket-Callback und `set-label` schreibt zurück (`test/hello-gui.rkt`). `racket/gui/base` lädt in 0,6 s
+(`test/load-profile.rkt` misst die Aufteilung). **S4c**: der Shim (`../src/shim.cpp`, unverändert) ist im Modul; Racket ruft ihn über die FFI
 (`(ffi-lib #f)`), jeder `shim_*`-Aufruf läuft per Proxy auf dem Qt-Hauptthread, Qt-Callbacks kommen über eine Queue
 zurück in den Racket-Thread (echter Mausklick in Chrome → Racket-Closure, Test `test/ffi-smoke.rkt`). Noch offen:
 `wx/qt` (`racket/gui`) in das Image bringen (S4d). Hintergrund und Messwerte:
@@ -80,9 +80,12 @@ python3 qt-shim/wasm/tools/unpack-share.py <out>/share.data.js <out>/share.data 
     -DQT_HOST_PATH=$HOME/Qt/6.11.2/macos -DCMAKE_BUILD_TYPE=Release \
     -DRACKET_SHARE_DIR=<tree> -DRACKET_QT_MAIN=$PWD/qt-shim/wasm/test/hello-gui.rkt
 cmake --build build/wasm
-# 4. Test (Klicks erst nach dem Laden, ~100 s)
-CLICK_AT="549,38;549,38" CLICK_AFTER=105 EXTRA_WAIT=6 node qt-shim/wasm/tools/serve-and-run.mjs build/wasm racketqt_wasm.html /tmp/out 200
+# 4. Test (Klicks nach dem Laden, ~12 s)
+CLICK_AT="549,38;549,38" CLICK_AFTER=12 EXTRA_WAIT=5 node qt-shim/wasm/tools/serve-and-run.mjs build/wasm racketqt_wasm.html /tmp/out 200
 ```
+
+Nach jedem App-Build die `.zo` je Paket im entpackten Image zählen (`gui-lib` ≈ 424): Fehlt Bytecode, kompiliert Racket zur Laufzeit
+und `racket/gui/base` braucht ~90 s statt 0,6 s.
 
 - `main.cpp` setzt `PLT_QT=1` (die `platform.rkt` der `gui-lib` wählt damit das Qt-Backend) und lädt `/app/main.rkt`.
 - `gui-lib/mred/private/wx/qt/utils.rkt` nutzt unter WASM (`(system-type 'target-machine)` = `tpb32l`) `(ffi-lib #f)` statt eines
