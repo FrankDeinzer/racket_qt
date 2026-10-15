@@ -1363,6 +1363,42 @@ void shim_canvas_blit_argb(void*          canvas_ptr,
     c->backing = img;
 }
 
+// Fast blit straight from a cairo image surface (CAIRO_FORMAT_ARGB32/RGB24 == native-endian premultiplied
+// 0xAARRGGBB == QImage::Format_ARGB32_Premultiplied): one memcpy per row instead of Racket's get-argb-pixels
+// + the per-pixel loop above (HACKING §85.11: that conversion was ~60 ms/keystroke in the WASM build).
+// opaque != 0: the surface has no alpha channel (RGB24, unused byte) -> force alpha to 255.
+// border != 0: 1-px ring 0xFF767676 over the outermost pixels (canvas% 'border/'control-border, as canvas.rkt paint-border!).
+void shim_canvas_blit_native(void*          canvas_ptr,
+                             const uint8_t* src,
+                             int w, int h, int stride, int opaque, int border)
+{
+    auto* c = static_cast<RacketCanvas*>(canvas_ptr);
+    QImage img(w, h, QImage::Format_ARGB32_Premultiplied);
+    for (int y = 0; y < h; y++) {
+        const uint8_t* src_row = src + (std::ptrdiff_t)y * stride;
+        uint8_t*       dst_row = img.scanLine(y);
+        if (opaque) {
+            auto* d  = reinterpret_cast<uint32_t*>(dst_row);
+            auto* sp = reinterpret_cast<const uint32_t*>(src_row);
+            for (int x = 0; x < w; x++) d[x] = sp[x] | 0xFF000000u;
+        } else {
+            memcpy(dst_row, src_row, (size_t)w * 4);
+        }
+    }
+    if (border && w > 0 && h > 0) {
+        const uint32_t gray = 0xFF767676u;
+        for (int x = 0; x < w; x++) {
+            reinterpret_cast<uint32_t*>(img.scanLine(0))[x]     = gray;
+            reinterpret_cast<uint32_t*>(img.scanLine(h - 1))[x] = gray;
+        }
+        for (int y = 0; y < h; y++) {
+            reinterpret_cast<uint32_t*>(img.scanLine(y))[0]     = gray;
+            reinterpret_cast<uint32_t*>(img.scanLine(y))[w - 1] = gray;
+        }
+    }
+    c->backing = img;
+}
+
 void shim_canvas_request_repaint(void* canvas_ptr)
 {
     static_cast<RacketCanvas*>(canvas_ptr)->update();

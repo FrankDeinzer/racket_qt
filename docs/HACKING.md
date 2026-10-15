@@ -9328,3 +9328,36 @@ und die Forks `third_party/gui`/`third_party/draw` müssen als lokale Pakete in 
   nicht). `embedded-gui` kompiliert im Image nicht (`mzscheme` aus `compatibility-lib` fehlt), für `racket/gui/base` ohne Folgen.
 - **Änderung im gui-Submodul:** nur `wx/qt/utils.rkt` (WASM-Zweig für `shim-lib`), auf anderen Plattformen wirkungslos.
 
+### 85.10 Praxistest: `canvas%` + `text%`-Editor + Tastatur im Browser (gemessen, 2026-10-15)
+
+- **Programm:** `qt-shim/wasm/test/canvas-editor.rkt` (`canvas%` mit 60 Ellipsen + Text per `on-paint`, `editor-canvas%` mit `text%`,
+  Zeitmessung in `on-paint` und `on-char`). `tools/serve-and-run.mjs` kann jetzt echte Tasten senden (`KEYS`, `KEYS_AFTER`, `KEY_GAP`,
+  DevTools `Input.dispatchKeyEvent`). Image kam komplett aus dem Cache (kein Netz), 424 `.zo` für `gui-lib`.
+- **Ergebnis (Headless-Chrome, SwiftShader, arm64):** `racket/gui/base` 1,45 s; Zeichnen und Darstellung korrekt (Screenshot), Tippen
+  „Hello Qt WASM" landet im Editor. `on-paint` 27/27/19 ms (Racket-Zeit inkl. Zeichnen auf `racket/draw`, ohne Blit);
+  **`on-char` ≈ 280–350 ms pro Taste** (Median ≈ 290 ms) — spürbar träge, die eigentliche Engstelle. Key-Release-Events ~0 ms.
+- **Aufteilung der 290 ms (Profil):** `test/key-profile.rkt` (Einzeloperationen) + `test/key-sample.rkt` (Sampler-Thread über
+  `continuation-mark-set->context`, `profile-lib` ist nicht im Image): `text%`-`insert` ohne Canvas 0,1 ms, mit angebundenem
+  `editor-canvas%` 60 ms (Gesamtzeit bis zur Taste: 280–350 ms, der Rest sind die weiteren Flushes pro Taste); `on-paint` nur 2 ms.
+  15 von 18 Samples liegen in `resume-flush` (`backing-dc.rkt`) → `raster-backing-flush` in `wx/qt/canvas.rkt`:
+  `bitmap%` `get-argb-pixels` über das ganze Canvas (interpretierte Pixelschleife, im Fork 9–30× langsamer) + Pixelschleife im Shim.
+  Nicht die Editor-Logik, nicht Proxy/Queue.
+
+### 85.11 Schneller Blit: Zeilenkopie aus der Cairo-Oberfläche (gemessen, 2026-10-15)
+
+- **Fix:** neuer, **tolerant** gebundener Shim-Export `shim_canvas_blit_native(canvas, data, w, h, stride, opaque, border)`
+  (`qt-shim/src/shim.cpp`): kopiert Zeilen direkt aus der Cairo-Oberfläche (`CAIRO_FORMAT_ARGB32` = `QImage::Format_ARGB32_Premultiplied`),
+  erzwingt Alpha 255 bei alpha-losen Bitmaps und zeichnet den 1-px-Rahmen (`'border`/`'control-border`). `wx/qt/canvas.rkt`
+  `raster-backing-flush` nimmt den Pfad, wenn Export vorhanden, Skalierung 1, Farb-Bitmap und kein Combo-Streifen
+  (`fast-blit-ok?`); sonst unverändert `get-argb-pixels` + `shim_canvas_blit_argb`. Alter Shim startet weiter (Fallback).
+- **Messung (Headless-Chrome, WASM):** `on-char` **~290 ms → 2–3 ms**; Screenshot pixelgleich zu vorher. Auch nativ wirksam (die
+  Konvertierung ist nicht WASM-spezifisch, dort nur kleiner). macOS nativ: Stub/Style/API-Audit 9/3/4, Smoke 4/4.
+- **Chrome mit GPU (Punkt 2):** `CHROME_GPU=1` in `serve-and-run.mjs` (ohne SwiftShader-Flags; loggt den WebGL-Renderer):
+  `ANGLE Metal Renderer: Apple M1` statt SwiftShader. Ergebnis gleich (Tasten 2–4 ms, `on-paint` 18–26 ms), Ladezeit
+  1,8 s (GPU) vs. 2,7 s (SwiftShader). Der Pfad ist CPU-/Racket-gebunden; die GPU ändert die Bedienbarkeit nicht.
+- **Fund für Punkt 3 (Orchestrator):** Der Payload-Cache-Schlüssel (`app-payload-cache/<hash>`) und der Final-Pass-Arbeitsordner
+  (`consume-work/*/final-{xtgt,hostzo,addon}`) berücksichtigen den **Inhalt lokaler Pakete nicht**: nach einer Änderung an `gui-lib`
+  landeten veraltete `.zo` (alte Quell-SHA in `compiled/*.dep`) im Image → `instantiate-linklet: reference to a variable that is not
+  exported`. Abhilfe vor jedem App-Build nach Änderung lokaler Pakete: `.work/pkg-catalog/*local-*`,
+  `.work/consume-work/*/final-*` und den betroffenen `app-payload-cache/<hash>` löschen (Skript im Scratchpad, s. u.).
+  Prüfung: `compiled/utils_rkt.dep` im entpackten Image darf nicht vorhanden sein bzw. muss die aktuelle Quell-SHA tragen.

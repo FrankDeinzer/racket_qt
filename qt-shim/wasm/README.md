@@ -2,7 +2,7 @@
 
 Status: **S4d erreicht**: ein echtes `racket/gui`-Programm (`frame%`, `message%`, `button%`) läuft auf dem Qt-Backend im Browser,
 echte Mausklicks erreichen den Racket-Callback und `set-label` schreibt zurück (`test/hello-gui.rkt`). `racket/gui/base` lädt in 0,6 s
-(`test/load-profile.rkt` misst die Aufteilung). **S4c**: der Shim (`../src/shim.cpp`, unverändert) ist im Modul; Racket ruft ihn über die FFI
+(`test/load-profile.rkt` misst die Aufteilung). `test/canvas-editor.rkt` + `KEYS=…` in `serve-and-run.mjs`: Canvas-Zeichnen und Editor mit echter Tastatur laufen, ~2–3 ms je Taste nach dem Blit-Fix (vorher ~290 ms, `docs/HACKING.md` §85.10/§85.11). `CHROME_GPU=1` misst mit echter GPU. **S4c**: der Shim (`../src/shim.cpp`, unverändert) ist im Modul; Racket ruft ihn über die FFI
 (`(ffi-lib #f)`), jeder `shim_*`-Aufruf läuft per Proxy auf dem Qt-Hauptthread, Qt-Callbacks kommen über eine Queue
 zurück in den Racket-Thread (echter Mausklick in Chrome → Racket-Closure, Test `test/ffi-smoke.rkt`). Noch offen:
 `wx/qt` (`racket/gui`) in das Image bringen (S4d). Hintergrund und Messwerte:
@@ -94,3 +94,7 @@ und `racket/gui/base` braucht ~90 s statt 0,6 s.
   ins Image („incompatible fasl-object machine-type").
 - Preload-Verzeichnisse und das Programm sind für Ninja unsichtbar; `links.rktd` der Nutzlast und `RACKET_QT_MAIN` sind
   deshalb als `LINK_DEPENDS` gesetzt (neue Nutzlast ⇒ Relink).
+
+**Achtung nach Änderungen an `third_party/gui`:** Der Orchestrator erkennt geänderte lokale Pakete nicht zuverlässig (veraltete `.zo`,
+HACKING §85.11). Vor dem App-Build `.work/pkg-catalog/*local-*`, `.work/consume-work/*/final-*` und den passenden
+`.work/app-payload-cache/<hash>` im Submodul löschen.

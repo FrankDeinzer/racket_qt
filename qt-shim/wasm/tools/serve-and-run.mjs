@@ -1,4 +1,5 @@
 // Static COOP/COEP server + headless Chrome (DevTools protocol, Node built-ins only) for the WASM builds.
+// CHROME_GPU=1: no SwiftShader flags (real GPU via ANGLE/Metal); logs UNMASKED_RENDERER so the result says which renderer ran.
 // usage: EXTRA_WAIT=<s> node serve-and-run.mjs <build-dir> <page.html> <out-dir> [timeout-s]; finishes when document.title === "BENCH-DONE".
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
@@ -13,7 +14,7 @@ const srv = createServer((req, res) => {
   res.end(readFileSync(p));
 }).listen(8123, "127.0.0.1");
 const PORT = 9334, CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const chrome = spawn(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, "--remote-debugging-address=127.0.0.1", `--user-data-dir=${OUT}/profile`, "--no-first-run", "--window-size=1100,900", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "about:blank"], { stdio: "ignore" });
+const chrome = spawn(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, "--remote-debugging-address=127.0.0.1", `--user-data-dir=${OUT}/profile`, "--no-first-run", "--window-size=1100,900", ...(process.env.CHROME_GPU ? ["--enable-gpu", "--ignore-gpu-blocklist"] : ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"]), "about:blank"], { stdio: "ignore" });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 try {
   let ok = false; for (let i = 0; i < 50 && !ok; i++) { try { await (await fetch(`http://127.0.0.1:${PORT}/json/version`)).json(); ok = true; } catch { await sleep(200); } }
@@ -30,6 +31,7 @@ try {
   await send("Runtime.enable"); await send("Page.enable");
   await send("Page.navigate", { url: `http://127.0.0.1:8123/${PAGE}` }); log("navigiert");
   await sleep(2000); log("isolated:", await ev("self.crossOriginIsolated"));
+  log("renderer:", await ev(`(()=>{const c=document.createElement("canvas").getContext("webgl2");if(!c)return "kein WebGL2";const e=c.getExtension("WEBGL_debug_renderer_info");return e?c.getParameter(e.UNMASKED_RENDERER_WEBGL):"?"})()`));
   const t0 = Date.now(); let done = false;
   while (Date.now() - t0 < Number(TIMEOUT) * 1000) { await sleep(1500); if ((await ev("document.title")) === "BENCH-DONE") { done = true; break; } }
   // CLICK_AT="x,y[;x,y...]" (CSS px) sends real mouse clicks after CLICK_AFTER seconds (default 20), then EXTRA_WAIT runs on.
@@ -42,6 +44,19 @@ try {
       log("klick", x, y);
       await sleep(1500);
     }
+  }
+  // KEYS="text" sends real key events (printable chars, "\n" = Enter, "\b" = Backspace) after KEYS_AFTER seconds (default 0), KEY_GAP ms apart (default 150).
+  if (process.env.KEYS) {
+    await sleep(Number(process.env.KEYS_AFTER || 0) * 1000);
+    const named = { "\n": ["Enter", 13], "\b": ["Backspace", 8] };
+    for (const ch of process.env.KEYS) {
+      const [key, code] = named[ch] ?? [ch, ch.toUpperCase().charCodeAt(0)];
+      const base = { key, code: key.length === 1 ? (/[a-z]/i.test(key) ? "Key" + key.toUpperCase() : "Digit0") : key, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code };
+      await send("Input.dispatchKeyEvent", { type: named[ch] ? "rawKeyDown" : "keyDown", ...base, text: named[ch] ? (key === "Enter" ? "\r" : undefined) : ch, unmodifiedText: named[ch] ? undefined : ch });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
+      await sleep(Number(process.env.KEY_GAP || 150));
+    }
+    log("tasten gesendet:", process.env.KEYS.length);
   }
   await sleep(Number(process.env.EXTRA_WAIT || 0) * 1000);
   log(done ? "fertig" : "TIMEOUT", ((Date.now() - t0) / 1000).toFixed(1) + " s");
