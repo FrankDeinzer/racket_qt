@@ -105,8 +105,23 @@ set(RACKET_PRELOADS
   "${RACKET_WASM_BACKEND}/.work/racket/racket/etc@/etc"
   "${RS}/cs/c/wasm-fonts/fonts.conf@/etc/fonts/fonts.conf"
   "${RS}/cs/c/wasm-fonts/DejaVuSans.ttf@/share/fonts/DejaVuSans.ttf")
+# Optional package payload (racket/gui + the wx/qt backend): the unpacked tree from tools/unpack-share.py, holding share/ (and pkgs/).
+set(RACKET_SHARE_DIR "" CACHE PATH "Unpacked payload tree (contains share/); empty = core collects only")
+if(RACKET_SHARE_DIR)
+  if(NOT EXISTS "${RACKET_SHARE_DIR}/share")
+    message(FATAL_ERROR "RACKET_SHARE_DIR=${RACKET_SHARE_DIR} has no share/ directory")
+  endif()
+  list(APPEND RACKET_PRELOADS "${RACKET_SHARE_DIR}/share@/share")
+  # --preload-file trees are invisible to Ninja; links.rktd is rewritten by every unpack-share.py run, so a new payload relinks.
+  set_property(TARGET racketqt_wasm APPEND PROPERTY LINK_DEPENDS "${RACKET_SHARE_DIR}/share/links.rktd")
+  if(EXISTS "${RACKET_SHARE_DIR}/pkgs")
+    list(APPEND RACKET_PRELOADS "${RACKET_SHARE_DIR}/pkgs@/pkgs")
+  endif()
+endif()
+
 set(RACKET_QT_MAIN "${CMAKE_CURRENT_LIST_DIR}/test/ffi-smoke.rkt" CACHE FILEPATH "Racket program preloaded as /app/main.rkt")
 list(APPEND RACKET_PRELOADS "${RACKET_QT_MAIN}@/app/main.rkt")
+set_property(TARGET racketqt_wasm APPEND PROPERTY LINK_DEPENDS "${RACKET_QT_MAIN}")   # preloaded files are invisible to Ninja
 foreach(p ${RACKET_PRELOADS})
   target_link_options(racketqt_wasm PRIVATE "SHELL:--preload-file ${p}")
 endforeach()

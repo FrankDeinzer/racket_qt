@@ -35,7 +35,10 @@ Details: `docs/2026-10-15_report-wasm-macos.md` (Studie mit allen Messwerten), `
 - **S4c (gemessen):** Shim im Modul; `tools/gen-proxies.py` erzeugt Proxy (Racket-Aufruf → Qt-Hauptthread, ~35 µs) und
   Callback-Queue (Qt → Racket-Thread via `shim_pump`); Racket 9.3 ruft `shim_version` per FFI, rendert einen Button und erhält
   echte Mausklicks als Callback (`BUTTON-CLICK 1/2/3`).
-- **Offen (nächster Schritt S4d, `wx/qt` im Image):** Shim in den WASM-Link bringen (Symboltabelle für 206 `shim_*`,
+- **S4d (gemessen):** `racket/gui` läuft mit dem Qt-Backend im Browser (`hello-gui.rkt`: `frame%`/`message%`/`button%`, echte
+  Klicks → Callback, `set-label` schreibt zurück). Änderungen: `gui-lib` `wx/qt/utils.rkt` (WASM-Zweig), Orchestrator stagt lokale
+  Pakete ohne `compiled/`. **Ladezeit `racket/gui/base` ~90 s** (interpretierter Bibliothekscode), größter offener Punkt.
+- **Offen (nächste Schritte):** Ladezeit senken, Chrome statt Headless messen, Dirty-Rect-Blit, `canvas%`/Editor-Test, Shim in den WASM-Link bringen (Symboltabelle für 206 `shim_*`,
   Queue-Callbacks statt Funktionszeiger, da die libffi-Closure-Tabelle pro Worker lebt), Mini-`frame%` +
   `button%` über Qt-WASM, Chrome statt Node messen. Backlog: `zlib.pc` für den Emscripten-zlib-Port
   (Freetype-Ausnahme entfernen), Dirty-Rect-Blit.

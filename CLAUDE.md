@@ -599,7 +599,7 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
   `third_party/racket-wasm-backend` (Pin Racket v9.3). Racket 9.3 [cs] läuft als WASM unter Node inkl. `racket/draw`
   (Interpreter 9–30× langsamer als nativ, Cairo/Pango 1,5–4×); Qt-Spike: Worker→Hauptthread ~35 µs, Callback über Queue
   ~155 µs; `shim.cpp` kompiliert unverändert für WASM. Qt 6.11.2 WASM verlangt exakt Emscripten 4.0.7 (`~/emsdk`, nur
-  macOS). Nächster Schritt S4: Shim in den WASM-Link. Windows/Linux: kein Rebuild nötig, Pull holt das neue Submodul
+  macOS). S4 (2026-10-15): Qt-main auf dem Hauptthread, Racket im pthread, Shim per Proxy/Queue eingebunden, `racket/gui` mit `wx/qt` läuft im Browser (`qt-shim/wasm/`, echte Klicks → Callback); offen: Ladezeit von `racket/gui/base` ~90 s (Interpreter), Chrome-Messung, `canvas%`/Editor. Windows/Linux: kein Rebuild nötig, Pull holt das neue Submodul
   (~210 MB), überspringbar mit `git submodule update --init third_party/gui third_party/draw`.
 
 ### Reklassifiziert (kein Produktbefund)

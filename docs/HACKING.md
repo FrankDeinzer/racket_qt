@@ -9305,3 +9305,21 @@ Damit ist der Kern der Architektur belegt: Aufruf Racket → Qt (Proxy), Callbac
 Racket-Thread). Offen: `wx/qt` im Image (S4d: `utils.rkt` lädt die Bibliothek per Dateipfad, hier `(ffi-lib #f)`; `racket/gui`
 und die Forks `third_party/gui`/`third_party/draw` müssen als lokale Pakete in das Image), Dirty-Rect-Blit.
 
+### 85.9 S4d — racket/gui auf dem Qt-Backend im Browser (gemessen)
+
+`qt-shim/wasm/app/app.rkt` (Manifest: `draw-lib` aus dem Katalog, `gui-lib` **lokal** aus `third_party/gui`) → Orchestrator
+`app` → `tools/unpack-share.py` → `-DRACKET_SHARE_DIR=<tree>` im CMake-Projekt (Ablauf: `qt-shim/wasm/README.md`).
+`test/hello-gui.rkt` (`frame%` + `message%` + `button%`, `(yield 'wait)`) in Headless-Chrome 155: das Fenster erscheint
+(Layout von `racket/gui`, Zeichnen von Qt), drei echte Mausklicks ergeben `CLICK 1/2/3` und das Label wechselt auf
+`clicked 3 times`. Damit läuft `racket/gui` mit `wx/qt` in WASM, Backend-Wahl über `PLT_QT=1` (`setenv` in `main.cpp`).
+
+- **Ladezeit: `(require racket/class racket/gui/base)` dauert ~90 s** (89,9 s und 92,1 s in zwei Läufen), gegen ~2 s Start der
+  Boot-Images. Ursache: pbchunk kompiliert nur die Boot-Images; der Bibliothekscode (~700 `.zo`) wird als einfacher `tpb32l`-
+  Bytecode interpretiert. Das ist der größte offene Punkt für die Nutzbarkeit (Hebel: Paketschicht ebenfalls chunken, `raco demod`
+  + Beschneiden von `racket/gui/base`, Splash/lazy `require`; alle ungetestet).
+- **Fehler unterwegs:** (1) `fasl-read: incompatible fasl-object machine-type 'tarm64osx` — lokale Pakete brachten hostnative
+  `compiled/*.zo` mit; Orchestrator stagt jetzt ohne `compiled/` (und hasht ohne). (2) Ninja relinkte nach Änderung der
+  Preload-Nutzlast/-Datei nicht; `LINK_DEPENDS` ergänzt. (3) Test brauchte `racket/class` (`racket/gui/base` exportiert `new`
+  nicht). `embedded-gui` kompiliert im Image nicht (`mzscheme` aus `compatibility-lib` fehlt), für `racket/gui/base` ohne Folgen.
+- **Änderung im gui-Submodul:** nur `wx/qt/utils.rkt` (WASM-Zweig für `shim-lib`), auf anderen Plattformen wirkungslos.
+

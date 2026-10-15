@@ -1,0 +1,16 @@
+;; racket/gui on the Qt backend, inside the combined Qt+Racket WASM module (PLT_QT=1 is set by main.cpp).
+(define t0 (current-inexact-milliseconds))
+(require racket/class racket/gui/base)
+(printf "GUI-LIB-LOADED ~a ms\n" (round (- (current-inexact-milliseconds) t0)))
+(define f (new frame% [label "Racket GUI on Qt-WASM"] [width 420] [height 240]))
+(define msg (new message% [parent f] [label "Hello from racket/gui in the browser"]))
+(define n 0)
+(void (new button% [parent f] [label "Click me"]
+           [callback (lambda (b e)
+                       (set! n (add1 n))
+                       (printf "CLICK ~a\n" n)
+                       (send msg set-label (format "clicked ~a times" n)))]))
+(send f show #t)
+(printf "FRAME-SHOWN\n")
+(yield 'wait)
+(printf "DONE\n")

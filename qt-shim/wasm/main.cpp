@@ -6,12 +6,15 @@
 #include <emscripten.h>
 #include <pthread.h>
 #include <cstdio>
+#include <cstdlib>
 
 extern "C" int racket_em_main(int argc, char** argv);
 extern "C" void shim_app_init(void);   // the real shim, called here on the Qt thread
 
 static void* racket_thread(void*) {
     // Spike: Racket looks the shim up through (ffi-lib #f) -- the proxied entry points are registered by boot.c.
+    // racket/gui picks its backend from the environment (gui-lib mred/private/wx/platform.rkt): the Qt backend.
+    setenv("PLT_QT", "1", 1);
     // The program is preloaded as /app/main.rkt (CMake option RACKET_QT_MAIN, default test/ffi-smoke.rkt).
     static char a0[] = "racket", a1[] = "-I", a2[] = "racket/base", a3[] = "-e";
     static char a4[] = "(load \"/app/main.rkt\")";

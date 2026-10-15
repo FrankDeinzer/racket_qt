@@ -1,6 +1,8 @@
 # qt-shim/wasm — Qt-WASM und Racket CS 9.3 in einem Modul
 
-Status: **S4c erreicht**: der Shim (`../src/shim.cpp`, unverändert) ist im Modul; Racket ruft ihn über die FFI
+Status: **S4d erreicht**: ein echtes `racket/gui`-Programm (`frame%`, `message%`, `button%`) läuft auf dem Qt-Backend im Browser,
+echte Mausklicks erreichen den Racket-Callback und `set-label` schreibt zurück (`test/hello-gui.rkt`). Offen: die Ladezeit von
+`racket/gui/base` (~90 s im Interpreter). **S4c**: der Shim (`../src/shim.cpp`, unverändert) ist im Modul; Racket ruft ihn über die FFI
 (`(ffi-lib #f)`), jeder `shim_*`-Aufruf läuft per Proxy auf dem Qt-Hauptthread, Qt-Callbacks kommen über eine Queue
 zurück in den Racket-Thread (echter Mausklick in Chrome → Racket-Closure, Test `test/ffi-smoke.rkt`). Noch offen:
 `wx/qt` (`racket/gui`) in das Image bringen (S4d). Hintergrund und Messwerte:
@@ -60,3 +62,32 @@ Ergebnis: ~45 MB `.wasm`, ~61 MB `.data` (Boot-Images, Kern-`collects`). Die Sei
 - **Besonderheiten:** `shim_app_init` wird einmal von `main()` auf dem Qt-Thread aufgerufen (spätere Aufrufe aus Racket
   sind No-ops); `shim_app_quit` ist ein No-op. Callback-Parameter müssen direkt von einem `void* ud` gefolgt werden
   (der Generator bricht sonst ab).
+
+## racket/gui im Modul (S4d)
+
+Das Paket-Image (`racket/gui` mit **unserer** `gui-lib` aus `third_party/gui`, `draw-lib` und Abhängigkeiten, alle als `tpb32l`-
+Bytecode) entsteht mit dem Orchestrator des Forks und wird als Dateibaum in das Modul vorgeladen:
+
+```bash
+# 1. Image bauen (Submodul racket-wasm-backend, emsdk aktiv; erstes Mal mit Netz zum Release-Katalog, danach aus dem Cache)
+cd third_party/racket-wasm-backend && source ~/emsdk/emsdk_env.sh
+racket build/main.rkt app ../../qt-shim/wasm/app --dest <out> --racket /opt/homebrew/bin/racket \
+       --scheme $PWD/.work/racket/racket/src/ChezScheme/tarm64osx/bin/tarm64osx/scheme
+# 2. Nutzlast entpacken (share.data + share.data.js -> Dateibaum)
+python3 qt-shim/wasm/tools/unpack-share.py <out>/share.data.js <out>/share.data <tree>
+# 3. Modul linken, mit Nutzlast und Programm
+~/Qt/6.11.2/wasm_multithread/bin/qt-cmake -S qt-shim/wasm -B build/wasm -G Ninja -DCMAKE_MAKE_PROGRAM=<ninja> \
+    -DQT_HOST_PATH=$HOME/Qt/6.11.2/macos -DCMAKE_BUILD_TYPE=Release \
+    -DRACKET_SHARE_DIR=<tree> -DRACKET_QT_MAIN=$PWD/qt-shim/wasm/test/hello-gui.rkt
+cmake --build build/wasm
+# 4. Test (Klicks erst nach dem Laden, ~100 s)
+CLICK_AT="549,38;549,38" CLICK_AFTER=105 EXTRA_WAIT=6 node qt-shim/wasm/tools/serve-and-run.mjs build/wasm racketqt_wasm.html /tmp/out 200
+```
+
+- `main.cpp` setzt `PLT_QT=1` (die `platform.rkt` der `gui-lib` wählt damit das Qt-Backend) und lädt `/app/main.rkt`.
+- `gui-lib/mred/private/wx/qt/utils.rkt` nutzt unter WASM (`(system-type 'target-machine)` = `tpb32l`) `(ffi-lib #f)` statt eines
+  Bibliothekspfads. Auf den anderen Plattformen ändert das nichts.
+- Der Orchestrator stagt lokale Pakete ohne `compiled/` (`stage-local-pkg!`): sonst gelangen hostnative `.zo` (z. B. `tarm64osx`)
+  ins Image („incompatible fasl-object machine-type").
+- Preload-Verzeichnisse und das Programm sind für Ninja unsichtbar; `links.rktd` der Nutzlast und `RACKET_QT_MAIN` sind
+  deshalb als `LINK_DEPENDS` gesetzt (neue Nutzlast ⇒ Relink).

@@ -113,6 +113,15 @@ falschen Thread aufzurufen) und die `Sforeign_symbol`-Registrierung für Chez. T
 drei echte Mausklicks ergeben `BUTTON-CLICK 1/2/3`. Der Rundlauf Maus → Qt (Hauptthread) → Queue → Racket-Thread → Closure
 funktioniert damit. Nächster Schritt: `wx/qt` (`racket/gui`) im Image (S4d).
 
+## 3e. Ergebnis S4d: racket/gui auf dem Qt-Backend im Browser (gemessen)
+
+Image mit unserer `gui-lib` (lokal aus `third_party/gui`, 30 Pakete, 29,7 MB Nutzlast) im kombinierten Modul; `PLT_QT=1` wählt
+das Qt-Backend, `utils.rkt` nutzt unter WASM `(ffi-lib #f)`. `hello-gui.rkt` (`frame%`, `message%`, `button%`): Fenster erscheint,
+drei echte Mausklicks (Chrome DevTools) → `CLICK 1/2/3`, Label `clicked 3 times`. **Ladezeit `racket/class` + `racket/gui/base`:
+~90 s** (89,9/92,1 s), bedingt durch den interpretierten Bibliotheks-Bytecode (pbchunk deckt nur die Boot-Images ab). Das ist der
+größte Hinderungsgrund für die Praxis und der nächste Hebel (Paketschicht chunken, `raco demod`, lazy Laden). Der Rest der
+GUI-Kette (Layout, Zeichnen, Ereignisse, Rückschreiben) ist damit funktional belegt.
+
 ## 4. Hindernisse im Detail
 
 ### 4.1 Racket CS auf WASM
@@ -209,7 +218,7 @@ B bleibt Messlatte für Interpreter-Speed und Draw-Pfad.
 | S4a | Qt im Proxy-Thread? | **erledigt, negativ** (Abschnitt 3b): Qt-`main()` muss auf dem Hauptthread laufen |
 | S4b | Qt und Racket in einem Modul (Qt-`main` Hauptthread, Racket im pthread) | **erledigt** (Abschnitt 3c) |
 | S4c | Shim im Modul: Symboltabelle für `shim_*`, Proxy auf den Hauptthread, Callback-Queue | **erledigt** (Abschnitt 3d) |
-| S4d | `wx/qt` (`racket/gui`): Mini-`frame%` + `button%` über Qt-WASM | offen |
+| S4d | `wx/qt` (`racket/gui`): Mini-`frame%` + `button%` über Qt-WASM | **erledigt** (Abschnitt 3e), Ladezeit ~90 s offen |
 
 ## 9. Auswirkungen auf die Projektregeln (zur Entscheidung)
 
