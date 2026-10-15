@@ -594,6 +594,14 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
   Fenster-Icons, Optik), Neustart-Test der gespeicherten Fensterposition, ~7 px horizontaler Versatz (unsichtbarer Windows-Rand),
   `frame%`-Größe weiter Client-Maß. Die `.sh`-Sweeps laufen nur unter Linux/X11.
 
+- **WebAssembly (Qt-WASM, Weg A) — Machbarkeit belegt, Qt-Link offen** (2026-10-15, macOS, `docs/2026-10-15_report-wasm-macos.md`,
+  `docs/HACKING.md` §85, `STATUS.md`): Fork `FrankDeinzer/racket-wasm-backend` (Branch `qt-wasm`) als Submodul
+  `third_party/racket-wasm-backend` (Pin Racket v9.3). Racket 9.3 [cs] läuft als WASM unter Node inkl. `racket/draw`
+  (Interpreter 9–30× langsamer als nativ, Cairo/Pango 1,5–4×); Qt-Spike: Worker→Hauptthread ~35 µs, Callback über Queue
+  ~155 µs; `shim.cpp` kompiliert unverändert für WASM. Qt 6.11.2 WASM verlangt exakt Emscripten 4.0.7 (`~/emsdk`, nur
+  macOS). Nächster Schritt S4: Shim in den WASM-Link. Windows/Linux: kein Rebuild nötig, Pull holt das neue Submodul
+  (~210 MB), überspringbar mit `git submodule update --init third_party/gui third_party/draw`.
+
 ### Reklassifiziert (kein Produktbefund)
 
 - Tools-Listbox-Klick (macOS) — reines AppleScript/AX-Automatisierungsartefakt, kein Bug (§51.2)

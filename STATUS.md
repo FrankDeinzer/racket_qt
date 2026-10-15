@@ -5,6 +5,42 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-10-15 (macOS) — WebAssembly: Machbarkeit, Fork, erster Racket-9.3-WASM-Build
+
+Details: `docs/2026-10-15_report-wasm-macos.md` (Studie mit allen Messwerten), `docs/HACKING.md` §85.
+
+- **Entscheidung (Nutzer):** Browser-Pfad über **Qt-WASM** (Weg A), das vorhandene eigengezeichnete
+  `wx/wasm`-Backend des PoC bleibt Messlatte/Rückfall. Lizenz: alles frei verfügbar.
+- **Toolchain:** Qt 6.11.2 `wasm_singlethread`/`wasm_multithread` (`~/Qt/6.11.2/`) verlangt **exakt**
+  Emscripten **4.0.7** (harter CMake-`FATAL_ERROR`); emsdk 4.0.7 liegt in `~/emsdk`
+  (`source ~/emsdk/emsdk_env.sh`), das Homebrew-Emscripten 6.0.12 bleibt unberührt.
+- **Repo:** Fork `FrankDeinzer/racket-wasm-backend`, Arbeits-Branch `qt-wasm`, als Submodul
+  `third_party/racket-wasm-backend` (Pin Racket **v9.3**, `bbf7dea8`). Gebautes liegt in `.work/`
+  (gitignored, ~1 GB).
+- **Gemessen (macOS arm64):** `shim.cpp` kompiliert unverändert für WASM (206 Exporte). Qt-Spike:
+  Worker→Hauptthread-Aufruf ~35 µs, Queue-Callback ~155 µs, Blit 640×480 ~5 ms. Racket 9.3 [cs] als WASM
+  unter Node läuft inkl. `racket/draw` (Boot ~2 s); Interpreter 9–30× langsamer als nativ, Cairo/Pango nur
+  1,5–4×.
+- **Beim Bauen gefunden und im Fork behoben:** pb-Bootdateien kommen in 9.3 aus `racket/pb`
+  (`make fetch-pb`); Host-Chez-Fund nahm das WASM-Ziel `tpb32l`; macOS-bash 3.2; ungepinntes fribidi und
+  meson-Nachlader (jetzt gepinnt + `--wrap-mode=nodownload`); `ppoll` in emcc 4.0.7 nur deklariert (glib);
+  Paketkatalog musste der 9.3-Release-Katalog sein (Standardkatalog lieferte Entwicklungsstände über
+  `git://github.com`).
+- **Regel 9:** für diesen Build wurde (auf ausdrückliche Freigabe, etappenweise, nur im Submodul) eine
+  begrenzte Ausnahme erteilt; die CLAUDE.md-Regel selbst bleibt unverändert. Unangekündigte Nachlader wurden
+  offengelegt (zlib-Port im emsdk-Cache, Einträge in `~/Library/Caches/Racket/download-cache`).
+- **Offen (nächster Schritt S4):** Shim in den WASM-Link bringen (Symboltabelle für 206 `shim_*`,
+  Queue-Callbacks statt Funktionszeiger, da die libffi-Closure-Tabelle pro Worker lebt), Mini-`frame%` +
+  `button%` über Qt-WASM, Chrome statt Node messen. Backlog: `zlib.pc` für den Emscripten-zlib-Port
+  (Freetype-Ausnahme entfernen), Dirty-Rect-Blit.
+- **Windows/Linux:** nichts zu bauen, kein Shim-ABI-Eingriff. Beim Pull des Umbrella kommt das neue Submodul
+  `third_party/racket-wasm-backend` (~210 MB Klon); wer es nicht braucht:
+  `git submodule update --init third_party/gui third_party/draw`.
+- Gepusht 2026-10-15 nach Rückfrage: Submodul `qt-wasm` `ce031d6`, Umbrella `main` `5a49247` (+ dieser
+  Doku-Commit).
+
+---
+
 ## Session 2026-10-01 (Linux) — §64.6–§64.11, §65 API-Audit, §66/§67 Funktions-Sweeps
 
 Details: `docs/2026-10-01_report-linux.md`, `-2-linux.md`, `-3-linux.md`, `docs/HACKING.md`

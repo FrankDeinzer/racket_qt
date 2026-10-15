@@ -9198,3 +9198,79 @@ Auflösungswechsel. Reiner Racket-Code (ohne Rebuild wirksam): `put-file`-Extens
 **Grenzen.** Labels innerhalb von Items (Position relativ zum Steuerelement) stehen nicht im Protokoll — nur im Bild/Pixelhinweis sichtbar (so wurde Befund 1 gefunden). Unter Windows/macOS/Wayland/HiDPI nicht gelaufen (das Skript ist X11/xdotool-spezifisch; die Probe selbst läuft überall und nutzt keine Skalierung, also HiDPI-neutral, aber ungeprüft). Qt läuft hier mit Fusion, gtk mit dem KDE-/Breeze-GTK-Stil: Farben/Rundungen werden bewusst nicht bewertet.
 
 **Tests.** `raco test` der fünf Audits 24/24, `PLT_QT=1 tests/smoke.rkt` 4/4, `behavior-matrix.sh button canvas slider radio-box` OK, `func-run.sh qt` (Marker/OCR ok), `dr-dialogs.sh both` Maße unverändert (Preferences 756×635 vs 752×647 wie §74.2). **Windows/macOS:** Pull + Shim-Rebuild (Radio-Rand ändert Layoutbreite um 3 px), `visual-matrix-probe.rkt` je Szene nativ/`PLT_QT=1` von Hand vergleichen (Geometrieprotokoll diffen).
+
+## §85 — WebAssembly: Fork, Toolchain, erster Racket-9.3-WASM-Build (macOS, 2026-10-15)
+
+Studie und Messwerte: `docs/2026-10-15_report-wasm-macos.md`. Hier nur das, was man zum Nachbauen und für
+die Fehlersuche braucht.
+
+### 85.1 Architektur (Entscheidung)
+
+Racket läuft in einem Web Worker (pthread, geteilter Speicher, `wasm_multithread`), Qt im Browser-Hauptthread.
+`shim_*`-Aufrufe aus Racket werden synchron auf den Hauptthread geproxied (gemessen ~35 µs), Qt-Callbacks stellen
+nur in eine Queue im geteilten Speicher (~155 µs), Racket fragt sie ab (Regel 2). Grund: die libffi-Closure-Tabelle
+des PoC lebt pro Worker, ein Funktionszeiger-Callback vom Hauptthread nach Racket würde trappen. `shim_pump` ist
+in diesem Modell wirkungslos (der Browser besitzt die Loop), Regel 1 (kein `exec()` durch uns) bleibt erhalten.
+Status: Spike (C++) gemessen, Verbindung mit echtem Racket (S4) steht aus.
+
+### 85.2 Toolchain
+
+- Qt 6.11.2 WASM prüft die Emscripten-Version **exakt** (`QtPublicWasmToolchainHelpers.cmake`,
+  `QT_EMCC_RECOMMENDED_VERSION = 4.0.7`). emsdk 4.0.7 in `~/emsdk`, aktiv nur per
+  `source ~/emsdk/emsdk_env.sh` (nicht in `~/.zshrc`, sonst verdrängt es das Homebrew-Emscripten).
+- Qt-Konfiguration (Beispiel, Scratchpad-Spike): `~/Qt/6.11.2/wasm_multithread/bin/qt-cmake -S . -B build -G Ninja
+  -DCMAKE_MAKE_PROGRAM=/opt/homebrew/bin/ninja -DQT_HOST_PATH=$HOME/Qt/6.11.2/macos`; Seite braucht
+  `Cross-Origin-Opener-Policy: same-origin` und `Cross-Origin-Embedder-Policy: require-corp`.
+- `qt-shim/src/shim.cpp` kompiliert unverändert mit `em++ -std=c++17 -fPIC -pthread -DRQT_HAVE_GL=1`
+  (`__linux__` ist unter Emscripten nicht definiert, X11/Windows-Pfade fallen weg). Gelinkt ist noch nichts.
+
+### 85.3 Repo-Aufbau
+
+Fork `FrankDeinzer/racket-wasm-backend` (Branch `qt-wasm`) als Submodul `third_party/racket-wasm-backend`
+(Remote lokal auf SSH). Der Fork ist ein *Delta* über Upstream-Racket: `patches/` + `overlay/` werden auf den in
+`upstream.lock` gepinnten Racket-Stand (`v9.3` = `bbf7dea8`) angewendet, der Klon liegt in `.work/racket`
+(gitignored). Pflege der Entscheidungen: `third_party/racket-wasm-backend/build-wasm.md`, Abschnitt „qt-wasm".
+
+### 85.4 Build (Reihenfolge, jeweils im Submodul, emsdk aktiv)
+
+```bash
+source ~/emsdk/emsdk_env.sh
+racket build/main.rkt sync                  # klont racket/racket (shallow) auf den Pin
+racket build/main.rkt apply                 # 20 Patches + Overlay (19/20 unverändert auf 9.3)
+( cd .work/racket && make fetch-pb )        # pb-Bootdateien (racket/pb, Branch v9.3)
+( cd .work/racket/racket/src/ChezScheme && ./configure --threads && make )   # nativer Host-Chez
+racket build/main.rkt app apps/node-repl --racket /opt/homebrew/bin/racket \
+  --scheme $PWD/.work/racket/racket/src/ChezScheme/tarm64osx/bin/tarm64osx/scheme
+echo '(+ 1 2)' | node apps/node-repl/dist/racket.js
+```
+
+`app` baut die zwölf Native-Bibliotheken (`wasm-deps/`, meson/autotools mit `emcc`) selbst. Netzzugriffe
+(alle sha-256-gepinnt): 12 Quell-Tarballs + fribidi 1.0.17, zlib/libpng über Freetype-Wraps, 62 Racket-Pakete
+aus `download.racket-lang.org/releases/9.3/`.
+
+### 85.5 Fallstricke (alle im Fork behoben)
+
+1. `racket/pb`: in 9.3 liegen die pb-Bootdateien nicht mehr im Baum; ohne `make fetch-pb` scheitert
+   `./configure --threads` („No suitable machine type found in ./boot").
+2. `build/toolchain.rkt` `find-built-scheme` akzeptierte `t*`-Maschinen, nach dem ersten Teilbuild auch das
+   WASM-Ziel `tpb32l` (`scheme` ist dort ein JS-Wrapper + `.wasm`): „failed querying version form executable".
+   Jetzt `tpb*` ausgeschlossen.
+3. macOS-bash 3.2: `declare -A` in `wasm-deps/build-deps.sh` (einzige Bash-4-Konstruktion).
+4. Ungepinnte Nachlader: pango holte fribidi per `wrap-git` von `master`. Jetzt Rezept `deps/fribidi.sh`
+   (SHA-256 beim ersten Download berechnet, Größe stimmt mit dem GitHub-Asset) und
+   `--wrap-mode=nodownload` als Vorgabe; Ausnahme `deps/freetype.sh` (es gibt keine `zlib.pc` für den
+   Emscripten-Port, daher fällt meson auf zlib 1.3.1 + libpng 1.6.43 aus den Wraps zurück; TODO: `zlib.pc`).
+5. glib: `ppoll` ist in emcc 4.0.7 deklariert, aber nicht implementiert; der Link bricht mit
+   `undefined symbol: ppoll` ab. `deps/glib.sh` schaltet `HAVE_PPOLL` ab (`poll(2)`-Fallback).
+6. Paketkatalog: ohne Vorgabe nutzt der Consume den Standardkatalog (`pkgs.racket-lang.org`, Entwicklungsstände
+   über `git://github.com`, `draw-lib` verlangt dort `base 9.3.0.2`). `upstream.lock` trägt jetzt den
+   Release-Katalog (`pkg-catalog-url` in `config.rkt`, genutzt in `consume.rkt`).
+7. Seiteneffekte außerhalb des Repos: Emscripten-Ports (`~/emsdk/upstream/emscripten/cache/ports/zlib…`) und
+   `raco pkg`-Downloads in `~/Library/Caches/Racket/download-cache`.
+
+### 85.6 Offen
+
+S4: Shim in den WASM-Link (Symboltabelle für `shim_*`, Queue-Callbacks), Mini-`frame%` + `button%` über Qt-WASM,
+Messung in Chrome, Dirty-Rect-Blit, `zlib.pc`-Aufräumen (Freetype-Ausnahme). Nicht geprüft: Verhalten von Qt-WASM
+bei Popups/Menüs/modalen Dialogen, native Datei-/Farb-/Schriftdialoge fehlen im Browser.
+
