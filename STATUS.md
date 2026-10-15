@@ -32,7 +32,10 @@ Details: `docs/2026-10-15_report-wasm-macos.md` (Studie mit allen Messwerten), `
 - **S4a/S4b (gemessen):** Qt-WASM läuft nicht unter `-sPROXY_TO_PTHREAD` (`main()` im pthread, `QApplication` bricht ab) →
   Qt-`main` auf dem Hauptthread, Racket im pthread. Kombinierter Link `qt-shim/wasm/` (Racket-Objekte + zwölf Bibliotheken +
   Qt) lief ohne Symbolkollisionen; Qt-Fenster sichtbar, Racket 9.3 druckt `racket-in-pthread: hello` / `3`.
-- **Offen (nächster Schritt S4c):** Shim in den WASM-Link bringen (Symboltabelle für 206 `shim_*`,
+- **S4c (gemessen):** Shim im Modul; `tools/gen-proxies.py` erzeugt Proxy (Racket-Aufruf → Qt-Hauptthread, ~35 µs) und
+  Callback-Queue (Qt → Racket-Thread via `shim_pump`); Racket 9.3 ruft `shim_version` per FFI, rendert einen Button und erhält
+  echte Mausklicks als Callback (`BUTTON-CLICK 1/2/3`).
+- **Offen (nächster Schritt S4d, `wx/qt` im Image):** Shim in den WASM-Link bringen (Symboltabelle für 206 `shim_*`,
   Queue-Callbacks statt Funktionszeiger, da die libffi-Closure-Tabelle pro Worker lebt), Mini-`frame%` +
   `button%` über Qt-WASM, Chrome statt Node messen. Backlog: `zlib.pc` für den Emscripten-zlib-Port
   (Freetype-Ausnahme entfernen), Dirty-Rect-Blit.

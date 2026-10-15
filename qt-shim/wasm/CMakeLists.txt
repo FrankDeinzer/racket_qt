@@ -13,7 +13,7 @@ cmake_minimum_required(VERSION 3.21)
 project(racketqt_wasm LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL PrintSupport)
 qt_standard_project_setup()
 
 set(RACKET_WASM_BACKEND "${CMAKE_CURRENT_LIST_DIR}/../../third_party/racket-wasm-backend"
@@ -33,9 +33,29 @@ set_source_files_properties(${MAIN_EM_C} PROPERTIES
   INCLUDE_DIRECTORIES "${RC}/ChezScheme/tpb32l/boot/tpb32l;${RC}/ChezScheme/tpb32l/c;${RS}/ChezScheme/c"
   COMPILE_OPTIONS "-sUSE_ZLIB=1")
 
-# --- Racket objects/archives, exactly as the fork's own link uses them (minus main_em.o / wasm_shell_io.o) ---
+# --- the shim and its WASM thread-proxy layer (generated from shim.cpp, tools/gen-proxies.py) ---------------
+set(SHIM_CPP "${CMAKE_CURRENT_LIST_DIR}/../src/shim.cpp")
+set(GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/gen")
+find_program(PYTHON3 python3 REQUIRED NO_CMAKE_FIND_ROOT_PATH)
+add_custom_command(
+  OUTPUT "${GEN_DIR}/shim_wasm_proxy.cpp" "${GEN_DIR}/wasm_shim.inc" "${GEN_DIR}/rqt_wasm_extras.inc"
+  COMMAND "${PYTHON3}" -I "${CMAKE_CURRENT_LIST_DIR}/tools/gen-proxies.py" "${SHIM_CPP}" "${RS}/cs/c/wasm_extras.inc" "${GEN_DIR}"
+  DEPENDS "${SHIM_CPP}" "${CMAKE_CURRENT_LIST_DIR}/tools/gen-proxies.py" "${RS}/cs/c/wasm_extras.inc"
+  COMMENT "Generating the WASM proxy layer for shim_* (gen-proxies.py)")
+set_source_files_properties("${SHIM_CPP}" PROPERTIES COMPILE_DEFINITIONS "RQT_HAVE_GL=1")
+
+# --- boot.c compiled here (not the fork's boot.o) so the shim symbols reach Chez' foreign-symbol table --------
+# Same flags as the fork's own compile of boot.c, but RACKET_EXTRA_FOREIGN_INC names our rqt_wasm_extras.inc: it includes
+# the fork's wasm_extras.inc and then the generated wasm_shim.inc (Sforeign_symbol for every shim_* entry).
+set(BOOT_C "${RS}/cs/c/boot.c")
+set_source_files_properties("${BOOT_C}" PROPERTIES
+  COMPILE_DEFINITIONS "PBCHUNK_REGISTER;RACKET_EXTRA_FOREIGN_INC=\"rqt_wasm_extras.inc\""
+  INCLUDE_DIRECTORIES "${GEN_DIR};${RS}/cs/c;${RC}/wasm-deps;${RC}/ChezScheme/tpb32l/boot/tpb32l;${RS}/rktio;${RC}/rktio"
+  OBJECT_DEPENDS "${GEN_DIR}/rqt_wasm_extras.inc;${GEN_DIR}/wasm_shim.inc")
+
+# --- Racket objects/archives, exactly as the fork's own link uses them (minus main_em.o / wasm_shell_io.o / boot.o)
 file(GLOB RACKET_O "${RC}/*.o")
-list(FILTER RACKET_O EXCLUDE REGEX "/(main_em|wasm_shell_io)\\.o$")
+list(FILTER RACKET_O EXCLUDE REGEX "/(main_em|wasm_shell_io|boot)\\.o$")
 set_source_files_properties(${RACKET_O} PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
 set(RACKET_A
   "${RC}/ChezScheme/tpb32l/boot/tpb32l/libkernel.a"
@@ -65,9 +85,10 @@ foreach(t ${DEP_TOKENS})
 endforeach()
 list(REMOVE_DUPLICATES DEP_LIBDIRS)
 
-qt_add_executable(racketqt_wasm main.cpp ${MAIN_EM_C} ${RACKET_O})
+qt_add_executable(racketqt_wasm main.cpp ${MAIN_EM_C} ${BOOT_C} ${SHIM_CPP}
+  "${GEN_DIR}/shim_wasm_proxy.cpp" ${RACKET_O})
 target_link_directories(racketqt_wasm PRIVATE ${DEP_LIBDIRS})
-target_link_libraries(racketqt_wasm PRIVATE ${RACKET_A} ${DEP_LIBS} Qt6::Widgets)
+target_link_libraries(racketqt_wasm PRIVATE ${RACKET_A} ${DEP_LIBS} Qt6::Widgets Qt6::OpenGL Qt6::PrintSupport)
 
 # Qt's own -s settings stay; ours extend EXPORTED_RUNTIME_METHODS/FUNCTIONS (the last -s wins, so both lists are merged here).
 target_link_options(racketqt_wasm PRIVATE
@@ -84,6 +105,8 @@ set(RACKET_PRELOADS
   "${RACKET_WASM_BACKEND}/.work/racket/racket/etc@/etc"
   "${RS}/cs/c/wasm-fonts/fonts.conf@/etc/fonts/fonts.conf"
   "${RS}/cs/c/wasm-fonts/DejaVuSans.ttf@/share/fonts/DejaVuSans.ttf")
+set(RACKET_QT_MAIN "${CMAKE_CURRENT_LIST_DIR}/test/ffi-smoke.rkt" CACHE FILEPATH "Racket program preloaded as /app/main.rkt")
+list(APPEND RACKET_PRELOADS "${RACKET_QT_MAIN}@/app/main.rkt")
 foreach(p ${RACKET_PRELOADS})
   target_link_options(racketqt_wasm PRIVATE "SHELL:--preload-file ${p}")
 endforeach()

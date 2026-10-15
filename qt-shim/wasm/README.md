@@ -1,7 +1,9 @@
 # qt-shim/wasm — Qt-WASM und Racket CS 9.3 in einem Modul
 
-Status: **S4b erreicht** (Qt-Fenster + Racket im pthread im selben WASM-Modul, `racket/base`-Ausdruck wird
-ausgewertet). Der Shim (`../src/shim.cpp`) ist hier noch **nicht** eingebunden (S4c). Hintergrund und Messwerte:
+Status: **S4c erreicht**: der Shim (`../src/shim.cpp`, unverändert) ist im Modul; Racket ruft ihn über die FFI
+(`(ffi-lib #f)`), jeder `shim_*`-Aufruf läuft per Proxy auf dem Qt-Hauptthread, Qt-Callbacks kommen über eine Queue
+zurück in den Racket-Thread (echter Mausklick in Chrome → Racket-Closure, Test `test/ffi-smoke.rkt`). Noch offen:
+`wx/qt` (`racket/gui`) in das Image bringen (S4d). Hintergrund und Messwerte:
 `docs/2026-10-15_report-wasm-macos.md`, `docs/HACKING.md` §85.
 
 ## Aufbau
@@ -12,6 +14,12 @@ ausgewertet). Der Shim (`../src/shim.cpp`) ist hier noch **nicht** eingebunden (
   (`.work/racket/racket/src/build/cs/c`): Objekte, `libkernel.a`/`liblz4.a`/`librktio.a`, die zwölf Native-Bibliotheken
   (aus `wasm-deps/.wasm-deps-linkflags.txt`), die Preload-Dateien (Boot-Images, `collects`, `etc`, Schrift). Racket-`main()`
   kommt aus der `main_em.c` des Forks, übersetzt mit `-Dmain=racket_em_main` (kein Eingriff in den Fork).
+- `tools/gen-proxies.py`: liest `shim.cpp` (alle `extern "C"`-Funktionen und Callback-Typedefs) und erzeugt
+  `shim_wasm_proxy.cpp` (Wrapper `W_shim_*` mit synchronem Proxy auf den Hauptthread, je ein Trampolin pro Callback-Typ,
+  Callback-Queue, `W_shim_pump` als Dispatcher im Racket-Thread), `wasm_shim.inc` (`Sforeign_symbol` je Eintrag) und
+  `rqt_wasm_extras.inc` (bindet die `wasm_extras.inc` des Forks plus `wasm_shim.inc` ein). `boot.c` wird deshalb hier
+  selbst übersetzt (gleiche Flags wie im Fork, aber `RACKET_EXTRA_FOREIGN_INC` zeigt auf `rqt_wasm_extras.inc`).
+- `test/ffi-smoke.rkt`: wird als `/app/main.rkt` vorgeladen und von `main.cpp` per `(load …)` ausgeführt.
 - `tools/serve-and-run.mjs`: statischer COOP/COEP-Server + Headless-Chrome per DevTools-Protokoll (nur Node-Bordmittel),
   wartet auf `document.title === "BENCH-DONE"`, schreibt Konsole und Screenshot.
 
@@ -22,8 +30,8 @@ source ~/emsdk/emsdk_env.sh          # emcc 4.0.7 -- Qt 6.11.2 WASM prüft die V
 ~/Qt/6.11.2/wasm_multithread/bin/qt-cmake -S qt-shim/wasm -B build/wasm -G Ninja \
     -DCMAKE_MAKE_PROGRAM=/opt/homebrew/bin/ninja -DQT_HOST_PATH=$HOME/Qt/6.11.2/macos -DCMAKE_BUILD_TYPE=Release
 cmake --build build/wasm
-EXTRA_WAIT=25 node qt-shim/wasm/tools/serve-and-run.mjs build/wasm racketqt_wasm.html /tmp/wasm-out 90
-cat /tmp/wasm-out/console.txt        # racket-in-pthread: hello / 3
+CLICK_AT="120,40;120,40" CLICK_AFTER=22 EXTRA_WAIT=6 node qt-shim/wasm/tools/serve-and-run.mjs build/wasm racketqt_wasm.html /tmp/wasm-out 90
+cat /tmp/wasm-out/console.txt        # version, RESIZE …, BUTTON-CLICK 1 / 2 (echte Mausklicks via DevTools)
 ```
 
 Ergebnis: ~45 MB `.wasm`, ~61 MB `.data` (Boot-Images, Kern-`collects`). Die Seite braucht
@@ -38,3 +46,17 @@ Ergebnis: ~45 MB `.wasm`, ~61 MB `.data` (Boot-Images, Kern-`collects`). Die Sei
 - `-sEXPORTED_RUNTIME_METHODS`/`-sEXPORTED_FUNCTIONS` müssen Qts und Rackets Listen vereinen (das letzte `-s` gewinnt).
 - Racket-`main()` setzt `exit_after = 1`: nach dem Auswerten beendet `exit()` den Prozess. Für eine laufende GUI
   muss Racket später in einer Ereignisschleife bleiben.
+
+## Proxy-Schicht (S4c)
+
+- **Aufrufe Racket → Qt:** `W_shim_x(...)` führt `shim_x` per `emscripten::ProxyingQueue::proxySync` auf dem Hauptthread aus
+  und blockiert, bis das Ergebnis da ist (gemessen ~35 µs, `docs/HACKING.md` §85.1). Argumente, die in Racket-Speicher
+  zeigen (z. B. Pixelpuffer), bleiben gültig, weil beide Threads denselben WASM-Speicher teilen.
+- **Callbacks Qt → Racket:** Der Shim bekommt statt des Racket-Funktionszeigers ein Trampolin und einen heap-allozierten
+  Record `{racket_cb, racket_ud}` als `ud`. Das Trampolin stellt `racket_cb(racket_ud, args…)` in eine Queue (String-
+  Argumente werden kopiert); `W_shim_pump` (Registriername `shim_pump`) arbeitet sie im Racket-Thread ab. Ein Racket-
+  Closure darf nur dort laufen, wo es erzeugt wurde (libffi-Closure-Tabelle pro Worker). `shim_pump` ruft **nicht**
+  `processEvents` auf, die Qt-Schleife gehört dem Browser. Der Record wird nicht freigegeben (kleines Leck pro Registrierung).
+- **Besonderheiten:** `shim_app_init` wird einmal von `main()` auf dem Qt-Thread aufgerufen (spätere Aufrufe aus Racket
+  sind No-ops); `shim_app_quit` ist ein No-op. Callback-Parameter müssen direkt von einem `void* ud` gefolgt werden
+  (der Generator bricht sonst ab).

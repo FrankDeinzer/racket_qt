@@ -104,6 +104,15 @@ libpng-, zlib-, pcre2- und libjpeg-Kopien bündelt (Racket-Archive vor Qt). `.wa
 größten Unbekannten der Architektur (Thread-Rolle, Entry-Point, Linkbarkeit) belegt; offen bleibt die Anbindung des Shim
 (S4c).
 
+## 3d. Ergebnis S4c: der Shim im Modul (gemessen)
+
+Der unveränderte `shim.cpp` ist im kombinierten Modul. `tools/gen-proxies.py` erzeugt daraus je Funktion einen Wrapper, der
+auf dem Qt-Hauptthread läuft (synchroner Proxy), je Callback-Typ ein Trampolin (stellt in eine Queue statt Racket aus dem
+falschen Thread aufzurufen) und die `Sforeign_symbol`-Registrierung für Chez. Test in Headless-Chrome 155 aus Racket 9.3:
+`shim_version` ruft `racketqtshim 0.2.0` zurück; ein per FFI erzeugter Button erscheint; Resize-Callbacks erreichen Racket;
+drei echte Mausklicks ergeben `BUTTON-CLICK 1/2/3`. Der Rundlauf Maus → Qt (Hauptthread) → Queue → Racket-Thread → Closure
+funktioniert damit. Nächster Schritt: `wx/qt` (`racket/gui`) im Image (S4d).
+
 ## 4. Hindernisse im Detail
 
 ### 4.1 Racket CS auf WASM
@@ -199,7 +208,8 @@ B bleibt Messlatte für Interpreter-Speed und Draw-Pfad.
 | S3 | Erster Build mit `racket/draw`, Interpreter-Messung | **erledigt:** Racket 9.3 [cs] als WASM unter Node, `racket/draw` läuft, Messung siehe Abschnitt 3a |
 | S4a | Qt im Proxy-Thread? | **erledigt, negativ** (Abschnitt 3b): Qt-`main()` muss auf dem Hauptthread laufen |
 | S4b | Qt und Racket in einem Modul (Qt-`main` Hauptthread, Racket im pthread) | **erledigt** (Abschnitt 3c) |
-| S4c | Shim: Symboltabelle für `shim_*`, Queue-Callbacks, Mini-`frame%` + `button%` über Qt-WASM | offen |
+| S4c | Shim im Modul: Symboltabelle für `shim_*`, Proxy auf den Hauptthread, Callback-Queue | **erledigt** (Abschnitt 3d) |
+| S4d | `wx/qt` (`racket/gui`): Mini-`frame%` + `button%` über Qt-WASM | offen |
 
 ## 9. Auswirkungen auf die Projektregeln (zur Entscheidung)
 

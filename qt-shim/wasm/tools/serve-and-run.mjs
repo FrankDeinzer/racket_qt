@@ -32,6 +32,17 @@ try {
   await sleep(2000); log("isolated:", await ev("self.crossOriginIsolated"));
   const t0 = Date.now(); let done = false;
   while (Date.now() - t0 < Number(TIMEOUT) * 1000) { await sleep(1500); if ((await ev("document.title")) === "BENCH-DONE") { done = true; break; } }
+  // CLICK_AT="x,y[;x,y...]" (CSS px) sends real mouse clicks after CLICK_AFTER seconds (default 20), then EXTRA_WAIT runs on.
+  if (process.env.CLICK_AT) {
+    await sleep(Number(process.env.CLICK_AFTER || 20) * 1000);
+    for (const pt of process.env.CLICK_AT.split(";")) {
+      const [x, y] = pt.split(",").map(Number);
+      for (const type of ["mouseMoved", "mousePressed", "mouseReleased"])
+        await send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1, buttons: type === "mousePressed" ? 1 : 0 });
+      log("klick", x, y);
+      await sleep(1500);
+    }
+  }
   await sleep(Number(process.env.EXTRA_WAIT || 0) * 1000);
   log(done ? "fertig" : "TIMEOUT", ((Date.now() - t0) / 1000).toFixed(1) + " s");
   writeFileSync(`${OUT}/bench.json`, JSON.stringify(await ev("JSON.stringify(window.__bench||null)")) );

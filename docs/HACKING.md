@@ -9292,3 +9292,16 @@ darübergelinkt. Ergebnis (Headless-Chrome 155): Qt-Fenster sichtbar, Racket dru
 libpng, zlib, pcre2 und libjpeg bündelt (Racket-Archive stehen vor Qt im Link). `.wasm` 45 MB, `.data` 61 MB. Noch nicht
 eingebunden: der Shim selbst (S4c: Symboltabelle für `shim_*`, Queue-Callbacks) und `wx/qt`.
 
+### 85.8 S4c — der Shim im Modul, FFI und Callback-Queue (gemessen)
+
+`qt-shim/wasm/tools/gen-proxies.py` erzeugt aus `shim.cpp` (206 Funktionen, 13 Callback-Typen, Abgleich gegen `nm`: gleiche
+Menge) die Proxy-Schicht; `boot.c` wird im CMake-Projekt selbst übersetzt, damit `Sforeign_symbol` für jeden `shim_*`-Eintrag
+in Chez' Symboltabelle landet (der Fork lädt `wasm_extras.inc` per `RACKET_EXTRA_FOREIGN_INC`; ein quoted `#include` in
+`boot.c` sucht zuerst im eigenen Verzeichnis, daher heißt unsere Datei `rqt_wasm_extras.inc`). Racket greift über
+`(ffi-lib #f)` darauf zu. Test `test/ffi-smoke.rkt` in Headless-Chrome 155: `shim_version` → `racketqtshim 0.2.0`; ein von
+Racket erzeugter Button wird gerendert; Resize-Callbacks kommen in Racket an (`RESIZE 1100 x 813`, Qt-WASM spannt das
+Fenster auf die Seite); drei echte Mausklicks (DevTools `Input.dispatchMouseEvent`) ergeben `BUTTON-CLICK 1/2/3`.
+Damit ist der Kern der Architektur belegt: Aufruf Racket → Qt (Proxy), Callback Qt → Racket (Queue, `shim_pump` im
+Racket-Thread). Offen: `wx/qt` im Image (S4d: `utils.rkt` lädt die Bibliothek per Dateipfad, hier `(ffi-lib #f)`; `racket/gui`
+und die Forks `third_party/gui`/`third_party/draw` müssen als lokale Pakete in das Image), Dirty-Rect-Blit.
+
