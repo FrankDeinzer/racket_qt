@@ -85,6 +85,15 @@ Ergebnisse stabil. Skript: `bench.rktl` (Scratchpad). Boot ca. 2 s, `racket.wasm
 - **Einschränkungen:** Node, nicht Chrome; eine Maschine; Pixelzahlen unterscheiden sich (WASM nutzt die
   mitgelieferte DejaVu-Schrift, nativ die Systemschrift), das ist kein Fehler.
 
+## 3b. Befund S4a: Qt im Proxy-Thread (gemessen)
+
+Spike: dasselbe Qt-Programm mit `-sPROXY_TO_PTHREAD` (wie der Racket-PoC es für sein `main()` nutzt). Ergebnis in
+Headless-Chrome 155: `main()` läuft im pthread (`emscripten_is_main_runtime_thread() == 0`), `QApplication` bricht
+ab (`Cannot read properties of undefined (reading 'chrome')`). **Qt-WASM braucht den Browser-Hauptthread.**
+Konsequenz für den kombinierten Link: kein `-sPROXY_TO_PTHREAD`; Qt-`main()` auf dem Hauptthread startet Racket in
+einem eigenen pthread (Racket-`main()` aus `main_em.c` wird eine aufrufbare Funktion). Diese Umkehrung der
+Entry-Point-Rollen ist der erste Eingriff in den PoC für S4.
+
 ## 4. Hindernisse im Detail
 
 ### 4.1 Racket CS auf WASM
@@ -178,7 +187,8 @@ B bleibt Messlatte für Interpreter-Speed und Draw-Pfad.
 | S1 | Qt-Spike: Hop-, Callback-, Blit-Kosten | **erledigt, gemessen** (Abschnitt 3) |
 | S2 | Basis klären: Racket-Version und Patch-Rebase | **erledigt:** Pin `v9.3`, `sync` + `apply` laufen, 19/20 Patches unverändert, 1 Kontextzeile angepasst |
 | S3 | Erster Build mit `racket/draw`, Interpreter-Messung | **erledigt:** Racket 9.3 [cs] als WASM unter Node, `racket/draw` läuft, Messung siehe Abschnitt 3a |
-| S4 | Shim linken (Symboltabelle), Mini-`frame%` + `button%` über Qt-WASM | offen |
+| S4a | Qt im Proxy-Thread? | **erledigt, negativ** (Abschnitt 3b): Qt-`main()` muss auf dem Hauptthread laufen |
+| S4 | Shim linken (Symboltabelle), Racket aus Qt-`main()` im pthread, Mini-`frame%` + `button%` über Qt-WASM | offen |
 
 ## 9. Auswirkungen auf die Projektregeln (zur Entscheidung)
 

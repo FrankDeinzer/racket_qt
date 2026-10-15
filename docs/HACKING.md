@@ -9213,6 +9213,15 @@ des PoC lebt pro Worker, ein Funktionszeiger-Callback vom Hauptthread nach Racke
 in diesem Modell wirkungslos (der Browser besitzt die Loop), Regel 1 (kein `exec()` durch uns) bleibt erhalten.
 Status: Spike (C++) gemessen, Verbindung mit echtem Racket (S4) steht aus.
 
+**Qt kann nicht im Proxy-Thread laufen (gemessen, Spike S4a).** Der PoC linkt Racket mit `-sPROXY_TO_PTHREAD`
+(Racket-`main()` im pthread, Browser-Hauptthread bleibt frei). Qt-WASM mit demselben Flag: `main()` läuft im
+pthread (`emscripten_is_main_runtime_thread() == 0`), aber `QApplication` bricht beim Start mit
+`Cannot read properties of undefined (reading 'chrome')` ab (die Plattform braucht den Hauptthread). Folge für
+den kombinierten Link: **kein `-sPROXY_TO_PTHREAD`**; Qts `main()` läuft auf dem Hauptthread, erzeugt
+`QApplication` und startet Racket (der heutige `main()` aus `overlay/racket/src/cs/c/main_em.c`, umzubenennen in
+eine aufrufbare Funktion) in einem eigenen pthread. Die vom PoC gelösten Hauptthread-Blockaden (GLib/Font) kamen
+vom blockierenden Racket-`main()` auf dem Hauptthread; hier bleibt der Hauptthread frei (Qt-`exec()`).
+
 ### 85.2 Toolchain
 
 - Qt 6.11.2 WASM prüft die Emscripten-Version **exakt** (`QtPublicWasmToolchainHelpers.cmake`,
