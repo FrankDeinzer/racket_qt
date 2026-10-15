@@ -4,3 +4,7 @@
 [submodule "third_party/draw"]
 	path = third_party/draw
 	url = https://github.com/FrankDeinzer/racket_draw.git
+[submodule "third_party/racket-wasm-backend"]
+	path = third_party/racket-wasm-backend
+	url = https://github.com/FrankDeinzer/racket-wasm-backend.git
+	branch = qt-wasm
