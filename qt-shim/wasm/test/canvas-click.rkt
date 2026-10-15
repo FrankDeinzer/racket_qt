@@ -1,0 +1,11 @@
+;; Which mouse events does a canvas% receive for a (synthetic DevTools) click in the browser?  (HACKING §85.14)
+(require racket/class racket/gui/base)
+(define f (new frame% [label "click"] [width 300] [height 200]))
+(define c (new (class canvas%
+                 (define/override (on-event e)
+                   (printf "EVENT ~a x=~a y=~a left=~a\n" (send e get-event-type) (send e get-x) (send e get-y) (send e get-left-down)))
+                 (super-new))
+               [parent f] [min-width 280] [min-height 150]))
+(send f show #t)
+(printf "FRAME-SHOWN\n")
+(yield 'wait)

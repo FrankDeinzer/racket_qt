@@ -25,6 +25,9 @@ static void* racket_thread(void*) {
 }
 
 int main(int argc, char** argv) {
+    // Diagnostics: open the page with ?qtdebug to turn on the shim's PLT_QT_DEBUG output (mouse targets, paint regions, ...).
+    if (MAIN_THREAD_EM_ASM_INT({ return new URLSearchParams(location.search).has('qtdebug') ? 1 : 0; }))
+        setenv("PLT_QT_DEBUG", "1", 1);
     shim_app_init();   // creates the QApplication (shim-owned); later proxied shim_app_init calls are no-ops
     (void)argc; (void)argv;
 

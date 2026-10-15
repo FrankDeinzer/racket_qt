@@ -34,13 +34,24 @@ try {
   log("renderer:", await ev(`(()=>{const c=document.createElement("canvas").getContext("webgl2");if(!c)return "kein WebGL2";const e=c.getExtension("WEBGL_debug_renderer_info");return e?c.getParameter(e.UNMASKED_RENDERER_WEBGL):"?"})()`));
   const t0 = Date.now(); let done = false;
   while (Date.now() - t0 < Number(TIMEOUT) * 1000) { await sleep(1500); if ((await ev("document.title")) === "BENCH-DONE") { done = true; break; } }
+  // A real user moves the mouse over many points; one jumping mouseMoved gives Qt-WASM no Enter/Leave for the new widget
+  // (switchable-button% needs `entering?` before it accepts a click) -- so glide from the last position in small steps.
+  let lastX = 5, lastY = 5;
+  const glideClick = async (x, y) => {
+    const steps = 14;
+    for (let i = 1; i <= steps; i++)
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: lastX + (x - lastX) * i / steps, y: lastY + (y - lastY) * i / steps, buttons: 0 });
+    await sleep(120);
+    for (const type of ["mousePressed", "mouseReleased"])
+      await send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1, buttons: type === "mousePressed" ? 1 : 0 });
+    lastX = x; lastY = y;
+  };
   // CLICK_AT="x,y[;x,y...]" (CSS px) sends real mouse clicks after CLICK_AFTER seconds (default 20), then EXTRA_WAIT runs on.
   if (process.env.CLICK_AT) {
     await sleep(Number(process.env.CLICK_AFTER || 20) * 1000);
     for (const pt of process.env.CLICK_AT.split(";")) {
       const [x, y] = pt.split(",").map(Number);
-      for (const type of ["mouseMoved", "mousePressed", "mouseReleased"])
-        await send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1, buttons: type === "mousePressed" ? 1 : 0 });
+      await glideClick(x, y);
       log("klick", x, y);
       await sleep(1500);
     }
@@ -57,6 +68,16 @@ try {
       await sleep(Number(process.env.KEY_GAP || 150));
     }
     log("tasten gesendet:", process.env.KEYS.length);
+  }
+  // CLICK_AT2: clicks sent AFTER the keys (e.g. type code, then press Run).
+  if (process.env.CLICK_AT2) {
+    await sleep(Number(process.env.CLICK2_DELAY || 500));
+    for (const pt of process.env.CLICK_AT2.split(";")) {
+      const [x, y] = pt.split(",").map(Number);
+      await glideClick(x, y);
+      log("klick2", x, y);
+      await sleep(1500);
+    }
   }
   await sleep(Number(process.env.EXTRA_WAIT || 0) * 1000);
   log(done ? "fertig" : "TIMEOUT", ((Date.now() - t0) / 1000).toFixed(1) + " s");

@@ -9424,3 +9424,31 @@ Thread geschlossen). Jeder Schritt loggt `CHK <name> OK|FAIL`, Callbacks loggen 
   Achtung, der Linker faltet identische Funktionen, die Namen im Stack können täuschen.)
 - **Beobachtungen, kein Defekt:** `select-all` im Editor löst im Browser die Warnung `Clipboard.write … Document is not focused` aus (Qt schreibt die
   Auswahl in die Zwischenablage; ohne Fokus im Headless-Chrome verweigert); `popup-menu%` hat keine `dismiss`-Methode (Testfehler, nicht Backend).
+
+### 85.14 Echtes DrRacket im Browser (gemessen, 2026-10-15)
+
+**Ergebnis:** `drracket-core` läuft auf dem Qt-Backend im Browser: Menüleiste (File/Edit/View/Racket/Insert/Tabs/Help), Editor mit Zeilennummern,
+Syntax- und Klammerfärbung, Interaktionsfenster, Run/Stop, Statusleiste. Tippen im Editor, Racket-Menü (Run, „Ask the Program to Quit", …) und der
+Run-Knopf der Toolbar funktionieren; `#lang racket` + `(+ 1 2)` + Run → Interaktionsfenster zeigt `3`.
+- **Bau:** `qt-shim/wasm/app/app.rkt` mit `'pkgs '(draw-lib drracket-core)` (Abhängigkeiten per 9.3-Release-Katalog, Netz für diese Etappe vom Nutzer freigegeben):
+  52 Pakete cross-kompiliert (u. a. `drracket-core-lib` 86 `.zo`, `typed-racket-lib` 279, `web-server-lib` 193, `images-lib` 32, `gui-lib` 424).
+  Startprogramm `test/drracket-main.rkt` (`(dynamic-require 'drracket/drracket)`). Größen: `share.data` 87 MB, `racket.data` 61 MB → `.data` 148 MB,
+  `.wasm` 45 MB.
+- **Zeiten (Headless-Chrome, arm64):** `drracket/drracket` geladen in **5,5–6,8 s** (Fenster sichtbar), `#lang racket` per `eval` 1,8 s, Run über Menü
+  oder Toolbar ≈ 2 s bis zur Ausgabe.
+- **Orchestrator-Fund (behoben, Fork `build/consume.rkt`):** `images-lib` instanziiert `racket/draw` schon beim Kompilieren (rendert Icons) und braucht
+  dazu die nativen Draw-Bibliotheken des Host-Racket (`libuuid.1.dylib` …). `racket-native-lib-path` nahm `<racket>/../lib` — bei `--racket /opt/homebrew/bin/racket`
+  (Symlink) das falsche Verzeichnis. Jetzt wird der Symlink aufgelöst (`/Applications/Racket v9.3/lib`).
+- **Mitvalidiert:** Das neue Freetype-Rezept (§85.12, `zlib.pc`, `-Dzlib=system`) hat den Produktivbaum sauber neu gebaut (Runtime-Cache-Schlüssel hatte sich
+  geändert; `racket.wasm` neu), DrRacket rendert Schrift/Text korrekt.
+- **Scheinbarer Fehler, Messartefakt:** Der Run-Knopf (`mrlib/switchable-button%`) reagierte auf einen DevTools-Klick nicht, obwohl `on-event` lief: er akzeptiert
+  `left-up` nur, wenn vorher `entering?` kam (`in?`). Ein einzelnes springendes `mouseMoved` erzeugt in Qt-WASM kein Enter/Leave für das neue Widget; ohne
+  vorherige Mausposition (frischer Lauf) kam es, nach einem Klick woanders nicht. Mit gleitender Maus (14 Zwischenpunkte, `glideClick` in
+  `serve-and-run.mjs`) funktioniert es immer. Ein echter Nutzer bewegt die Maus über viele Punkte; **nicht mit echter Maus geprüft**.
+- **Diagnose-Hilfen:** Seite mit `?qtdebug` öffnen schaltet `PLT_QT_DEBUG` ein (Mausziel-Widget + Geometrie, Paint-Regionen; `main.cpp`).
+  Neue Tests: `test/eval-test.rkt` (Eval/Namespace/Custodian ohne DrRacket; `place` ist im WASM-Runtime nicht verfügbar), `test/canvas-click.rkt`,
+  `test/switchable-button.rkt`.
+- **Beobachtungen, offen:** (1) `openssl: OpenSSL library too old, version 1.0.2 or later required` beim Laden von `net-lib` (harmlos, kein TLS im Browser-Image);
+  (2) `racket/place` (`make-place`) nicht verfügbar; (3) Datei-Dialoge, Speichern/Öffnen (virtuelles MEMFS), Hilfe/Browser, Check Syntax, Debugger,
+  Paket-Manager, Ctrl-Tastenkürzel (der Tastensender kann noch keine Modifier), HiDPI, Chrome mit GPU und die Bedienbarkeit mit echter Maus/Tastatur sind
+  nicht geprüft; (4) die `.data`-Nutzlast (148 MB) wird komplett vor dem Start geladen — Download-/Startzeit über Netz ungemessen.

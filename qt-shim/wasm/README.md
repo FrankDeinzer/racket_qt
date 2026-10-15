@@ -1,6 +1,6 @@
 # qt-shim/wasm — Qt-WASM und Racket CS 9.3 in einem Modul
 
-Status: **S4d erreicht**: ein echtes `racket/gui`-Programm (`frame%`, `message%`, `button%`) läuft auf dem Qt-Backend im Browser,
+Status: **echtes DrRacket läuft im Browser** (HACKING §85.14: `app/app.rkt` mit `drracket-core`, `test/drracket-main.rkt`, Run → `3`). Davor **S4d erreicht**: ein echtes `racket/gui`-Programm (`frame%`, `message%`, `button%`) läuft auf dem Qt-Backend im Browser,
 echte Mausklicks erreichen den Racket-Callback und `set-label` schreibt zurück (`test/hello-gui.rkt`). `racket/gui/base` lädt in 0,6 s
 (`test/load-profile.rkt` misst die Aufteilung). `test/canvas-editor.rkt` + `KEYS=…` in `serve-and-run.mjs`: Canvas-Zeichnen und Editor mit echter Tastatur laufen, ~2–3 ms je Taste nach dem Blit-Fix (vorher ~290 ms, `docs/HACKING.md` §85.10/§85.11). `CHROME_GPU=1` misst mit echter GPU. **S4c**: der Shim (`../src/shim.cpp`, unverändert) ist im Modul; Racket ruft ihn über die FFI
 (`(ffi-lib #f)`), jeder `shim_*`-Aufruf läuft per Proxy auf dem Qt-Hauptthread, Qt-Callbacks kommen über eine Queue

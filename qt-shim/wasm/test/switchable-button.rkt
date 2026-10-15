@@ -1,0 +1,10 @@
+;; Does a click reach mrlib's switchable-button% (DrRacket's Run/Stop toolbar buttons) in the browser?  (HACKING §85.14)
+(require racket/class racket/gui/base mrlib/switchable-button)
+(define f (new frame% [label "sb"] [width 300] [height 120]))
+(define p (new horizontal-panel% [parent f] [alignment '(left top)]))
+(define bm (make-object bitmap% 16 16))
+(define sb (new switchable-button% [parent p] [label "Run"] [bitmap bm]
+                [callback (lambda (b) (printf "SB-CALLBACK\n"))]))
+(send f show #t)
+(printf "FRAME-SHOWN\n")
+(yield 'wait)
