@@ -9364,3 +9364,32 @@ und die Forks `third_party/gui`/`third_party/draw` müssen als lokale Pakete in 
   (Ausnahmen `local-zo-exempt`: `tests/examples/scribblings/doc`, `embedded-gui`, `info.rkt`), sonst bricht `cross-install` ab. Getestet:
   geänderter Inhalt → Wipe + Prüfung besteht (424 `.zo`); unverändert → kein Wipe. Der Negativfall der Modulprüfung (fehlendes `.zo`)
   wurde nicht künstlich erzeugt. Manuelles Löschen der Caches ist nicht mehr nötig.
+
+### 85.12 Aufräumen: Callback-Records und `zlib.pc` (gemessen, 2026-10-15)
+
+**Callback-Records (`qt-shim/wasm/tools/gen-proxies.py`).** Jede Registrierung legte einen `{racket_cb, racket_ud}`-Record per `new` an,
+der nie freigegeben wurde. Jetzt gehören die Records einer Registry (Qt-Thread, Schlüssel = Widget-Handle + Setter-Name),
+Refcount = Registry-Referenz + je ein Verweis pro eingereihtem Callback (die Queue-Lambda gibt nach dem Aufruf frei; so wird kein
+Record unter einem wartenden Aufruf freigegeben). Neu registrieren ersetzt und gibt den alten Record frei; `shim_{window,canvas,button,printer}_destroy`
+geben alle Records ihres Widgets frei. **Nur eine geprüfte Allowlist (`RELEASABLE`)** nimmt teil: Setter, die Callback+ud in einem
+Member der Qt-Klasse ablegen (oder einen Filter beim Ersetzen löschen). **Nicht** dabei, weil Qt danach noch auf den alten Record zeigt:
+`shim_widget_set_focus_cb`/`_nav_key_cb` (installieren bei jedem Aufruf einen NEUEN Event-Filter), alle `connect()`-Lambdas
+(`*_create` für Slider/Choice/Radio/…, `list_box_set_activate_cb`, `printer_show_*_dialog`, `display_set_changed_cb`) — dort bleibt das alte
+Verhalten (Record wird nie freigegeben). Neuer Debug-Export `shim_rec_count` (lebende Records).
+- **Test:** `qt-shim/wasm/test/rec-leak.rkt` (rohe Shim-FFI): 2000 Neuregistrierungen eines Resize-Callbacks → 2 lebende Records
+  (Close + Resize, vorher 2000+), ein eingereihter und danach ersetzter Callback läuft trotzdem (`fired 3`, kein Absturz), `destroy` → 0.
+  `canvas-editor.rkt` (Tasten 3–4 ms) und `hello-gui.rkt` (Klicks) laufen unverändert.
+- **Grenze, ehrlich:** Das `wx/qt`-Backend ruft `shim_*_destroy` **nirgends** auf (Fenster werden versteckt, nicht zerstört; `frame.rkt` hält
+  versteckte Frames in einem 64er-Ring). Im Alltag greift deshalb nur das Ersetzen derselben Registrierung; den größten Teil des Lecks
+  (ein Record pro Widget) beseitigt erst ein echtes `destroy` im Backend. **Fund dabei:** `shim_window_destroy` auf einem **sichtbaren** Fenster
+  bricht unter WASM mit `Aborted(): Terminating since we don't have asyncify` ab (verstecktes Fenster: sauber). Wer `destroy` im Backend
+  einführt, muss vorher `show #f` + einen Pump-Zyklus einplanen.
+
+**`zlib.pc` / Freetype (`wasm-deps/`, Fork).** Die Wrap-Ausnahme `DEP_WRAP_MODE=default` ist weg. Ursache war doppelt: (1) der Emscripten-
+zlib-Port (Sysroot `zlib.h` + `libz.a`) liefert keine `zlib.pc`, (2) Freetypes meson-Option `-Dzlib=external` heißt „meson-Subprojekt/Wrap",
+nicht „pkg-config" — das ist `system`. Fix: `deps.sh` `wasm_ensure_zlib_pc` erzeugt `zlib.pc` aus dem Sysroot (kein Download, Version aus `zlib.h`)
+und legt sie in `PKG_CONFIG_PATH`; `freetype.sh` nutzt `-Dzlib=system` und den Standardmodus `nodownload`. Ergebnis: kein zweites libpng/libz mehr in
+`build-freetype-em/install`, `freetype2.pc` hat `Requires: zlib, libpng`. **Geprüft im Scratch-Verzeichnis** (Produktivbaum unberührt): komplette
+`draw`-Gruppe (libpng … pango) baut offline in 5 min durch. **Offen:** Der Produktivbaum ist noch nicht neu gebaut — die Rezept-Änderung ändert den
+Manifest-Hash von Freetype und damit den Runtime-Cache-Schlüssel; der nächste Runtime-Build baut Freetype (und, laut Hinweis in `deps.sh`, manuell
+auch dessen Verbraucher Cairo/Pango) neu und sollte danach `racket/draw` kurz prüfen.

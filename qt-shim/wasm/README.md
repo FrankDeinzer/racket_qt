@@ -58,7 +58,7 @@ Ergebnis: ~45 MB `.wasm`, ~61 MB `.data` (Boot-Images, Kern-`collects`). Die Sei
   Record `{racket_cb, racket_ud}` als `ud`. Das Trampolin stellt `racket_cb(racket_ud, args…)` in eine Queue (String-
   Argumente werden kopiert); `W_shim_pump` (Registriername `shim_pump`) arbeitet sie im Racket-Thread ab. Ein Racket-
   Closure darf nur dort laufen, wo es erzeugt wurde (libffi-Closure-Tabelle pro Worker). `shim_pump` ruft **nicht**
-  `processEvents` auf, die Qt-Schleife gehört dem Browser. Der Record wird nicht freigegeben (kleines Leck pro Registrierung).
+  `processEvents` auf, die Qt-Schleife gehört dem Browser. Records werden bei erneuter Registrierung bzw. `shim_*_destroy` freigegeben (Allowlist `RELEASABLE`, Refcount gegen wartende Aufrufe; HACKING §85.12), alle anderen bleiben ein kleines Leck pro Registrierung.
 - **Besonderheiten:** `shim_app_init` wird einmal von `main()` auf dem Qt-Thread aufgerufen (spätere Aufrufe aus Racket
   sind No-ops); `shim_app_quit` ist ein No-op. Callback-Parameter müssen direkt von einem `void* ud` gefolgt werden
   (der Generator bricht sonst ab).

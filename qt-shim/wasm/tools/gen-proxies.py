@@ -63,6 +63,22 @@ for m in func_re.finditer(body):
     ret_full = full.split(m.group("name"))[0].strip()
     funcs.append((ret_full, m.group("name"), split_args(m.group("args"))))
 
+# shim exports that delete their widget: the records registered for it are released with it
+DESTROY = {"shim_window_destroy", "shim_canvas_destroy", "shim_button_destroy", "shim_printer_destroy"}
+# Only these registrations are released (replace / destroy). Each one was read in shim.cpp: the callback + ud are stored in a
+# member of the object (or an event filter that is deleted on replace), so after a replace/destroy nothing in Qt still points
+# at the old record. Everything else (setters that connect() a lambda or install a NEW event filter per call, one-shot dialogs,
+# widgets that are never destroyed explicitly) keeps the old behaviour: a record that is never freed. Add a name here only
+# after checking that.
+RELEASABLE = {
+    "shim_app_set_quit_cb",
+    "shim_canvas_set_focus_cb", "shim_canvas_set_key_cb", "shim_canvas_set_mouse_cb", "shim_canvas_set_wheel_cb",
+    "shim_menu_set_about_to_hide_cb", "shim_menu_set_about_to_show_cb",
+    "shim_widget_set_drop_cb",
+    "shim_window_set_activate_cb", "shim_window_set_drop_cb", "shim_window_set_move_cb", "shim_window_set_resize_cb",
+    # created together with the widget, released with its explicit destroy (shim_*_destroy deletes the widget at once)
+    "shim_window_create", "shim_canvas_create", "shim_button_create",
+}
 SPECIAL = {"shim_pump", "shim_pump_us", "shim_events_pending", "shim_app_quit"}
 # Platform variants (#ifdef __linux__ ... #else stub) define a few functions twice; they must agree on the parameter
 # TYPES (names may differ or be missing in the stub). Keep the variant whose parameters are all named.
@@ -104,6 +120,8 @@ w("#include <string>")
 w("#include <deque>")
 w("#include <functional>")
 w("#include <mutex>")
+w("#include <atomic>")
+w("#include <map>")
 w("#include <emscripten.h>")
 w("#include <emscripten/threading.h>")
 w("#include <emscripten/proxying.h>")
@@ -130,6 +148,30 @@ inline void post_cb(std::function<void()> f) {
     std::lock_guard<std::mutex> lk(g_cb_mu);
     g_cb_q.push_back(std::move(f));
 }
+
+// Callback records (HACKING §85.12). A record {racket_cb, racket_ud} is owned by the registry below, keyed by
+// (widget handle, setter name[#n]); re-registering or destroying the widget releases it. refs counts the registry's own
+// reference plus one per callback queued for the Racket thread, so a record is never freed under a queued call.
+// The registry is only touched on the Qt thread (inside on_main), like the shim itself.
+std::atomic<int> g_rec_live{0};   // live records, for shim_rec_count (leak check in test/rec-leak.rkt)
+struct RecBase {
+    std::atomic<int> refs{1};
+    RecBase() { g_rec_live.fetch_add(1); }
+    virtual ~RecBase() { g_rec_live.fetch_sub(1); }
+};
+inline void rec_release(RecBase* r) { if (r && r->refs.fetch_sub(1) == 1) delete r; }
+std::map<void*, std::map<std::string, RecBase*>> g_recs;
+inline void rec_set(void* handle, const char* key, RecBase* r) {
+    auto& slot = g_recs[handle][key];
+    if (slot != r) { rec_release(slot); slot = r; }
+    if (!slot) g_recs[handle].erase(key);
+}
+inline void rec_drop_widget(void* handle) {
+    auto it = g_recs.find(handle);
+    if (it == g_recs.end()) return;
+    for (auto& kv : it->second) rec_release(kv.second);
+    g_recs.erase(it);
+}
 }  // namespace
 """)
 
@@ -140,10 +182,11 @@ for name, args in cb_types.items():
     if not typed or typed[0][0].replace(" ", "") != "void*":
         raise SystemExit("callback %s: first parameter must be the void* user data (%r)" % (name, args))
     rest = typed[1:]
-    w("struct Rec_%s { %s cb; void* ud; };" % (name, name))
+    w("struct Rec_%s : RecBase { %s cb; void* ud; Rec_%s(%s c, void* u) : cb(c), ud(u) {} };" % (name, name, name, name))
     decl = ", ".join(["void* rec"] + ["%s %s" % (t, n) for t, n in rest])
     w("static void tramp_%s(%s) {" % (name, decl))
     w("    Rec_%s* rec__ = static_cast<Rec_%s*>(rec);" % (name, name))
+    w("    rec__->refs.fetch_add(1);   // released after the queued call ran (the registry still holds its own reference here)")
     caps, call_args = [], ["rec__->ud"]
     for t, n in rest:
         if t.replace(" ", "") == "constchar*":
@@ -153,7 +196,7 @@ for name, args in cb_types.items():
             caps.append("%s = %s" % (n, n))
             call_args.append(n)
     cap = ", ".join(["rec__"] + caps)
-    w("    post_cb([%s] { rec__->cb(%s); });" % (cap, ", ".join(call_args)))
+    w("    post_cb([%s] { rec__->cb(%s); rec_release(rec__); });" % (cap, ", ".join(call_args)))
     w("}")
     w("")
 
@@ -165,6 +208,16 @@ for ret, name, args in funcs:
     typed = [parse_param(p, i) for i, p in enumerate(args)]
     decl = ", ".join("%s %s" % (t, n) for t, n in typed) if typed else "void"
     call = []
+    pre, post = [], []
+    ncb = 0
+    # registry handle: the created widget (ret void*), else the widget the setter works on (first void* parameter),
+    # else 0 (application-level setters such as shim_app_set_quit_cb)
+    if ret.replace(" ", "") == "void*":
+        handle = "rv__"
+    elif typed and typed[0][0].replace(" ", "") == "void*":
+        handle = typed[0][1]
+    else:
+        handle = "(void*)nullptr"
     i = 0
     while i < len(typed):
         t, n = typed[i]
@@ -173,18 +226,27 @@ for ret, name, args in funcs:
             if i + 1 >= len(typed) or typed[i + 1][0].replace(" ", "") != "void*":
                 raise SystemExit("%s: callback parameter %s is not followed by a void* user data" % (name, n))
             un = typed[i + 1][1]
+            rv = "r%d__" % ncb
+            pre.append("Rec_%s* %s = %s ? new Rec_%s(%s, %s) : nullptr;" % (key, rv, n, key, n, un))
             call.append("%s ? (%s)tramp_%s : nullptr" % (n, key, key))
-            call.append("%s ? (void*)new Rec_%s{%s, %s} : %s" % (n, key, n, un, un))
+            call.append("%s ? (void*)%s : %s" % (n, rv, un))
+            if name in RELEASABLE:
+                post.append('rec_set(%s, "%s#%d", %s);' % (handle, name, ncb, rv))
+            ncb += 1
             i += 2
             continue
         call.append(n)
         i += 1
+    if name in DESTROY:
+        post.append("rec_drop_widget(%s);" % typed[0][1])
+    pre_s = " ".join(pre)
+    post_s = " ".join(post)
     w('extern "C" %s W_%s(%s) {' % (ret, name, decl))
     if ret == "void":
-        w("    on_main([&] { %s(%s); });" % (name, ", ".join(call)))
+        w("    on_main([&] { %s %s(%s); %s });" % (pre_s, name, ", ".join(call), post_s))
     else:
         w("    %s rv__{};" % ret)
-        w("    on_main([&] { rv__ = %s(%s); });" % (name, ", ".join(call)))
+        w("    on_main([&] { %s rv__ = %s(%s); %s });" % (pre_s, name, ", ".join(call), post_s))
         w("    return rv__;")
     w("}")
     reg.append(name)
@@ -211,8 +273,9 @@ extern "C" int W_shim_events_pending(void) {
 }
 extern "C" void W_shim_app_quit(void) { /* the browser owns the Qt application lifetime */ }
 extern "C" long long W_shim_pump_us(int max_ms) { W_shim_pump(max_ms); return 0; }
+extern "C" int W_shim_rec_count(void) { return g_rec_live.load(); }   // debug: number of live callback records
 """)
-reg += ["shim_pump", "shim_events_pending", "shim_app_quit", "shim_pump_us"]
+reg += ["shim_pump", "shim_events_pending", "shim_app_quit", "shim_pump_us", "shim_rec_count"]
 
 os.makedirs(outdir, exist_ok=True)
 open(os.path.join(outdir, "shim_wasm_proxy.cpp"), "w").write("\n".join(out) + "\n")
