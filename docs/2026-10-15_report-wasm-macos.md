@@ -94,6 +94,16 @@ Konsequenz für den kombinierten Link: kein `-sPROXY_TO_PTHREAD`; Qt-`main()` au
 einem eigenen pthread (Racket-`main()` aus `main_em.c` wird eine aufrufbare Funktion). Diese Umkehrung der
 Entry-Point-Rollen ist der erste Eingriff in den PoC für S4.
 
+## 3c. Ergebnis S4b: Qt und Racket im selben WASM-Modul (gemessen)
+
+`qt-shim/wasm/` (CMake, im Umbrella): Qt-`main()` auf dem Hauptthread, Racket im pthread (die `main_em.c` des Forks, mit
+`-Dmain=racket_em_main` übersetzt, kein Eingriff in den Fork), Racket-Objekte und die zwölf Native-Bibliotheken aus dem
+Build-Verzeichnis des Forks, darüber Qt. Headless-Chrome 155: Qt-Fenster sichtbar, Racket 9.3 meldet
+`racket-in-pthread: hello` und `3`. Der Link lief **ohne Symbolkollisionen**, obwohl Qt eigene FreeType-, HarfBuzz-,
+libpng-, zlib-, pcre2- und libjpeg-Kopien bündelt (Racket-Archive vor Qt). `.wasm` 45 MB, `.data` 61 MB. Damit sind die drei
+größten Unbekannten der Architektur (Thread-Rolle, Entry-Point, Linkbarkeit) belegt; offen bleibt die Anbindung des Shim
+(S4c).
+
 ## 4. Hindernisse im Detail
 
 ### 4.1 Racket CS auf WASM
@@ -188,7 +198,8 @@ B bleibt Messlatte für Interpreter-Speed und Draw-Pfad.
 | S2 | Basis klären: Racket-Version und Patch-Rebase | **erledigt:** Pin `v9.3`, `sync` + `apply` laufen, 19/20 Patches unverändert, 1 Kontextzeile angepasst |
 | S3 | Erster Build mit `racket/draw`, Interpreter-Messung | **erledigt:** Racket 9.3 [cs] als WASM unter Node, `racket/draw` läuft, Messung siehe Abschnitt 3a |
 | S4a | Qt im Proxy-Thread? | **erledigt, negativ** (Abschnitt 3b): Qt-`main()` muss auf dem Hauptthread laufen |
-| S4 | Shim linken (Symboltabelle), Racket aus Qt-`main()` im pthread, Mini-`frame%` + `button%` über Qt-WASM | offen |
+| S4b | Qt und Racket in einem Modul (Qt-`main` Hauptthread, Racket im pthread) | **erledigt** (Abschnitt 3c) |
+| S4c | Shim: Symboltabelle für `shim_*`, Queue-Callbacks, Mini-`frame%` + `button%` über Qt-WASM | offen |
 
 ## 9. Auswirkungen auf die Projektregeln (zur Entscheidung)
 

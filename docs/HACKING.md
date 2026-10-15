@@ -9283,3 +9283,12 @@ S4: Shim in den WASM-Link (Symboltabelle für `shim_*`, Queue-Callbacks), Mini-`
 Messung in Chrome, Dirty-Rect-Blit, `zlib.pc`-Aufräumen (Freetype-Ausnahme). Nicht geprüft: Verhalten von Qt-WASM
 bei Popups/Menüs/modalen Dialogen, native Datei-/Farb-/Schriftdialoge fehlen im Browser.
 
+### 85.7 S4b — Qt und Racket in einem Modul (gemessen)
+
+`qt-shim/wasm/` (README dort): Qt-`main()` auf dem Hauptthread, Racket (`main_em.c` mit `-Dmain=racket_em_main`
+übersetzt) im pthread, alle Racket-Objekte und die zwölf Native-Bibliotheken aus dem Build-Verzeichnis des Forks, Qt
+darübergelinkt. Ergebnis (Headless-Chrome 155): Qt-Fenster sichtbar, Racket druckt `racket-in-pthread: hello` und `3`
+(`racket -I racket/base -e …`). Der Link lief ohne Symbolkollisionen, obwohl Qt eigene Kopien von FreeType, HarfBuzz,
+libpng, zlib, pcre2 und libjpeg bündelt (Racket-Archive stehen vor Qt im Link). `.wasm` 45 MB, `.data` 61 MB. Noch nicht
+eingebunden: der Shim selbst (S4c: Symboltabelle für `shim_*`, Queue-Callbacks) und `wx/qt`.
+

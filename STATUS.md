@@ -29,7 +29,10 @@ Details: `docs/2026-10-15_report-wasm-macos.md` (Studie mit allen Messwerten), `
 - **Regel 9:** für diesen Build wurde (auf ausdrückliche Freigabe, etappenweise, nur im Submodul) eine
   begrenzte Ausnahme erteilt; die CLAUDE.md-Regel selbst bleibt unverändert. Unangekündigte Nachlader wurden
   offengelegt (zlib-Port im emsdk-Cache, Einträge in `~/Library/Caches/Racket/download-cache`).
-- **Offen (nächster Schritt S4):** Shim in den WASM-Link bringen (Symboltabelle für 206 `shim_*`,
+- **S4a/S4b (gemessen):** Qt-WASM läuft nicht unter `-sPROXY_TO_PTHREAD` (`main()` im pthread, `QApplication` bricht ab) →
+  Qt-`main` auf dem Hauptthread, Racket im pthread. Kombinierter Link `qt-shim/wasm/` (Racket-Objekte + zwölf Bibliotheken +
+  Qt) lief ohne Symbolkollisionen; Qt-Fenster sichtbar, Racket 9.3 druckt `racket-in-pthread: hello` / `3`.
+- **Offen (nächster Schritt S4c):** Shim in den WASM-Link bringen (Symboltabelle für 206 `shim_*`,
   Queue-Callbacks statt Funktionszeiger, da die libffi-Closure-Tabelle pro Worker lebt), Mini-`frame%` +
   `button%` über Qt-WASM, Chrome statt Node messen. Backlog: `zlib.pc` für den Emscripten-zlib-Port
   (Freetype-Ausnahme entfernen), Dirty-Rect-Blit.
