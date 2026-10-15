@@ -61,6 +61,30 @@ BlockingQueuedConnection)` auf. Chrome 155 headless (SwiftShader), Apple-Silicon
   sondern müssen in eine Queue im geteilten Speicher gestellt werden (passt zu Regel 2). Der Spike zeigt
   die Queue-Seite auf C++-Ebene, mit Racket dazwischen ist es noch ungeprüft.
 
+## 3a. Messung S3: Racket 9.3 als WASM (Node) gegen natives Racket 9.3
+
+Aufbau: `apps/node-repl` aus dem Fork gebaut (Pin `v9.3` = `bbf7dea8`, emsdk 4.0.7, Racket-Pakete aus dem
+9.3-Release-Katalog). Banner: `Welcome to Racket v9.3-2026-10-15-bbf7dea831* [cs].` Ablauf: Skript über stdin
+in `node racket.js`; Vergleich mit `racket -I racket` (native, arm64). Je drei native und zwei WASM-Läufe,
+Ergebnisse stabil. Skript: `bench.rktl` (Scratchpad). Boot ca. 2 s, `racket.wasm` 33,5 MB, `racket.data` 61 MB.
+
+| Messung | native | WASM (Node) | Faktor |
+|---|---|---|---|
+| `fib 30` | 6 ms | 170 ms | ~28× |
+| 200k-Liste sortieren | 22 ms | 402 ms | ~18× |
+| 100k `number->string` + `string-append` | 5 ms | 43 ms | ~9× |
+| 1000 Ellipsen auf `bitmap%` 640×480 (Cairo) | 58 ms | 212 ms | ~3,6× |
+| 300× `draw-text` (Pango) | 87 ms | 131 ms | ~1,5× |
+| `get-argb-pixels` 640×480 | 4 ms | 139 ms | ~35× |
+
+- **Aussage:** Reiner Racket-Code im pb-Interpreter ist 9–30× langsamer, Zeichnen in Cairo/Pango (C nach
+  WASM kompiliert) nur 1,5–4×. Eine GUI besteht aus beidem; Layout, Klassenaufrufe (`send`) und
+  Ereignisbehandlung laufen im Interpreter. Absolutwerte bleiben klein (Millisekunden bis wenige 100 ms für
+  die gemessenen Arbeiten), aber Bildaufbau mit großen Pixelschleifen in Racket ist teuer. Die
+  Zeilen- und Ereignislogik von `wx/qt` ist ungemessen.
+- **Einschränkungen:** Node, nicht Chrome; eine Maschine; Pixelzahlen unterscheiden sich (WASM nutzt die
+  mitgelieferte DejaVu-Schrift, nativ die Systemschrift), das ist kein Fehler.
+
 ## 4. Hindernisse im Detail
 
 ### 4.1 Racket CS auf WASM
@@ -80,6 +104,11 @@ BlockingQueuedConnection)` auf. Chrome 155 headless (SwiftShader), Apple-Silicon
   im Patch angepasst, danach alle 20 Patches + Overlay angewendet (`delta applied`). Die Patch-Semantik
   ist unverändert (der Patch ergänzt selbst das Überspringen der Paketabhängigkeitsprüfung).
   Der Klon (`.work/`, 130 MB, gitignored) lässt das Submodul sauber.
+- **Beim Bauen gefunden und im Fork behoben** (Details `build-wasm.md`, Abschnitt „qt-wasm"): pb-Bootdateien
+  kommen in 9.3 aus `racket/pb` (`make fetch-pb`); der Host-Chez-Fund nahm fälschlich das WASM-Ziel `tpb32l`;
+  macOS-bash 3.2; ungepinntes fribidi und meson-Nachlader (jetzt gepinnt, `--wrap-mode=nodownload`);
+  `ppoll` in emcc 4.0.7 deklariert aber nicht implementiert (glib); Paketkatalog musste der 9.3-Release-
+  Katalog sein (Standardkatalog liefert Entwicklungsstände über `git://github.com`).
 - **Host-Chez** wird vom Orchestrator selbst gebaut (`./configure --threads`), kein externer Chez nötig. Das
   Host-Racket muss dieselbe Version wie der Baum haben (versionsgestempelt), also 9.3.
 
@@ -148,7 +177,7 @@ B bleibt Messlatte für Interpreter-Speed und Draw-Pfad.
 | S0 | FFI/`racket/draw` im PoC | **erledigt, belegt** (Headless-Lauf) |
 | S1 | Qt-Spike: Hop-, Callback-, Blit-Kosten | **erledigt, gemessen** (Abschnitt 3) |
 | S2 | Basis klären: Racket-Version und Patch-Rebase | **erledigt:** Pin `v9.3`, `sync` + `apply` laufen, 19/20 Patches unverändert, 1 Kontextzeile angepasst |
-| S3 | Erster Build mit `racket/draw`, Interpreter-Messung | offen |
+| S3 | Erster Build mit `racket/draw`, Interpreter-Messung | **erledigt:** Racket 9.3 [cs] als WASM unter Node, `racket/draw` läuft, Messung siehe Abschnitt 3a |
 | S4 | Shim linken (Symboltabelle), Mini-`frame%` + `button%` über Qt-WASM | offen |
 
 ## 9. Auswirkungen auf die Projektregeln (zur Entscheidung)
