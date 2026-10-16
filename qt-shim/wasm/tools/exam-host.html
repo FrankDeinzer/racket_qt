@@ -9,8 +9,11 @@
   #bar button{padding:2px 12px}
   #racket,#submit{position:absolute;top:32px;left:0;right:0;bottom:0}
   #racket{border:0;width:100%;height:calc(100% - 32px)}
+  /* The Racket frame is never hidden (display:none would also stop its rendering); the submission pane is opaque and lies on top of it.
+     Keyboard focus after switching back is restored inside the frame by main.cpp (Qt's focus helper lives in a shadow root, HACKING §85.16). */
+  #submit{z-index:10;background:#fff}
   #submit textarea{width:100%;height:100%;box-sizing:border-box;font:14px monospace}
-  .hidden{visibility:hidden}
+  .hidden{display:none}
 </style></head><body>
 <div id="bar"><button id="t1" onclick="show('racket')">Racket</button><button id="t2" onclick="show('submit')">Abgabe</button></div>
 <iframe id="racket" tabindex="0" src="racketqt_wasm.html" allow="cross-origin-isolated; clipboard-read; clipboard-write"></iframe>
@@ -20,7 +23,7 @@
   document.getElementById('racket').src = 'racketqt_wasm.html' + location.search;
   function focusRacket(){ const f = document.getElementById('racket'); f.focus(); try { f.contentWindow.focus(); } catch(e) {} }
   window.addEventListener('load', () => setTimeout(focusRacket, 500));
-  function show(w){ if (w === 'racket') setTimeout(focusRacket, 50); document.getElementById('racket').classList.toggle('hidden', w!=='racket'); document.getElementById('submit').classList.toggle('hidden', w!=='submit'); if(w==='submit') document.getElementById('ta').focus(); }
+  function show(w){ if (w === 'racket') setTimeout(focusRacket, 50); document.getElementById('submit').classList.toggle('hidden', w!=='submit'); if(w==='submit') document.getElementById('ta').focus(); }
   window.__bench = {};
   const ta = document.getElementById('ta');
   ta.addEventListener('input', () => { window.__bench = { text: ta.value }; });

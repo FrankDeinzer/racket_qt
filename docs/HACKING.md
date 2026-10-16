@@ -9491,3 +9491,11 @@ würde das MEMFS leeren; Cross-Origin-Isolation aktiv, `isolated: true` auch im 
   Plattform per iframe ein, muss sie COEP-tauglich antworten (`Cross-Origin-Resource-Policy`) — eigene Plattform: steuerbar; (b) SEB-Version/Engine ungeklärt
   (Windows: vermutlich Chromium, macOS: WKWebView) → **Test in einem echten SEB steht aus** (`crossOriginIsolated`, Startzeit, Speicher, Zwischenablage-Regeln);
   (c) Absturz/Reload verliert das MEMFS — die Plattform sollte Entwürfe selbst sichern; (d) 148 MB Nutzlast und Speicherbedarf auf Studentenrechnern ungemessen.
+
+**Tippen nach dem Tab-Wechsel (Nutzerbeobachtung, 2026-10-16) — behoben.** Ablauf: Racket-Bereich → „Abgabe" → zurück: Tippen in DrRacket tot (auch nach einem Klick in
+den Editor, der Cursor erschien). Ursache (per `DOM_DUMP=1` in `serve-and-run.mjs` belegt): Qt-WASM empfängt Tasten an einem `contenteditable`
+`div.qt-window-focus-helper` **im Shadow-Root** von `#qt-shadow-container`. Sobald die umgebende Seite den Fokus nimmt (Tab-Knopf, Textarea), ist
+`shadowRoot.activeElement == null`; Qt holt den Fokus nicht zurück, und die Tasten erreichen Qt nicht mehr (kein `press key` im `?qtdebug`-Log). Das hat nichts mit
+`visibility` zu tun (der erste Verdacht; die Seite überdeckt den Frame jetzt nur noch, versteckt ihn aber nie). Fix in `main.cpp`: bei `focus` des Frame-Fensters und
+bei jedem `pointerdown` wird der zuletzt fokussierte Helper (sonst der oberste) wieder fokussiert, wenn im Shadow-Root nichts aktiv ist. Gemessen: nach dem
+Zurückwechseln erscheint getippter Text (`aaabbb`), sowohl direkt als auch nach einem Klick in den Editor.

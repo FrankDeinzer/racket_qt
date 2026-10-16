@@ -139,6 +139,14 @@ try {
   }
   if (process.env.KEYS2) { await sleep(Number(process.env.KEYS2_DELAY || 800)); await typeText(process.env.KEYS2.replace(/\\n/g, "\n")); log("keys2 gesendet"); }
   if (process.env.CHORDS2) await runChords(process.env.CHORDS2, Number(process.env.CHORDS2_DELAY || 800), process.env.PASTE_PHASE === "2");
+  // DOM_DUMP=1: print the frame's DOM outline and the active element (keyboard-focus diagnostics), at the end of the run.
+  if (process.env.DOM_DUMP) {
+    const r = await send("Runtime.evaluate", { returnByValue: true, expression: `(()=>{const d=(document.querySelector('iframe')?.contentDocument)||document;
+      const desc=e=>e?(e.tagName+(e.id?'#'+e.id:'')+(e.className&&typeof e.className==='string'?'.'+e.className:'')+(e.getAttribute&&e.getAttribute('tabindex')!==null?'[tabindex='+e.getAttribute('tabindex')+']':'')+(e.isContentEditable?'[editable]':'')):'null';
+      const walk=(e,dep)=>dep>5?'':desc(e)+'\\n'+[...e.children].map(c=>'  '.repeat(dep+1)+walk(c,dep+1)).join('');
+      const c=d.getElementById('qt-shadow-container');const sr=c&&c.shadowRoot;const shadow=sr?('shadowActive='+desc(sr.activeElement)+' shadowHTML='+sr.innerHTML.slice(0,900)):'(no open shadowRoot)';return shadow+' || container='+(c?c.cloneNode(false).outerHTML:'none')+' topActive='+desc(document.activeElement)+' frameActive='+desc(d.activeElement)+' hasFocus='+d.hasFocus()+'\\n'+walk(d.body,0);})()` });
+    log("DOM:\n" + (r.result?.result?.value ?? JSON.stringify(r.result)));
+  }
   // CLICK_AT2: clicks sent AFTER the keys (e.g. type code, then press Run).
   if (process.env.CLICK_AT2) {
     await sleep(Number(process.env.CLICK2_DELAY || 500));

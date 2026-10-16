@@ -46,6 +46,28 @@ int main(int argc, char** argv) {
     // Diagnostics: open the page with ?qtdebug to turn on the shim's PLT_QT_DEBUG output (mouse targets, paint regions, ...).
     if (MAIN_THREAD_EM_ASM_INT({ return new URLSearchParams(location.search).has('qtdebug') ? 1 : 0; }))
         setenv("PLT_QT_DEBUG", "1", 1);
+    // Keyboard focus (HACKING §85.16): Qt-WASM receives keys on a contenteditable `div.qt-window-focus-helper` inside the shadow root of
+    // #qt-shadow-container.  When the page around us takes the focus (switching to another area of the exam page, clicking a button) the browser
+    // blurs it (shadowRoot.activeElement == null) and Qt never takes it back: typing was dead after switching away and back.  Give the
+    // focus back to the helper that had it (or the topmost one) when the frame's window is focused or clicked and nothing in Qt holds it.
+    MAIN_THREAD_EM_ASM({
+        var last = null;
+        var root = function() { var c = document.getElementById('qt-shadow-container'); return c && c.shadowRoot; };
+        var track = function() {
+            var r = root();
+            if (r && !r.__rqtTracked) { r.__rqtTracked = true; r.addEventListener('focusin', function(e) { last = e.target; }); }
+        };
+        var refocus = function() {
+            track();
+            var r = root();
+            if (!r || r.activeElement) return;
+            var t = (last && last.isConnected) ? last : Array.prototype.slice.call(r.querySelectorAll('.qt-window-focus-helper')).pop();
+            if (t) t.focus({ preventScroll: true });
+        };
+        window.addEventListener('focus', function() { setTimeout(refocus, 0); });
+        document.addEventListener('pointerdown', function() { setTimeout(refocus, 0); }, true);
+        setInterval(track, 1000);
+    });
     MAIN_THREAD_EM_ASM({
         window.addEventListener('paste', function(e) {
             var t = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
