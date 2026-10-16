@@ -9499,3 +9499,8 @@ den Editor, der Cursor erschien). Ursache (per `DOM_DUMP=1` in `serve-and-run.mj
 `visibility` zu tun (der erste Verdacht; die Seite überdeckt den Frame jetzt nur noch, versteckt ihn aber nie). Fix in `main.cpp`: bei `focus` des Frame-Fensters und
 bei jedem `pointerdown` wird der zuletzt fokussierte Helper (sonst der oberste) wieder fokussiert, wenn im Shadow-Root nichts aktiv ist. Gemessen: nach dem
 Zurückwechseln erscheint getippter Text (`aaabbb`), sowohl direkt als auch nach einem Klick in den Editor.
+
+**Handtest durch den Nutzer in Firefox (2026-10-16, `start-exam-host.sh` + `exam-host.html`):** Tippen funktioniert in beiden Bereichen, Kopieren/Einfügen
+geht in beide Richtungen und mehrfach, Racket (DrRacket) läuft sauber. Damit sind echte Tastatur und **echte** Paste-Ereignisse (bisher nur synthetisch geprüft)
+für Firefox bestätigt. Weiter offen: Chrome und Safari/WKWebView von Hand, ein echter SEB (Windows und macOS), Leerlauf-Last und Speicher auf Studentenrechnern.
+
