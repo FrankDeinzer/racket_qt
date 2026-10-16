@@ -5,6 +5,19 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-10-16 (macOS) — WASM-DrRacket im SEB: Copy/Cut, Debugger, `math-lib`, Tools-Cache, Doku
+
+Details: `docs/2026-10-16_report-wasm-macos.md`, `docs/HACKING.md` §85.18–§85.20.
+
+- **Copy/Cut im SEB (3.7.1.1, macOS):** SEB liefert `copy`/`cut`/`paste` statt `keydown`; `copy`/`cut` werden synchron aus einem Auswahl-Spiegel beantwortet (`shim_wasm_set_selection`,
+  `drracket-main.rkt` pollt alle 100 ms). Vom Nutzer im SEB bestätigt. Diagnose-Werkzeug `?clipdiag` (+ `POST /__log`).
+- **Pakete:** `drracket` (Debugger, Macro Stepper) + `math-lib`; DrRacket hatte im WASM-Image bisher **keine Tools** (kein `info-cache.rktd`) — `tools/make-info-cache.rkt`.
+  `QCursor::pos()`-Sentinel (8388608) brach Check Syntax → Mausposition per Event-Filter. Image 160 MB `.data`, Seitenspeicher ≈ 680 MB.
+- **Doku:** `external-browser`-Hook + `shim_wasm_open_url` + Bereich „Doku" in `exam-host.html`; `tools/stage-docs.sh` (95 MB). Vom Nutzer im SEB bestätigt.
+- **Offen:** Debug-Lauf im Browser, Studentenbetrieb, Tastaturlayouts, Windows/Linux-Sync (nach Rückfrage).
+
+---
+
 ## Session 2026-10-15 (macOS) — WebAssembly: Machbarkeit, Fork, erster Racket-9.3-WASM-Build
 
 Details: `docs/2026-10-15_report-wasm-macos.md` (Studie mit allen Messwerten), `docs/HACKING.md` §85.
