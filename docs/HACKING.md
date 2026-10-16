@@ -9531,3 +9531,13 @@ für Firefox bestätigt. Weiter offen: Chrome und Safari/WKWebView von Hand, ein
   schickt Racket selbst Ctrl+c/Ctrl+x (Editor kopiert/schneidet wirklich, `g_wasm_clip` bleibt aktuell). Ohne bekannte Auswahl: Qts Verhalten. Fallstrick: Kommas in `[...]` zerlegen `MAIN_THREAD_EM_ASM`-Argumente.
 - **Test:** Headless `COPY_EVENT=copy|cut` (neu in `serve-and-run.mjs`): `clipboardData` = markierter Text, `cut` leert den Editor. Im echten SEB vom Nutzer bestätigt: Copy → Abgabe, Cut + Einfügen an anderer Stelle.
 - **Grenze:** Wer markiert und binnen 100 ms kopiert, kann eine veraltete Auswahl erwischen.
+
+### 85.19 Debugger, `math-lib`, Tools-Cache und `QCursor::pos()` (2026-10-16)
+
+- **Pakete:** `app.rkt` `'pkgs` = `draw-lib drracket-core drracket math-lib` (Freigabe des Nutzers für Netzbezug aus dem 9.3-Katalog). Der Debugger (Collection `gui-debugger`) steckt im Vollpaket `drracket`
+  (kein eigenes Paket `gui-debugger`/`debugger`), das auch Macro Stepper, `quickscript`, `html-lib`, `racket-doc` mitbringt; `racket-doc` ist im Image nur ≈ 0,5 MB (Quellen/Doku werden entfernt, „binary-lib").
+  Image `.data` **141 → 160 MB**, `.wasm` 43 MB, Ladezeit 5,2–6,4 s, Seitenspeicher gemessen **588 → ≈ 680 MB** (WASM-Speicher ≈ 620 MB; Status-Leiste 240 MB Racket-Heap). `math/number-theory` läuft (`(nth-prime 10)` → 31).
+- **Befund: DrRacket startete im WASM-Image ohne jedes Tool** (kein Check Syntax, auch vorher nicht). `find-relevant-directory-records` liest `share/info-cache.rktd` (von `raco setup` geschrieben); die Cross-Installation hat keinen.
+  Fix: `tools/make-info-cache.rkt` filtert den Cache der Host-Installation auf die Pakete des Images (55 von 238 Einträgen, 8 Tool-Verzeichnisse) → Check Syntax, Debug, Macro Stepper, Scripts-Menü erscheinen.
+- **Folgefehler, behoben:** Check Syntax rief `screen->client` mit 8388608 auf — `QCursor::pos()` liefert unter WASM einen Sentinel. `shim_get_mouse_state` nutzt dort die zuletzt gesehene globale Mausposition (`WasmMouseTracker`, Event-Filter).
+- **Offen:** Debug-Lauf selbst (Haltepunkt/Einzelschritt) im Browser noch nicht ausprobiert; Versionszeile zeigt `9.3-2026-10-16-bbf7dea831*` (aus dem `drracket`-Paket, kosmetisch ungeklärt).

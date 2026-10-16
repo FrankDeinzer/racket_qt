@@ -486,6 +486,24 @@ public:
     }
 };
 
+#ifdef __EMSCRIPTEN__
+// WASM (HACKING §85.19): QCursor::pos() has no real pointer to ask and returns a sentinel (8388608), which made Check Syntax's
+// `screen->client` call fail its contract.  Remember the last global mouse position seen in any mouse event instead.
+static QPoint g_wasm_mouse_pos(0, 0);
+class WasmMouseTracker : public QObject {
+public:
+    bool eventFilter(QObject*, QEvent* ev) override {
+        switch (ev->type()) {
+        case QEvent::MouseMove: case QEvent::MouseButtonPress: case QEvent::MouseButtonRelease:
+            g_wasm_mouse_pos = static_cast<QMouseEvent*>(ev)->globalPosition().toPoint();
+            break;
+        default: break;
+        }
+        return false;
+    }
+};
+#endif
+
 // Debug only (PLT_QT_DEBUG): who actually receives mouse presses.  Installed on
 // the QApplication in shim_app_init.
 class DebugMouseFilter : public QObject {
@@ -629,6 +647,9 @@ void shim_app_init(void)
     s_argv = argv_arr;
     s_app = new QApplication(s_argc, s_argv);
     if (plt_qt_debug()) s_app->installEventFilter(new DebugMouseFilter());
+#ifdef __EMSCRIPTEN__
+    s_app->installEventFilter(new WasmMouseTracker());
+#endif
 }
 
 void shim_app_quit(void)
@@ -1237,7 +1258,11 @@ int shim_key_keysym(int, int) { return 0; }
 
 void shim_get_mouse_state(int* out_x, int* out_y, int* out_flags)
 {
+#ifdef __EMSCRIPTEN__
+    QPoint p = g_wasm_mouse_pos;
+#else
     QPoint p = QCursor::pos();
+#endif
     *out_x = p.x();
     *out_y = p.y();
 

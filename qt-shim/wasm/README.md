@@ -75,6 +75,8 @@ racket build/main.rkt app ../../qt-shim/wasm/app --dest <out> --racket /opt/home
        --scheme $PWD/.work/racket/racket/src/ChezScheme/tarm64osx/bin/tarm64osx/scheme
 # 2. Nutzlast entpacken (share.data + share.data.js -> Dateibaum)
 python3 qt-shim/wasm/tools/unpack-share.py <out>/share.data.js <out>/share.data <tree>
+# 2b. Tool-Cache (ohne ihn startet DrRacket OHNE Check Syntax/Debug/Macro Stepper, HACKING §85.19)
+racket qt-shim/wasm/tools/make-info-cache.rkt "/Applications/Racket v9.3/share" <tree>
 # 3. Modul linken, mit Nutzlast und Programm
 ~/Qt/6.11.2/wasm_multithread/bin/qt-cmake -S qt-shim/wasm -B build/wasm -G Ninja -DCMAKE_MAKE_PROGRAM=<ninja> \
     -DQT_HOST_PATH=$HOME/Qt/6.11.2/macos -DCMAKE_BUILD_TYPE=Release \

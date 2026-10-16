@@ -13,7 +13,7 @@
 (provide app)
 
 (define app
-  (hash 'pkgs       '(draw-lib drracket-core)
+  (hash 'pkgs       '(draw-lib drracket-core drracket math-lib)
         'wasm-libs  '(draw)
         'local-pkgs '("../../../third_party/gui/gui-lib")
         'target     'node))

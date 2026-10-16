@@ -162,6 +162,17 @@ try {
       const c=d.getElementById('qt-shadow-container');const sr=c&&c.shadowRoot;const shadow=sr?('shadowActive='+desc(sr.activeElement)+' shadowHTML='+sr.innerHTML.slice(0,900)):'(no open shadowRoot)';return shadow+' || container='+(c?c.cloneNode(false).outerHTML:'none')+' topActive='+desc(document.activeElement)+' frameActive='+desc(d.activeElement)+' hasFocus='+d.hasFocus()+'\\n'+walk(d.body,0);})()` });
     log("DOM:\n" + (r.result?.result?.value ?? JSON.stringify(r.result)));
   }
+  // MEM_DUMP=1: what the page's memory consists of -- WASM heap size, MEMFS content, JS heap, user-agent memory estimate (HACKING §85.19).
+  if (process.env.MEM_DUMP) {
+    const r = await send("Runtime.evaluate", { awaitPromise: true, returnByValue: true, expression: `(async()=>{const w=(document.querySelector('iframe')?.contentWindow)||window;const o={};
+      const M=w.Module||w.qtModule||null;o.hasModule=!!M;
+      try{o.heapMB=((M&&M.HEAPU8?M.HEAPU8.length:w.HEAPU8.length)/1048576).toFixed(0);}catch(e){o.heapErr=String(e)}
+      try{const FS=(M&&M.FS)||w.FS;let tot=0,n=0;const walk=p=>{for(const e of FS.readdir(p)){if(e=='.'||e=='..')continue;const f=p=='/'?'/'+e:p+'/'+e;const st=FS.stat(f);if(FS.isDir(st.mode))walk(f);else{tot+=st.size;n++}}};walk('/');o.memfsMB=(tot/1048576).toFixed(0);o.memfsFiles=n;}catch(e){o.fsErr=String(e)}
+      try{o.jsHeapMB=(w.performance.memory.usedJSHeapSize/1048576).toFixed(0)}catch(e){}
+      try{const m=await w.performance.measureUserAgentSpecificMemory();o.uaMB=(m.bytes/1048576).toFixed(0);o.uaBreakdown=m.breakdown.filter(b=>b.bytes>5e6).map(b=>(b.bytes/1048576).toFixed(0)+'MB '+(b.types||[]).join('/'));}catch(e){o.uaErr=String(e)}
+      return JSON.stringify(o);})()` });
+    log("MEM:", r.result?.result?.value ?? JSON.stringify(r.result));
+  }
   // IDLE_SAMPLE=<seconds> (after IDLE_AFTER seconds, default 0): resource use of the whole headless-Chrome process group while the page sits idle
   // -- CPU time delta / wall time (100 % = one core), RSS sum, process count; plus the page's own memory estimate (needs cross-origin isolation).
   if (process.env.IDLE_SAMPLE) {
