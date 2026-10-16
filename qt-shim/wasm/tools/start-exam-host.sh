@@ -1,6 +1,7 @@
 #!/bin/bash
 # Starts the exam-host prototype (HACKING §85.16).
 #   tools/start-exam-host.sh [build-dir]
+# LOG_ENDPOINT=1 schaltet POST /__log ein (nur zur Diagnose, siehe qt-shim/wasm/README.md "Diagnose-Schalter").
 # build-dir: a finished Qt+Racket WASM build (default qt-shim/build/wasm-drracket, i.e. the folder `tools/stage-build.sh` fills).
 # It must contain racketqt_wasm.{html,js,wasm,data}; exam-host.html is copied in from this repo on every start.
 set -e

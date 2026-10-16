@@ -1,6 +1,8 @@
 ;; Start the real DrRacket inside the combined Qt+Racket WASM module (HACKING §85.14).
 (require ffi/unsafe racket/class racket/gui/base net/sendurl)
 (define t0 (current-inexact-milliseconds))
+;; Debug output only with ?qtdebug in the page URL (main.cpp then sets PLT_QT_DEBUG).  Real errors are always printed.
+(define (debug-log fmt . args) (when (getenv "PLT_QT_DEBUG") (apply eprintf fmt args)))
 (printf "DRRACKET-START\n")
 
 ;; Selection mirror for the browser `copy` event (HACKING §85.18): SEB's private clipboard fires `copy` and wants the text synchronously,
@@ -42,7 +44,7 @@
   (define page (and m (with-handlers ([void (lambda (e) #f)])
                         (call-with-input-file (cadr m) (lambda (in) (read-string 100000 in))))))
   (cond [(not page) url]
-        [else (eprintf "send-url redirect page: ~a\n" page)
+        [else (debug-log "send-url redirect page: ~a\n" page)
               (cond [(regexp-match #rx"[Uu][Rr][Ll]=['\"]?([^'\"> ]+)" page) => cadr]
                     [(regexp-match #rx"location[.a-z]* *= *['\"]([^'\"]+)" page) => cadr]
                     [(regexp-match #rx"(https?://[^'\"<> ]+)" page) => cadr]
@@ -51,7 +53,7 @@
   (external-browser
    (lambda (url)
      (define target (redirect-target url))
-     (eprintf "send-url: ~a -> ~a\n" url target)
+     (debug-log "send-url: ~a -> ~a\n" url target)
      (open-url (cond [(regexp-match #rx"^https?://docs\\.racket-lang\\.org/(.*)$" target)
                       => (lambda (m) (string-append "doc/" (cadr m)))]
                      [else target])))))

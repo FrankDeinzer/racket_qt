@@ -113,3 +113,18 @@ qt-shim/wasm/tools/start-exam-host.sh                    # startet den Server (C
 ## Dokumentation (HACKING §85.20)
 
 `tools/stage-docs.sh` kopiert die HTML-Handbücher der lokalen Racket-Installation nach `<build>/doc/`; `start-exam-host.sh` liefert sie mit aus, und die Prüfungsseite zeigt Help-Links im Bereich „Doku“.
+
+## Diagnose-Schalter (alles aus, solange man sie nicht einschaltet)
+
+Der Diagnose-Code bleibt im Build. Er ist standardmäßig **aus** und wird ausschließlich so eingeschaltet:
+
+| Schalter | Wo | Wirkung |
+|---|---|---|
+| `?qtdebug` an die Seiten-URL hängen | URL der Prüfungsseite (wird an den Racket-Frame weitergereicht) | Qt-Ausgabe zu Maus-Zielen, Zeichenbereichen, Tasten in der Browser-Konsole; außerdem die `send-url`-Meldungen der Doku-Weiterleitung (Racket sieht das als Umgebungsvariable `PLT_QT_DEBUG`). Kostet etwas Leistung und erzeugt viel Ausgabe. |
+| `?clipdiag` an die Seiten-URL hängen | URL der Prüfungsseite | Gelbes Overlay unten rechts: Zwischenablage-Ereignisse (`copy`/`cut`/`paste`, Cmd+C/V) im Top-Dokument und im Racket-Frame, Knöpfe „writeText"/„execCommand". Zusammen mit `LOG_ENDPOINT=1` landet das Log auch in einer Datei. |
+| `LOG_ENDPOINT=1` beim Start von `start-exam-host.sh` | Server | Schaltet `POST /__log` ein: der Server hängt jede Zeile an `<build>/clipdiag.log` an (nötig im SEB, der außer localhost alles sperrt). **Ohne dieses Flag antwortet der Server mit 404** — im Prüfungsbetrieb nicht setzen. |
+
+Beispiel (Diagnose im SEB): `LOG_ENDPOINT=1 qt-shim/wasm/tools/start-exam-host.sh`, dann `http://localhost:8123/exam-host.html?clipdiag` öffnen; danach `qt-shim/build/wasm-drracket/clipdiag.log` lesen.
+
+Immer an (bewusst, harmlos): Fehlermeldungen des Auswahl-Spiegels (`selmirror error`) sowie die Marker `DRRACKET-START`/`DRRACKET-LOADED` in der Konsole.
+Nur für Entwickler, laufen nicht auf dem Prüfungsserver: `serve-and-run.mjs` mit `COPY_EVENT`, `MEM_DUMP`, `DOM_DUMP`, `IDLE_SAMPLE`, `KEYS`, `CHORDS` usw.

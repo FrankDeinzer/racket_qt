@@ -9,10 +9,10 @@ if (!DIR0) { console.error("usage: node serve.mjs <dir> [port]"); process.exit(2
 const DIR = resolve(DIR0);
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".wasm": "application/wasm", ".json": "application/json", ".png": "image/png", ".data": "application/octet-stream",
   ".css": "text/css", ".svg": "image/svg+xml", ".gif": "image/gif", ".jpg": "image/jpeg", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".txt": "text/plain; charset=utf-8" };
-// Diagnostics (exam-host.html ?clipdiag): POST /__log appends the body to <dir>/clipdiag.log and echoes it here, so the log survives
+// Diagnostics (exam-host.html ?clipdiag), only when started with LOG_ENDPOINT=1 (otherwise 404): POST /__log appends the body to <dir>/clipdiag.log and echoes it here, so the log survives
 // even when the browser (SEB) blocks everything but localhost.
 createServer((req, res) => {
-  if (req.method === "POST" && req.url.startsWith("/__log")) {
+  if (req.method === "POST" && req.url.startsWith("/__log") && process.env.LOG_ENDPOINT) {
     let body = ""; req.on("data", c => { if (body.length < 100000) body += c; });
     req.on("end", () => { appendFileSync(join(DIR, "clipdiag.log"), body + "\n"); console.log("LOG " + body); res.writeHead(204); res.end(); });
     return;
