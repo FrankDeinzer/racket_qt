@@ -9457,13 +9457,37 @@ Run-Knopf der Toolbar funktionieren; `#lang racket` + `(+ 1 2)` + Run → Intera
 
 - **Modifier-Tasten (`serve-and-run.mjs`):** `CHORDS="ctrl+r;ctrl+shift+z;enter;f5;…"` sendet Tastenkombinationen (DevTools `Input.dispatchKeyEvent` mit
   `modifiers`, Modifier-Tasten davor/danach), `KEYS2` tippt Text nach den Chords, `CLICK_AT_C` klickt dazwischen (z. B. in das Dateinamenfeld eines Dialogs).
-- **Fund + Fix (`shim.cpp`, `rqt_fix_mods`):** Läuft der **Browser unter macOS**, wendet Qt-WASM die Mac-Konvention an: die physische **Ctrl-Taste kommt als
-  `MetaModifier`** an, Cmd als `ControlModifier` (`AA_MacDontSwapCtrlAndMeta` wirkt unter WASM nicht). Folge: Ctrl+R fügte ein `r` ein, statt Run
-  auszulösen (die Racket-Seite behandelt WASM wie andere Nicht-Mac-Systeme, Menüs zeigen „Ctrl+R"). Fix: `encodeMods` (und der `NavKeyFilter`) tauschen
-  Ctrl/Meta unter `__EMSCRIPTEN__` zurück, wenn `navigator.platform` Mac/iPhone/iPad ist; nativ identisch. Cmd (= Qt-Ctrl nach Rücktausch Meta) bleibt Meta.
-  Zu prüfen: Cmd-Verhalten, und Browser-eigene Kürzel (Ctrl+W/T u. ä. fängt der Browser ab).
+- **Korrektur (2026-10-16): der „Ctrl/Meta-Rücktausch" (`rqt_fix_mods`) war falsch und ist entfernt.** Unter einem **macOS-Browser** wendet Qt-WASM die
+  Mac-Konvention an: **Cmd kommt als `ControlModifier`** an, die physische Ctrl-Taste als `MetaModifier`. Mac-Nutzer drücken Cmd+R/V/Z/S — genau das
+  funktioniert ohne Eingriff (Cmd+R → Run, `3`). Mein Test hatte den DevTools-Modifier „ctrl" (= physische Ctrl) verwendet, daher der scheinbare Fehler
+  („Ctrl+R fügt ein r ein"); der Rücktausch hätte Cmd kaputtgemacht und Qts eigenes synthetisches Paste-Ereignis (s. §85.16) verfälscht. Für Tests unter
+  einem Mac-Browser also `meta+…` statt `ctrl+…` verwenden; Windows/Linux-Browser liefern Ctrl als Control.
 - **Gemessen (Headless-Chrome):** Ctrl+R → `3` im Interaktionsfenster; Ctrl+A, Delete, Ctrl+Z stellt den Text wieder her; Ctrl+S öffnet den Qt-Dateidialog
   (zeigt das virtuelle Dateisystem: `app collects dev etc home pkgs proc share tmp`); Klick ins Namensfeld, `/tmp/t.rkt` + Enter speichert (Reiter „t.rkt", Speichern-
   Symbol verschwindet). Ohne den Klick landeten die Tasten **nicht** im Dialog (der Browser aktiviert das neue Qt-Fenster nicht von selbst, Tastaturfokus fehlt).
-- **Grenzen:** Das Dateisystem ist MEMFS — gespeicherte Dateien überleben kein Neuladen der Seite (IDBFS/Download/Upload wären ein eigener Schritt); echte Maus/
-  Tastatur, Cmd-Kürzel, Chrome/Firefox/Safari-Unterschiede, Windows-/Linux-Browser (Rücktausch dort nicht aktiv) ungeprüft.
+- **Grenzen:** Das Dateisystem ist MEMFS — gespeicherte Dateien überleben kein Neuladen der Seite (für den Prüfungsfall bewusst akzeptiert, §85.16); echte Maus/
+  Tastatur und Chrome/Firefox/Safari-Unterschiede ungeprüft.
+
+### 85.16 Prüfungsszenario (SEB): zwei Bereiche in einem Fenster, Zwischenablage (gemessen, 2026-10-16)
+
+**Konzept (Nutzer):** Safe Exam Browser erlaubt nur ein Hauptfenster → die Seite baut zwei künstliche „Tabs" nach: Racket (WASM) und die Abgabeplattform (Web);
+Lösungen werden hineinkopiert. Das **Dateisystem (MEMFS) reicht dann**, weil die Plattform die Ablage ist. Es gibt keinen Dateiweg nach draußen außer
+Kopieren — gewollt. Prototyp: `qt-shim/wasm/tools/exam-host.html` (Bereiche per `visibility`, beide bleiben geladen; `beforeunload`-Warnung, ein Reload
+würde das MEMFS leeren; Cross-Origin-Isolation aktiv, `isolated: true` auch im Frame). Testskript: `serve-and-run.mjs` mit `CLIPBOARD=1`, `PASTE_EVENT`,
+`PASTE_PHASE`, `CLICK_AT_C`, `CHORDS2`.
+- **Racket → Abgabe:** Strg/Cmd+A, +C in DrRacket → Zwischenablage des Browsers enthält den Text (`#lang racket\n(+ 1 2)`); Einfügen in die Textarea der
+  Abgabe-Seite funktioniert.
+- **Abgabe → Racket: war kaputt, jetzt behoben.** (1) Qt-WASM übernimmt den Paste-Text nur über seinen eigenen `paste`-Handler und erzeugt danach selbst
+  einen Tastendruck **mit großem „V"** (DrRacket fügt ein literales `V` ein, nichts wird eingefügt); den echten Strg/Cmd+V-Tastendruck leitet es nicht weiter.
+  (2) Fix: `main.cpp` registriert **vor** dem Qt-Start einen `paste`-Listener (Capture auf `window`), der Qts eigenen Handler unterdrückt, den Text in einen
+  Zwischenablage-Spiegel des Shims schreibt (`shim_clipboard_wasm_inject`; `shim_clipboard_get/has/set_text` lesen/schreiben ihn unter `__EMSCRIPTEN__`)
+  und ein korrektes Ctrl+v an das fokussierte Widget postet. Gemessen: ein Paste-Ereignis → der Text steht genau einmal im Editor, kein `V`; Menü
+  Edit→Paste fügt ebenfalls ein; der Weg Abgabe-Seite → Kopieren → Racket-Bereich → Paste ergibt `answer 42` im Editor.
+- **Grenze der Messung:** DevTools können für nicht editierbare Fokusziele kein echtes Paste-Ereignis auslösen; getestet wurde mit einem synthetischen
+  `ClipboardEvent` (Text = echter Inhalt der Zwischenablage). Ob Chrome/WKWebView/SEB bei echtem Strg/Cmd+V ein `paste`-Ereignis an das Dokument liefern
+  (nach meinem Wissen ja, auch ohne editierbares Ziel), ist **nicht** geprüft — **bitte einmal von Hand testen** (`exam-host.html`, auch in SEB). Edit→Paste per Menü
+  nutzt den Spiegel, also den Stand des letzten Paste-Ereignisses/Racket-Kopierens, nicht den aktuellen Browserinhalt.
+- **Offene Risiken fürs Prüfungsszenario:** (a) Cross-Origin-Isolation (COOP/COEP) wird für `SharedArrayBuffer` gebraucht; bettet die Prüfungsseite die
+  Plattform per iframe ein, muss sie COEP-tauglich antworten (`Cross-Origin-Resource-Policy`) — eigene Plattform: steuerbar; (b) SEB-Version/Engine ungeklärt
+  (Windows: vermutlich Chromium, macOS: WKWebView) → **Test in einem echten SEB steht aus** (`crossOriginIsolated`, Startzeit, Speicher, Zwischenablage-Regeln);
+  (c) Absturz/Reload verliert das MEMFS — die Plattform sollte Entwürfe selbst sichern; (d) 148 MB Nutzlast und Speicherbedarf auf Studentenrechnern ungemessen.

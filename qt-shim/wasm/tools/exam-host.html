@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- Prototype of the exam page (HACKING §85.16): ONE window, two artificial "tabs" -- the Racket/Qt-WASM app and the submission
+     platform (here a plain textarea). Both stay loaded (display switch only), so Racket keeps running while the other tab is shown.
+     Served with COOP/COEP (the Racket module needs SharedArrayBuffer), see serve-and-run.mjs. -->
+<html><head><meta charset="utf-8"><title>exam-host</title>
+<style>
+  body{margin:0;font:14px sans-serif}
+  #bar{height:28px;background:#ddd;display:flex;gap:4px;padding:2px}
+  #bar button{padding:2px 12px}
+  #racket,#submit{position:absolute;top:32px;left:0;right:0;bottom:0}
+  #racket{border:0;width:100%;height:calc(100% - 32px)}
+  #submit textarea{width:100%;height:100%;box-sizing:border-box;font:14px monospace}
+  .hidden{visibility:hidden}
+</style></head><body>
+<div id="bar"><button id="t1" onclick="show('racket')">Racket</button><button id="t2" onclick="show('submit')">Abgabe</button></div>
+<iframe id="racket" src="racketqt_wasm.html" allow="cross-origin-isolated; clipboard-read; clipboard-write"></iframe>
+<div id="submit" class="hidden"><textarea id="ta" placeholder="Abgabe"></textarea></div>
+<script>
+  function show(w){ document.getElementById('racket').classList.toggle('hidden', w!=='racket'); document.getElementById('submit').classList.toggle('hidden', w!=='submit'); if(w==='submit') document.getElementById('ta').focus(); }
+  window.__bench = {};
+  const ta = document.getElementById('ta');
+  ta.addEventListener('input', () => { window.__bench = { text: ta.value }; });
+  ta.addEventListener('paste', e => { window.__bench = { pasteEvent: (e.clipboardData && e.clipboardData.getData('text/plain')) || null, text: ta.value }; });
+  window.addEventListener('beforeunload', e => { e.preventDefault(); e.returnValue = ''; });   // a reload would lose the MEMFS
+</script></body></html>
