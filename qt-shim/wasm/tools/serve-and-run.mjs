@@ -15,7 +15,14 @@ const srv = createServer((req, res) => {
   res.end(readFileSync(p));
 }).listen(HTTP_PORT, "127.0.0.1");
 const PORT = 9334, CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const chrome = spawn(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, "--remote-debugging-address=127.0.0.1", `--user-data-dir=${OUT}/profile`, "--no-first-run", "--window-size=1100,900", ...(process.env.CHROME_GPU ? ["--enable-gpu", "--ignore-gpu-blocklist"] : ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"]), "about:blank"], { stdio: "ignore" });
+const chrome = spawn(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, "--remote-debugging-address=127.0.0.1", `--user-data-dir=${OUT}/profile`, "--no-first-run", "--window-size=1100,900", ...(process.env.CHROME_GPU ? ["--enable-gpu", "--ignore-gpu-blocklist"] : ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"]), "about:blank"], { stdio: "ignore", detached: true });
+
+// Chrome runs in its own process group (detached) so that it and ALL its helper processes can be killed together, whatever way node ends
+// (normal exit, error, SIGTERM from `timeout`, Ctrl+C).  Without this an aborted run left a headless Chrome with a busy WASM renderer behind.
+let chromeKilled = false;
+const killChrome = () => { if (chromeKilled) return; chromeKilled = true; try { process.kill(-chrome.pid, "SIGKILL"); } catch { try { chrome.kill("SIGKILL"); } catch {} } };
+process.on("exit", killChrome);
+for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(sig, () => { killChrome(); process.exit(130); });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 try {
   let ok = false; for (let i = 0; i < 50 && !ok; i++) { try { await (await fetch(`http://127.0.0.1:${PORT}/json/version`)).json(); ok = true; } catch { await sleep(200); } }
@@ -168,4 +175,4 @@ try {
   const shot = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(`${OUT}/screenshot.png`, Buffer.from(shot.result.data, "base64"));
   console.log(await ev("JSON.stringify(window.__bench||null)")); ws.close();
 } catch (e) { console.error("FEHLER:", e.message); process.exitCode = 1; }
-finally { chrome.kill("SIGTERM"); srv.close(); await sleep(500); if (chrome.exitCode === null) chrome.kill("SIGKILL"); log("beendet"); setTimeout(() => process.exit(), 200); }
+finally { killChrome(); srv.close(); log("beendet"); setTimeout(() => process.exit(), 200); }
