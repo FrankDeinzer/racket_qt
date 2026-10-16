@@ -97,3 +97,13 @@ und `racket/gui/base` braucht ~90 s statt 0,6 s.
 
 Der Orchestrator verwirft seine wiederverwendeten Final-Pass-Schatten selbst, wenn sich lokale Pakete (`third_party/gui`) ändern, und
 prüft, dass jedes Modul ein `.zo` hat (HACKING §85.11); manuelles Cache-Löschen ist nicht nötig.
+
+## Prüfungsseite von Hand ausprobieren (exam-host, HACKING §85.16)
+
+```bash
+qt-shim/wasm/tools/stage-build.sh <cmake-build-dir>     # einmal: kopiert die Build-Dateien nach qt-shim/build/wasm-drracket (gitignored)
+qt-shim/wasm/tools/start-exam-host.sh                    # startet den Server (COOP/COEP) und kopiert exam-host.html hinein
+# dann im Browser: http://localhost:8123/exam-host.html   (nur DrRacket: .../racketqt_wasm.html)
+```
+`start-exam-host.sh [build-dir]` nimmt auch einen anderen Build-Ordner (Port per `PORT=…`). Die Seite muss über `localhost` oder https laufen
+(Zwischenablage-API, SharedArrayBuffer); ein einfacher `python -m http.server` genügt nicht, weil die Header fehlen.
