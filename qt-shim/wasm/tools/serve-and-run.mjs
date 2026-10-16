@@ -69,6 +69,49 @@ try {
     }
     log("tasten gesendet:", process.env.KEYS.length);
   }
+  // CHORDS="ctrl+r;ctrl+shift+z;enter;tab;escape;f5": key chords sent after KEYS (modifiers ctrl/shift/alt/meta, keys: a letter/digit,
+  // enter, tab, escape, backspace, delete, space, up/down/left/right, home, end, pageup/pagedown, f1..f12), CHORD_GAP ms apart (default 600).
+  if (process.env.CHORDS) {
+    const MODS = { alt: 1, ctrl: 2, meta: 4, shift: 8 };
+    const NAMED = { enter: ["Enter", 13, "Enter", "\r"], tab: ["Tab", 9, "Tab", "\t"], escape: ["Escape", 27, "Escape"], backspace: ["Backspace", 8, "Backspace"],
+      delete: ["Delete", 46, "Delete"], space: [" ", 32, "Space", " "], up: ["ArrowUp", 38, "ArrowUp"], down: ["ArrowDown", 40, "ArrowDown"],
+      left: ["ArrowLeft", 37, "ArrowLeft"], right: ["ArrowRight", 39, "ArrowRight"], home: ["Home", 36, "Home"], end: ["End", 35, "End"],
+      pageup: ["PageUp", 33, "PageUp"], pagedown: ["PageDown", 34, "PageDown"] };
+    for (let i = 1; i <= 12; i++) NAMED["f" + i] = ["F" + i, 111 + i, "F" + i];
+    await sleep(Number(process.env.CHORDS_DELAY || 500));
+    for (const chord of process.env.CHORDS.split(";")) {
+      const parts = chord.toLowerCase().split("+"); const k = parts.pop();
+      const modifiers = parts.reduce((m, p) => m | (MODS[p] ?? 0), 0);
+      let key, vk, code, text;
+      if (NAMED[k]) [key, vk, code, text] = NAMED[k];
+      else { key = (modifiers & 8) ? k.toUpperCase() : k; vk = k.toUpperCase().charCodeAt(0); code = /[a-z]/.test(k) ? "Key" + k.toUpperCase() : "Digit" + k; text = (modifiers & (1 | 2 | 4)) ? undefined : key; }
+      const base = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers };
+      // modifier keys themselves first (Qt needs the modifier state, and some handlers watch the modifier key events)
+      for (const [name, bit] of Object.entries(MODS)) if (modifiers & bit) await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: { alt: "Alt", ctrl: "Control", meta: "Meta", shift: "Shift" }[name], code: { alt: "AltLeft", ctrl: "ControlLeft", meta: "MetaLeft", shift: "ShiftLeft" }[name], windowsVirtualKeyCode: { alt: 18, ctrl: 17, meta: 91, shift: 16 }[name], modifiers });
+      await send("Input.dispatchKeyEvent", { type: text ? "keyDown" : "rawKeyDown", ...base, ...(text ? { text, unmodifiedText: text } : {}) });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
+      for (const [name, bit] of Object.entries(MODS)) if (modifiers & bit) await send("Input.dispatchKeyEvent", { type: "keyUp", key: { alt: "Alt", ctrl: "Control", meta: "Meta", shift: "Shift" }[name], code: { alt: "AltLeft", ctrl: "ControlLeft", meta: "MetaLeft", shift: "ShiftLeft" }[name], windowsVirtualKeyCode: { alt: 18, ctrl: 17, meta: 91, shift: 16 }[name], modifiers: 0 });
+      log("chord", chord);
+      await sleep(Number(process.env.CHORD_GAP || 600));
+    }
+  }
+  // KEYS2: more text typed after CHORDS (e.g. a file name into the dialog the chord opened); CHORDS2: chords after KEYS2.
+  const typeText = async (text) => {
+    const named = { "\n": ["Enter", 13], "\b": ["Backspace", 8] };
+    for (const ch of text) {
+      const [key, code] = named[ch] ?? [ch, ch.toUpperCase().charCodeAt(0)];
+      const base = { key, code: key.length === 1 ? (/[a-z]/i.test(key) ? "Key" + key.toUpperCase() : "Digit0") : key, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code };
+      await send("Input.dispatchKeyEvent", { type: named[ch] ? "rawKeyDown" : "keyDown", ...base, text: named[ch] ? (key === "Enter" ? "\r" : undefined) : ch, unmodifiedText: named[ch] ? undefined : ch });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
+      await sleep(Number(process.env.KEY_GAP || 150));
+    }
+  };
+  // CLICK_AT_C: clicks between the chords and KEYS2 (e.g. focus the file-name field of the dialog a chord opened).
+  if (process.env.CLICK_AT_C) {
+    await sleep(Number(process.env.CLICK_AT_C_DELAY || 1500));
+    for (const pt of process.env.CLICK_AT_C.split(";")) { const [x, y] = pt.split(",").map(Number); await glideClick(x, y); log("klickC", x, y); await sleep(800); }
+  }
+  if (process.env.KEYS2) { await sleep(Number(process.env.KEYS2_DELAY || 800)); await typeText(process.env.KEYS2.replace(/\\n/g, "\n")); log("keys2 gesendet"); }
   // CLICK_AT2: clicks sent AFTER the keys (e.g. type code, then press Run).
   if (process.env.CLICK_AT2) {
     await sleep(Number(process.env.CLICK2_DELAY || 500));

@@ -1,4 +1,7 @@
 #include <QApplication>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #include <QGuiApplication>
 #include <QWindow>
 #include <QMainWindow>
@@ -148,6 +151,24 @@ static int    s_argc = 0;
 static char** s_argv = nullptr;
 static QApplication* s_app = nullptr;
 
+// Qt-WASM running in a browser on macOS applies Qt's mac convention to the modifiers: physical Ctrl arrives as MetaModifier and
+// Cmd as ControlModifier (AA_MacDontSwapCtrlAndMeta has no effect there).  racket/gui under WASM is configured like the other
+// non-mac platforms (menus say "Ctrl+R"), so undo the swap: physical Ctrl must stay Ctrl (HACKING §85.15).  Elsewhere identity.
+static Qt::KeyboardModifiers rqt_fix_mods(Qt::KeyboardModifiers m)
+{
+#ifdef __EMSCRIPTEN__
+    static int mac = -1;
+    if (mac < 0) mac = emscripten_run_script_int("/Mac|iPhone|iPad/.test(navigator.platform) ? 1 : 0");
+    if (mac) {
+        Qt::KeyboardModifiers r = m & ~(Qt::ControlModifier | Qt::MetaModifier);
+        if (m & Qt::MetaModifier)    r |= Qt::ControlModifier;
+        if (m & Qt::ControlModifier) r |= Qt::MetaModifier;
+        return r;
+    }
+#endif
+    return m;
+}
+
 // Temporary diagnostics, gated by env PLT_QT_DEBUG (read once). Left in the
 // code intentionally — QMenuBar layout instrumentation for the menu-bar work.
 static bool plt_qt_debug()
@@ -277,6 +298,7 @@ protected:
         return r;
     }
     static int encodeMods(Qt::KeyboardModifiers m) {
+        m = rqt_fix_mods(m);
         int r = 0;
         if (m & Qt::ShiftModifier)   r |= 1;
         if (m & Qt::ControlModifier) r |= 2;
@@ -414,7 +436,7 @@ public:
             bool ret = (k == Qt::Key_Return || k == Qt::Key_Enter);
             // Ctrl+<printable> chords (dialog shortcuts such as Choose Language's Ctrl+D/R/T/O) must also
             // reach racket/gui's pre-on-char chain; with focus in a native control they were lost (§74.7).
-            bool chord = (ke->modifiers() & Qt::ControlModifier) && k >= 0x20 && k <= 0x7e;
+            bool chord = (rqt_fix_mods(ke->modifiers()) & Qt::ControlModifier) && k >= 0x20 && k <= 0x7e;
 #ifdef Q_OS_MACOS
             // macOS: buttons are not autoDefault (see shim_button_create), so Return on a
             // focused button must reach racket/gui's dialog traversal -> default button.
@@ -424,7 +446,7 @@ public:
 #endif
             if (k == Qt::Key_Escape || chord || (ret && (ret_button_ok || !qobject_cast<QPushButton*>(o))))
                 {
-                    Qt::KeyboardModifiers m = ke->modifiers();
+                    Qt::KeyboardModifiers m = rqt_fix_mods(ke->modifiers());
                     int bits = (m & Qt::ShiftModifier ? 1 : 0) | (m & Qt::ControlModifier ? 2 : 0)
                              | (m & Qt::AltModifier ? 4 : 0) | (m & Qt::MetaModifier ? 8 : 0);
                     cb(ud, k, bits);

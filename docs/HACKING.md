@@ -9452,3 +9452,18 @@ Run-Knopf der Toolbar funktionieren; `#lang racket` + `(+ 1 2)` + Run → Intera
   (2) `racket/place` (`make-place`) nicht verfügbar; (3) Datei-Dialoge, Speichern/Öffnen (virtuelles MEMFS), Hilfe/Browser, Check Syntax, Debugger,
   Paket-Manager, Ctrl-Tastenkürzel (der Tastensender kann noch keine Modifier), HiDPI, Chrome mit GPU und die Bedienbarkeit mit echter Maus/Tastatur sind
   nicht geprüft; (4) die `.data`-Nutzlast (148 MB) wird komplett vor dem Start geladen — Download-/Startzeit über Netz ungemessen.
+
+### 85.15 DrRacket im Browser: Tastenkürzel, Speichern (gemessen, 2026-10-16)
+
+- **Modifier-Tasten (`serve-and-run.mjs`):** `CHORDS="ctrl+r;ctrl+shift+z;enter;f5;…"` sendet Tastenkombinationen (DevTools `Input.dispatchKeyEvent` mit
+  `modifiers`, Modifier-Tasten davor/danach), `KEYS2` tippt Text nach den Chords, `CLICK_AT_C` klickt dazwischen (z. B. in das Dateinamenfeld eines Dialogs).
+- **Fund + Fix (`shim.cpp`, `rqt_fix_mods`):** Läuft der **Browser unter macOS**, wendet Qt-WASM die Mac-Konvention an: die physische **Ctrl-Taste kommt als
+  `MetaModifier`** an, Cmd als `ControlModifier` (`AA_MacDontSwapCtrlAndMeta` wirkt unter WASM nicht). Folge: Ctrl+R fügte ein `r` ein, statt Run
+  auszulösen (die Racket-Seite behandelt WASM wie andere Nicht-Mac-Systeme, Menüs zeigen „Ctrl+R"). Fix: `encodeMods` (und der `NavKeyFilter`) tauschen
+  Ctrl/Meta unter `__EMSCRIPTEN__` zurück, wenn `navigator.platform` Mac/iPhone/iPad ist; nativ identisch. Cmd (= Qt-Ctrl nach Rücktausch Meta) bleibt Meta.
+  Zu prüfen: Cmd-Verhalten, und Browser-eigene Kürzel (Ctrl+W/T u. ä. fängt der Browser ab).
+- **Gemessen (Headless-Chrome):** Ctrl+R → `3` im Interaktionsfenster; Ctrl+A, Delete, Ctrl+Z stellt den Text wieder her; Ctrl+S öffnet den Qt-Dateidialog
+  (zeigt das virtuelle Dateisystem: `app collects dev etc home pkgs proc share tmp`); Klick ins Namensfeld, `/tmp/t.rkt` + Enter speichert (Reiter „t.rkt", Speichern-
+  Symbol verschwindet). Ohne den Klick landeten die Tasten **nicht** im Dialog (der Browser aktiviert das neue Qt-Fenster nicht von selbst, Tastaturfokus fehlt).
+- **Grenzen:** Das Dateisystem ist MEMFS — gespeicherte Dateien überleben kein Neuladen der Seite (IDBFS/Download/Upload wären ein eigener Schritt); echte Maus/
+  Tastatur, Cmd-Kürzel, Chrome/Firefox/Safari-Unterschiede, Windows-/Linux-Browser (Rücktausch dort nicht aktiv) ungeprüft.
