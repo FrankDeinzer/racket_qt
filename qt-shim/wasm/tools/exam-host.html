@@ -13,10 +13,14 @@
   .hidden{visibility:hidden}
 </style></head><body>
 <div id="bar"><button id="t1" onclick="show('racket')">Racket</button><button id="t2" onclick="show('submit')">Abgabe</button></div>
-<iframe id="racket" src="racketqt_wasm.html" allow="cross-origin-isolated; clipboard-read; clipboard-write"></iframe>
+<iframe id="racket" tabindex="0" src="racketqt_wasm.html" allow="cross-origin-isolated; clipboard-read; clipboard-write"></iframe>
 <div id="submit" class="hidden"><textarea id="ta" placeholder="Abgabe"></textarea></div>
 <script>
-  function show(w){ document.getElementById('racket').classList.toggle('hidden', w!=='racket'); document.getElementById('submit').classList.toggle('hidden', w!=='submit'); if(w==='submit') document.getElementById('ta').focus(); }
+  // ?qtdebug (and any other query) is handed on to the Racket frame; with ?qtdebug the Qt layer logs key/mouse events to the browser console.
+  document.getElementById('racket').src = 'racketqt_wasm.html' + location.search;
+  function focusRacket(){ const f = document.getElementById('racket'); f.focus(); try { f.contentWindow.focus(); } catch(e) {} }
+  window.addEventListener('load', () => setTimeout(focusRacket, 500));
+  function show(w){ if (w === 'racket') setTimeout(focusRacket, 50); document.getElementById('racket').classList.toggle('hidden', w!=='racket'); document.getElementById('submit').classList.toggle('hidden', w!=='submit'); if(w==='submit') document.getElementById('ta').focus(); }
   window.__bench = {};
   const ta = document.getElementById('ta');
   ta.addEventListener('input', () => { window.__bench = { text: ta.value }; });

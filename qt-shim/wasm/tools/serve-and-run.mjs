@@ -6,13 +6,14 @@ import { createServer } from "node:http";
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "node:fs";
 import { join, extname } from "node:path";
 const [DIR, PAGE, OUT, TIMEOUT = "120"] = process.argv.slice(2);
+const HTTP_PORT = Number(process.env.HTTP_PORT || 8123);   // HTTP_PORT=8124 to run next to a server on 8123
 mkdirSync(OUT, { recursive: true });
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".wasm": "application/wasm", ".json": "application/json", ".png": "image/png" };
 const srv = createServer((req, res) => {
   let p = join(DIR, decodeURIComponent(req.url.split("?")[0])); if (!existsSync(p) || statSync(p).isDirectory()) { res.writeHead(404); return res.end("nf"); }
   res.writeHead(200, { "Content-Type": MIME[extname(p)] || "application/octet-stream", "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp", "Cache-Control": "no-store" });
   res.end(readFileSync(p));
-}).listen(8123, "127.0.0.1");
+}).listen(HTTP_PORT, "127.0.0.1");
 const PORT = 9334, CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const chrome = spawn(CHROME, ["--headless=new", `--remote-debugging-port=${PORT}`, "--remote-debugging-address=127.0.0.1", `--user-data-dir=${OUT}/profile`, "--no-first-run", "--window-size=1100,900", ...(process.env.CHROME_GPU ? ["--enable-gpu", "--ignore-gpu-blocklist"] : ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"]), "about:blank"], { stdio: "ignore" });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -30,8 +31,8 @@ try {
   const ev = async (e) => (await send("Runtime.evaluate", { expression: e, returnByValue: true })).result?.result?.value;
   await send("Runtime.enable"); await send("Page.enable");
   // clipboard round trips (CLIPBOARD=1): grant read/write so navigator.clipboard works in headless Chrome
-  if (process.env.CLIPBOARD) await send("Browser.grantPermissions", { origin: "http://127.0.0.1:8123", permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"] });
-  await send("Page.navigate", { url: `http://127.0.0.1:8123/${PAGE}` }); log("navigiert");
+  if (process.env.CLIPBOARD) await send("Browser.grantPermissions", { origin: `http://127.0.0.1:${HTTP_PORT}`, permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"] });
+  await send("Page.navigate", { url: `http://127.0.0.1:${HTTP_PORT}/${PAGE}` }); log("navigiert");
   await sleep(2000); log("isolated:", await ev("self.crossOriginIsolated"));
   log("renderer:", await ev(`(()=>{const c=document.createElement("canvas").getContext("webgl2");if(!c)return "kein WebGL2";const e=c.getExtension("WEBGL_debug_renderer_info");return e?c.getParameter(e.UNMASKED_RENDERER_WEBGL):"?"})()`));
   const t0 = Date.now(); let done = false;
