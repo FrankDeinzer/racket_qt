@@ -146,6 +146,14 @@ try {
   }
   if (process.env.KEYS2) { await sleep(Number(process.env.KEYS2_DELAY || 800)); await typeText(process.env.KEYS2.replace(/\\n/g, "\n")); log("keys2 gesendet"); }
   if (process.env.CHORDS2) await runChords(process.env.CHORDS2, Number(process.env.CHORDS2_DELAY || 800), process.env.PASTE_PHASE === "2");
+  // COPY_EVENT=copy|cut: dispatch a synthetic copy/cut event (what SEB's private clipboard triggers) and print what the page put into
+  // clipboardData and whether it prevented the default (HACKING §85.18).
+  if (process.env.COPY_EVENT) {
+    const r = await send("Runtime.evaluate", { returnByValue: true, expression: `(()=>{const w=(document.querySelector('iframe')?.contentWindow)||window;const dt=new w.DataTransfer();
+      const ev=new w.ClipboardEvent(${JSON.stringify(process.env.COPY_EVENT)},{clipboardData:dt,bubbles:true,cancelable:true});(w.document.activeElement||w.document.body).dispatchEvent(ev);
+      return 'prevented='+ev.defaultPrevented+' text='+JSON.stringify(dt.getData('text/plain'));})()` });
+    log("COPY_EVENT:", r.result?.result?.value ?? JSON.stringify(r.result));
+  }
   // DOM_DUMP=1: print the frame's DOM outline and the active element (keyboard-focus diagnostics), at the end of the run.
   if (process.env.DOM_DUMP) {
     const r = await send("Runtime.evaluate", { returnByValue: true, expression: `(()=>{const d=(document.querySelector('iframe')?.contentDocument)||document;

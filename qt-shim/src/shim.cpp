@@ -3530,6 +3530,20 @@ extern "C" void shim_clipboard_wasm_inject(const char* utf8)
 }
 #endif
 
+#ifdef __EMSCRIPTEN__
+// Text currently selected in the focused editor, pushed by Racket (HACKING §85.18).  SEB's private clipboard makes the page's `copy`
+// event fire, but the Racket thread only answers after the event is over; main.cpp's copy listener answers from this mirror instead.
+QByteArray rqt_wasm_sel;
+#endif
+void shim_wasm_set_selection(const char* utf8)
+{
+#ifdef __EMSCRIPTEN__
+    rqt_wasm_sel = QByteArray(utf8 ? utf8 : "");
+#else
+    (void)utf8;
+#endif
+}
+
 void shim_clipboard_set_text(const char* utf8, int mode)
 {
 #ifdef __EMSCRIPTEN__

@@ -9519,3 +9519,15 @@ für Firefox bestätigt. Weiter offen: Chrome und Safari/WKWebView von Hand, ein
 - **Speicher (offen):** DrRacket-Seite ≈ **660 MB** Seitenspeicher (davon ≈ 600 MB WASM-Speicher: Nutzlast von 148 MB wird in den Speicher gepackt, dazu Racket-Heap, Qt, 128-MB-Limit
   des Benutzerprogramms). Auf Studentenrechnern ungemessen; mögliche Hebel: unnötige Pakete aus dem Image (`web-server-lib`, `db-lib`, …), kleinere Nutzlast.
 
+
+### 85.18 Copy/Cut im SEB (macOS, private Zwischenablage) — gemessen und behoben (2026-10-16)
+
+- **Symptom:** Im Safe Exam Browser 3.7.1.1 (macOS, WKWebView, Option „private Zwischenablage erzwingen") ging Cmd+C/Cmd+X aus dem Racket-Fenster nicht (Edit-Menü ebenso), Einfügen in Racket und Abgabe ging.
+- **Diagnose** (`exam-host.html?clipdiag`, Log per `POST /__log` in `<build>/clipdiag.log`, denn SEB sperrt alles außer localhost): SEB liefert **kein `keydown`** für Cmd+C/V, sondern löst `copy`/`cut`/`paste` aus.
+  Das `copy`-Ereignis erreicht den Frame mit schreibbarem `clipboardData`; Qt-WASM beantwortet es mit veralteten Daten und der Racket-Thread kopiert erst nach Ende des Ereignisses.
+  Ein Schreiben nach dem Ereignis (`navigator.clipboard`, `execCommand`) erreicht SEBs privates Clipboard nicht.
+- **Fix:** (1) `drracket-main.rkt` meldet alle 100 ms die Auswahl des fokussierten `text%` (`get-position`/`get-text`; `get-selected-text` gibt es nicht) per neuem Export `shim_wasm_set_selection`
+  an einen Spiegel (`rqt_wasm_sel`, shim.cpp). (2) `main.cpp`: Capture-Listener für `copy`/`cut` auf `window` setzt `clipboardData` synchron aus dem Spiegel, stoppt das Ereignis für Qt und
+  schickt Racket selbst Ctrl+c/Ctrl+x (Editor kopiert/schneidet wirklich, `g_wasm_clip` bleibt aktuell). Ohne bekannte Auswahl: Qts Verhalten. Fallstrick: Kommas in `[...]` zerlegen `MAIN_THREAD_EM_ASM`-Argumente.
+- **Test:** Headless `COPY_EVENT=copy|cut` (neu in `serve-and-run.mjs`): `clipboardData` = markierter Text, `cut` leert den Editor. Im echten SEB vom Nutzer bestätigt: Copy → Abgabe, Cut + Einfügen an anderer Stelle.
+- **Grenze:** Wer markiert und binnen 100 ms kopiert, kann eine veraltete Auswahl erwischen.

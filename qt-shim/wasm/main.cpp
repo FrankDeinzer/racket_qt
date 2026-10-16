@@ -29,6 +29,20 @@ extern "C" void rqt_on_browser_paste(const char* text) {
     }
 }
 
+// Copy/cut (HACKING §85.18): in SEB (private clipboard) the page's `copy`/`cut` event fires, but Qt-WASM answers it with stale data and the
+// Racket thread only copies after the event is over.  Answer synchronously from the selection mirror Racket keeps up to date, then give
+// Racket the Ctrl+c / Ctrl+x key itself (so the editor really copies / cuts and its own clipboard mirror stays correct).
+extern QByteArray rqt_wasm_sel;   // shim.cpp
+extern "C" const char* rqt_selection_text() { return rqt_wasm_sel.constData(); }
+extern "C" void rqt_on_browser_copy(int cut) {
+    if (QWidget* w = QApplication::focusWidget()) {
+        const int key = cut ? Qt::Key_X : Qt::Key_C;
+        const QString txt = cut ? QStringLiteral("x") : QStringLiteral("c");
+        QCoreApplication::postEvent(w, new QKeyEvent(QEvent::KeyPress,   key, Qt::ControlModifier, txt));
+        QCoreApplication::postEvent(w, new QKeyEvent(QEvent::KeyRelease, key, Qt::ControlModifier, txt));
+    }
+}
+
 static void* racket_thread(void*) {
     // Spike: Racket looks the shim up through (ffi-lib #f) -- the proxied entry points are registered by boot.c.
     // racket/gui picks its backend from the environment (gui-lib mred/private/wx/platform.rkt): the Qt backend.
@@ -80,6 +94,18 @@ int main(int argc, char** argv) {
             _free(p);
         }, true);
     }, (int)&rqt_on_browser_paste);
+    MAIN_THREAD_EM_ASM({
+        'copy cut'.split(' ').forEach(function(kind) {
+            window.addEventListener(kind, function(e) {
+                var t = UTF8ToString(getWasmTableEntry($1)());
+                if (!t || !e.clipboardData) return;   // nothing known: leave it to Qt
+                e.clipboardData.setData('text/plain', t);
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                getWasmTableEntry($0)(kind === 'cut' ? 1 : 0);
+            }, true);
+        });
+    }, (int)&rqt_on_browser_copy, (int)&rqt_selection_text);
     shim_app_init();   // creates the QApplication (shim-owned); later proxied shim_app_init calls are no-ops
     (void)argc; (void)argv;
 
