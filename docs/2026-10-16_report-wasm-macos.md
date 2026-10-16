@@ -1,7 +1,9 @@
 # Report 2026-10-16 (macOS): DrRacket im Safe Exam Browser — Copy/Cut, Debugger, Mathe, Doku
 
 Fortsetzung von `docs/2026-10-15_report-wasm-macos.md` (Machbarkeit) und HACKING §85.9–§85.17.
-Es gibt **keinen** zugehörigen `*_prompt*.md`: die Aufgaben kamen im Gespräch (Nutzer testet im echten SEB 3.7.1.1, macOS).
+Herkunft: `docs/2026-09-30_prompt.md` führt WASM nur unter „OUT OF SCOPE" („eigener Prompt nach der Machbarkeitsrecherche des Advisors"). Die Machbarkeitsstudie
+(`docs/2026-10-15_report-wasm-macos.md`) lief so gut, dass sie im Gespräch zu einem lauffähigen DrRacket im Browser vervollständigt wurde; einen eigenen `*_prompt*.md` dafür gibt es nicht.
+Die Aufgaben dieser Session kamen ebenfalls im Gespräch (Nutzer testet im echten SEB 3.7.1.1, macOS).
 Ausführliche Herleitung: `docs/HACKING.md` §85.18–§85.20.
 
 ## Ergebnis auf einen Blick
