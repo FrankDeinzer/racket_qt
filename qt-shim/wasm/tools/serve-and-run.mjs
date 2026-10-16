@@ -8,7 +8,7 @@ import { join, extname } from "node:path";
 const [DIR, PAGE, OUT, TIMEOUT = "120"] = process.argv.slice(2);
 const HTTP_PORT = Number(process.env.HTTP_PORT || 8123);   // HTTP_PORT=8124 to run next to a server on 8123
 mkdirSync(OUT, { recursive: true });
-const MIME = { ".html": "text/html", ".js": "text/javascript", ".wasm": "application/wasm", ".json": "application/json", ".png": "image/png" };
+const MIME = { ".html": "text/html", ".js": "text/javascript", ".wasm": "application/wasm", ".json": "application/json", ".png": "image/png", ".css": "text/css", ".svg": "image/svg+xml", ".gif": "image/gif", ".woff": "font/woff", ".woff2": "font/woff2", ".txt": "text/plain" };
 const srv = createServer((req, res) => {
   let p = join(DIR, decodeURIComponent(req.url.split("?")[0])); if (!existsSync(p) || statSync(p).isDirectory()) { res.writeHead(404); return res.end("nf"); }
   res.writeHead(200, { "Content-Type": MIME[extname(p)] || "application/octet-stream", "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Embedder-Policy": "require-corp", "Cache-Control": "no-store" });

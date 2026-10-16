@@ -1,5 +1,5 @@
 ;; Start the real DrRacket inside the combined Qt+Racket WASM module (HACKING §85.14).
-(require ffi/unsafe racket/class racket/gui/base)
+(require ffi/unsafe racket/class racket/gui/base net/sendurl)
 (define t0 (current-inexact-milliseconds))
 (printf "DRRACKET-START\n")
 
@@ -31,6 +31,30 @@
        (define t (and (sync/timeout 1 done) result))
        (cond [(and t (not (equal? t last))) (set-selection t) (loop t)]
              [else (loop last)])))))
+
+;; Documentation (HACKING §85.20): there is no browser to start.  Help links point to docs.racket-lang.org (no local doc tree in the image);
+;; hand them to the exam page, which shows the same path from its own copy of the docs (<server>/doc/...).  Other URLs go to the page unchanged.
+(define open-url
+  (get-ffi-obj "shim_wasm_open_url" (ffi-lib #f) (_fun _string -> _void) (lambda () #f)))
+;; send-url/contents (used for Help Desk searches) writes a small redirect page to the temp dir and sends its file: URL: read the target out of it.
+(define (redirect-target url)
+  (define m (regexp-match #rx"^file://(/tmp/plt-sendurl-contents-[^/]*[.]html)$" url))
+  (define page (and m (with-handlers ([void (lambda (e) #f)])
+                        (call-with-input-file (cadr m) (lambda (in) (read-string 100000 in))))))
+  (cond [(not page) url]
+        [else (eprintf "send-url redirect page: ~a\n" page)
+              (cond [(regexp-match #rx"[Uu][Rr][Ll]=['\"]?([^'\"> ]+)" page) => cadr]
+                    [(regexp-match #rx"location[.a-z]* *= *['\"]([^'\"]+)" page) => cadr]
+                    [(regexp-match #rx"(https?://[^'\"<> ]+)" page) => cadr]
+                    [else url])]))
+(when open-url
+  (external-browser
+   (lambda (url)
+     (define target (redirect-target url))
+     (eprintf "send-url: ~a -> ~a\n" url target)
+     (open-url (cond [(regexp-match #rx"^https?://docs\\.racket-lang\\.org/(.*)$" target)
+                      => (lambda (m) (string-append "doc/" (cadr m)))]
+                     [else target])))))
 
 (dynamic-require 'drracket/drracket #f)
 (printf "DRRACKET-LOADED ~a ms\n" (round (- (current-inexact-milliseconds) t0)))

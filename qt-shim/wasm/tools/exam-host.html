@@ -14,18 +14,34 @@
   #diag{position:fixed;right:0;bottom:0;width:46%;height:40%;z-index:20;background:#ffffe0;border:1px solid #888;font:11px monospace;overflow:auto;white-space:pre-wrap;padding:2px}
   #diagbar{position:fixed;right:0;bottom:40%;z-index:21;background:#eee}
   #submit{z-index:10;background:#fff}
+  #doc{position:absolute;top:32px;left:0;right:0;bottom:0;z-index:10;background:#fff;border:0;width:100%;height:calc(100% - 32px)}
   #submit textarea{width:100%;height:100%;box-sizing:border-box;font:14px monospace}
   .hidden{display:none}
 </style></head><body>
-<div id="bar"><button id="t1" onclick="show('racket')">Racket</button><button id="t2" onclick="show('submit')">Abgabe</button></div>
+<div id="bar"><button id="t1" onclick="show('racket')">Racket</button><button id="t2" onclick="show('submit')">Abgabe</button><button id="t3" onclick="show('doc')">Doku</button></div>
 <iframe id="racket" tabindex="0" src="racketqt_wasm.html" allow="cross-origin-isolated; clipboard-read; clipboard-write"></iframe>
+<iframe id="doc" class="hidden" src="about:blank"></iframe>
 <div id="submit" class="hidden"><textarea id="ta" placeholder="Abgabe"></textarea></div>
 <script>
   // ?qtdebug (and any other query) is handed on to the Racket frame; with ?qtdebug the Qt layer logs key/mouse events to the browser console.
   document.getElementById('racket').src = 'racketqt_wasm.html' + location.search;
   function focusRacket(){ const f = document.getElementById('racket'); f.focus(); try { f.contentWindow.focus(); } catch(e) {} }
   window.addEventListener('load', () => setTimeout(focusRacket, 500));
-  function show(w){ if (w === 'racket') setTimeout(focusRacket, 50); document.getElementById('submit').classList.toggle('hidden', w!=='submit'); if(w==='submit') document.getElementById('ta').focus(); }
+  function show(w){
+    if (w === 'racket') setTimeout(focusRacket, 50);
+    document.getElementById('submit').classList.toggle('hidden', w !== 'submit');
+    document.getElementById('doc').classList.toggle('hidden', w !== 'doc');
+    if (w === 'submit') document.getElementById('ta').focus();
+  }
+  // Documentation (HACKING §85.20): racket's send-url (F1, Help Desk, "Help" links) arrives here as {rqtOpenUrl: 'doc/reference/...'}; the docs are static
+  // files under <server>/doc/ (tools/stage-docs.sh).  Anything else is not opened (the exam browser blocks the network anyway).
+  window.addEventListener('message', e => {
+    const u = e.data && e.data.rqtOpenUrl;
+    if (typeof u !== 'string') return;
+    if (!/^doc\//.test(u)) { console.warn('exam-host: URL nicht geoeffnet:', u); return; }
+    document.getElementById('doc').src = u;
+    show('doc');
+  });
   window.__bench = {};
   const ta = document.getElementById('ta');
   ta.addEventListener('input', () => { window.__bench = { text: ta.value }; });

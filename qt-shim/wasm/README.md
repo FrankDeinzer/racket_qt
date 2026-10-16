@@ -109,3 +109,7 @@ qt-shim/wasm/tools/start-exam-host.sh                    # startet den Server (C
 ```
 `start-exam-host.sh [build-dir]` nimmt auch einen anderen Build-Ordner (Port per `PORT=…`). Die Seite muss über `localhost` oder https laufen
 (Zwischenablage-API, SharedArrayBuffer); ein einfacher `python -m http.server` genügt nicht, weil die Header fehlen.
+
+## Dokumentation (HACKING §85.20)
+
+`tools/stage-docs.sh` kopiert die HTML-Handbücher der lokalen Racket-Installation nach `<build>/doc/`; `start-exam-host.sh` liefert sie mit aus, und die Prüfungsseite zeigt Help-Links im Bereich „Doku“.

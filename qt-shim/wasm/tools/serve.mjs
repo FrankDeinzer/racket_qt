@@ -7,7 +7,8 @@ import { join, extname, resolve, normalize } from "node:path";
 const [DIR0, PORT = "8123"] = process.argv.slice(2);
 if (!DIR0) { console.error("usage: node serve.mjs <dir> [port]"); process.exit(2); }
 const DIR = resolve(DIR0);
-const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".wasm": "application/wasm", ".json": "application/json", ".png": "image/png", ".data": "application/octet-stream" };
+const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".wasm": "application/wasm", ".json": "application/json", ".png": "image/png", ".data": "application/octet-stream",
+  ".css": "text/css", ".svg": "image/svg+xml", ".gif": "image/gif", ".jpg": "image/jpeg", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".txt": "text/plain; charset=utf-8" };
 // Diagnostics (exam-host.html ?clipdiag): POST /__log appends the body to <dir>/clipdiag.log and echoes it here, so the log survives
 // even when the browser (SEB) blocks everything but localhost.
 createServer((req, res) => {

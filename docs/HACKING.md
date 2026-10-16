@@ -9541,3 +9541,16 @@ für Firefox bestätigt. Weiter offen: Chrome und Safari/WKWebView von Hand, ein
   Fix: `tools/make-info-cache.rkt` filtert den Cache der Host-Installation auf die Pakete des Images (55 von 238 Einträgen, 8 Tool-Verzeichnisse) → Check Syntax, Debug, Macro Stepper, Scripts-Menü erscheinen.
 - **Folgefehler, behoben:** Check Syntax rief `screen->client` mit 8388608 auf — `QCursor::pos()` liefert unter WASM einen Sentinel. `shim_get_mouse_state` nutzt dort die zuletzt gesehene globale Mausposition (`WasmMouseTracker`, Event-Filter).
 - **Offen:** Debug-Lauf selbst (Haltepunkt/Einzelschritt) im Browser noch nicht ausprobiert; Versionszeile zeigt `9.3-2026-10-16-bbf7dea831*` (aus dem `drracket`-Paket, kosmetisch ungeklärt).
+
+### 85.20 Dokumentation im Browser (F1/Help Desk), 2026-10-16
+
+- **Symptom (SEB):** Help-Links öffnen `docs.racket-lang.org` (SEB sperrt das Netz); lokale Doku fehlt im Image (`racket-doc` ohne HTML).
+- **Mechanismus:** `send-url` hat im WASM keinen Browser. Der Help Desk ruft `send-url/contents` (Weiterleitungsseite in `/tmp/plt-sendurl-contents-….html`) bzw. `send-url` mit
+  `https://docs.racket-lang.org/search/index.html?q=<wort>`. `drracket-main.rkt` setzt `(external-browser <proc>)`: liest das Ziel aus der Weiterleitungsseite, schreibt
+  `docs.racket-lang.org/<pfad>` auf `doc/<pfad>` um und übergibt es über den neuen Export `shim_wasm_open_url` an die Seite (`postMessage {rqtOpenUrl}` an den Parent, sonst `window.open`).
+- **Prüfungsseite:** `exam-host.html` hat einen dritten Bereich „Doku“ (iframe), der `doc/…`-URLs anzeigt; andere URLs werden nicht geöffnet.
+- **Dokumentationsdateien:** `tools/stage-docs.sh` kopiert ausgewählte Handbücher der lokalen Racket-Installation (Standard: reference, guide, gui, draw, math, search, teachpack, htdp-langs, syntax, scribble, images,
+  framework ≈ 95 MB; ohne `docindex.sqlite`) nach `<build>/doc/`. Der Server liefert sie statisch; `serve.mjs`/`serve-and-run.mjs` kannten kein `text/css` (Seite unformatiert) — ergänzt.
+- **Test:** `exam-host.html` im Headless-Chrome, `(map` getippt, F1 → Tab „Doku“ zeigt die lokale Suche „Search Manuals“ mit 596 Treffern für `map`.
+- **Grenzen:** Die Doku liegt beim Server, nicht im Image — im Prüfungsbetrieb muss der Server sie ausliefern (SEB-Starturl-Regeln: gleiche Origin). Nicht getestet im SEB; Sprung zu einer Handbuchseite (Klick auf Treffer) und
+  Hilfe-Links aus Fehlermeldungen nur über denselben Pfad angenommen.

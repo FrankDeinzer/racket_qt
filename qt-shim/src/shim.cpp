@@ -1,3 +1,6 @@
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #include <QApplication>
 #include <QGuiApplication>
 #include <QWindow>
@@ -3560,6 +3563,21 @@ extern "C" void shim_clipboard_wasm_inject(const char* utf8)
 // event fire, but the Racket thread only answers after the event is over; main.cpp's copy listener answers from this mirror instead.
 QByteArray rqt_wasm_sel;
 #endif
+// Hands a URL to the page around the WASM module (HACKING §85.20): racket's `send-url` has no browser to start there.  The exam page opens it
+// in its documentation area; a bare module page opens a new browser tab.  Elsewhere: no-op.
+void shim_wasm_open_url(const char* url)
+{
+#ifdef __EMSCRIPTEN__
+    MAIN_THREAD_EM_ASM({
+        var u = UTF8ToString($0);
+        if (window.parent && window.parent !== window) window.parent.postMessage({ rqtOpenUrl: u }, '*');
+        else window.open(u, '_blank');
+    }, url);
+#else
+    (void)url;
+#endif
+}
+
 void shim_wasm_set_selection(const char* utf8)
 {
 #ifdef __EMSCRIPTEN__
