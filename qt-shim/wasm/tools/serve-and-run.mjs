@@ -1,7 +1,7 @@
 // Static COOP/COEP server + headless Chrome (DevTools protocol, Node built-ins only) for the WASM builds.
 // CHROME_GPU=1: no SwiftShader flags (real GPU via ANGLE/Metal); logs UNMASKED_RENDERER so the result says which renderer ran.
 // usage: EXTRA_WAIT=<s> node serve-and-run.mjs <build-dir> <page.html> <out-dir> [timeout-s]; finishes when document.title === "BENCH-DONE".
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from "node:fs";
 import { join, extname } from "node:path";
@@ -153,6 +153,32 @@ try {
       const walk=(e,dep)=>dep>5?'':desc(e)+'\\n'+[...e.children].map(c=>'  '.repeat(dep+1)+walk(c,dep+1)).join('');
       const c=d.getElementById('qt-shadow-container');const sr=c&&c.shadowRoot;const shadow=sr?('shadowActive='+desc(sr.activeElement)+' shadowHTML='+sr.innerHTML.slice(0,900)):'(no open shadowRoot)';return shadow+' || container='+(c?c.cloneNode(false).outerHTML:'none')+' topActive='+desc(document.activeElement)+' frameActive='+desc(d.activeElement)+' hasFocus='+d.hasFocus()+'\\n'+walk(d.body,0);})()` });
     log("DOM:\n" + (r.result?.result?.value ?? JSON.stringify(r.result)));
+  }
+  // IDLE_SAMPLE=<seconds> (after IDLE_AFTER seconds, default 0): resource use of the whole headless-Chrome process group while the page sits idle
+  // -- CPU time delta / wall time (100 % = one core), RSS sum, process count; plus the page's own memory estimate (needs cross-origin isolation).
+  if (process.env.IDLE_SAMPLE) {
+    await sleep(Number(process.env.IDLE_AFTER || 0) * 1000);
+    const snap = () => {
+      const rows = execSync(`ps -axo pgid=,pid=,rss=,time=,command=`).toString().split("\n").filter((l) => l.trim());
+      let rss = 0, cpu = 0, n = 0; const parts = [];
+      for (const l of rows) {
+        const m = l.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+([\d:.]+)\s+(.*)$/);
+        if (!m || Number(m[1]) !== chrome.pid) continue;
+        const t = m[4].split(":").reverse().reduce((a, v, i) => a + parseFloat(v) * Math.pow(60, i), 0);
+        rss += Number(m[3]); cpu += t; n++;
+        const kind = (m[5].match(/--type=(\w[\w-]*)/) || [, "browser"])[1] + (/--renderer-client-id/.test(m[5]) ? "" : "");
+        parts.push({ pid: Number(m[2]), kind, t, rss: Number(m[3]) });
+      }
+      return { rss, cpu, n, parts, wall: Date.now() / 1000 };
+    };
+    const a = snap(); await sleep(Number(process.env.IDLE_SAMPLE) * 1000); const b = snap();
+    const dw = b.wall - a.wall;
+    log(`IDLE ${process.env.IDLE_SAMPLE}s: CPU ${(100 * (b.cpu - a.cpu) / dw).toFixed(1)} % of one core, RSS ${(b.rss / 1024).toFixed(0)} MB, ${b.n} processes`);
+    const byKind = {};
+    for (const q of b.parts) { const p0 = a.parts.find((x) => x.pid === q.pid); const d = p0 ? q.t - p0.t : q.t; (byKind[q.kind] ??= { cpu: 0, rss: 0, n: 0 }); byKind[q.kind].cpu += d; byKind[q.kind].rss += q.rss; byKind[q.kind].n++; }
+    for (const [k, v] of Object.entries(byKind)) log(`  ${k.padEnd(10)} n=${v.n}  CPU ${(100 * v.cpu / dw).toFixed(1)} %  RSS ${(v.rss / 1024).toFixed(0)} MB`);
+    const mem = await send("Runtime.evaluate", { expression: "(typeof performance.measureUserAgentSpecificMemory==='function'?performance.measureUserAgentSpecificMemory().then(r=>Math.round(r.bytes/1048576)+' MB (page estimate), '+r.breakdown.filter(b=>b.bytes>1048576).map(b=>Math.round(b.bytes/1048576)+' MB '+(b.types||[]).join('/')).join('; ')).catch(e=>'n/a: '+e.message):'n/a')", awaitPromise: true, returnByValue: true });
+    log("  page memory:", mem.result?.result?.value);
   }
   // CLICK_AT2: clicks sent AFTER the keys (e.g. type code, then press Run).
   if (process.env.CLICK_AT2) {

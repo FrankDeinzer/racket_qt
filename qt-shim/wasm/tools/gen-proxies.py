@@ -124,6 +124,8 @@ w("#include <string>")
 w("#include <deque>")
 w("#include <functional>")
 w("#include <mutex>")
+w("#include <condition_variable>")
+w("#include <chrono>")
 w("#include <atomic>")
 w("#include <map>")
 w("#include <emscripten.h>")
@@ -147,10 +149,11 @@ template <class F> inline void on_main(F&& f) {
 
 // Callback queue: filled on the Qt (main) thread, drained by the Racket thread inside W_shim_pump.
 std::mutex g_cb_mu;
+std::condition_variable g_cb_cv;   // signalled by post_cb: wakes the Racket thread out of rqt_wasm_idle_wait
 std::deque<std::function<void()>> g_cb_q;
 inline void post_cb(std::function<void()> f) {
-    std::lock_guard<std::mutex> lk(g_cb_mu);
-    g_cb_q.push_back(std::move(f));
+    { std::lock_guard<std::mutex> lk(g_cb_mu); g_cb_q.push_back(std::move(f)); }
+    g_cb_cv.notify_one();
 }
 
 // Callback records (HACKING §85.12). A record {racket_cb, racket_ud} is owned by the registry below, keyed by
@@ -273,6 +276,13 @@ extern "C" void W_shim_pump(int max_ms) {
         }
         f();
     }
+}
+// Idle wait for the Racket scheduler (HACKING §85.17).  rktio_sleep (patched, rktio_poll_set.c.patch) calls this instead of poll()/select(), which do
+// not block under Emscripten and made the idle scheduler spin at 100% CPU.  Sleeps up to `secs`, returns early when Qt queued a callback.
+extern "C" void rqt_wasm_idle_wait(double secs) {
+    std::unique_lock<std::mutex> lk(g_cb_mu);
+    if (!g_cb_q.empty()) return;
+    g_cb_cv.wait_for(lk, std::chrono::duration<double>(secs), [] { return !g_cb_q.empty(); });
 }
 extern "C" int W_shim_events_pending(void) {
     std::lock_guard<std::mutex> lk(g_cb_mu);

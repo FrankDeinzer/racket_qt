@@ -1,0 +1,7 @@
+;; Idle load of a minimal racket/gui program (one frame + button) on the Qt backend.  (HACKING §85.17)
+(require racket/class racket/gui/base)
+(define f (new frame% [label "idle"] [width 300] [height 120]))
+(void (new button% [parent f] [label "x"] [callback void]))
+(send f show #t)
+(printf "IDLE-GUI-SHOWN\n")
+(yield 'wait)

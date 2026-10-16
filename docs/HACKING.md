@@ -9504,3 +9504,18 @@ Zurückwechseln erscheint getippter Text (`aaabbb`), sowohl direkt als auch nach
 geht in beide Richtungen und mehrfach, Racket (DrRacket) läuft sauber. Damit sind echte Tastatur und **echte** Paste-Ereignisse (bisher nur synthetisch geprüft)
 für Firefox bestätigt. Weiter offen: Chrome und Safari/WKWebView von Hand, ein echter SEB (Windows und macOS), Leerlauf-Last und Speicher auf Studentenrechnern.
 
+### 85.17 Leerlauf-Last: der Racket-Scheduler drehte auf 100 % (gemessen und behoben, 2026-10-16)
+
+- **Messung (`serve-and-run.mjs` mit `IDLE_AFTER`/`IDLE_SAMPLE`, Headless-Chrome, Summe der Chrome-Prozessgruppe, 100 % = ein Kern):** leere Seite 2,9 %;
+  **DrRacket im Leerlauf 104 %** (Renderer 102 %, Seitenspeicher ≈ 660 MB); minimale GUI und sogar das nackte Racket mit `(let loop () (sleep 1) (loop))` ohne GUI
+  je ≈ 105 % → die Last kam nicht von Qt oder DrRacket, sondern vom Scheduler.
+- **Ursache:** `rktio_sleep` wartet per `poll()`/`select()` mit Timeout. Unter Emscripten (WasmFS, ohne Asyncify) **blockieren beide nicht**, sie kehren sofort zurück;
+  der Scheduler läuft im Leerlauf in einer Dauerschleife (der Fork nannte die „0%-idle wake" als zurückgestellte Verfeinerung, `build-wasm.md`).
+- **Fix:** (1) Fork-Patch `patches/racket/src/rktio/rktio_poll_set.c.patch`: unter `__EMSCRIPTEN__` ruft `rktio_sleep` — falls der Einbetter sie bereitstellt (schwaches
+  Symbol) — `rqt_wasm_idle_wait(secs)` auf und kehrt zurück (`nsecs <= 0` bzw. > 1 s auf 1 s gekappt); ohne die Funktion bleibt alles wie vorher. (2) `gen-proxies.py`: die Funktion schläft
+  auf einer `condition_variable`, die `post_cb` bei jedem von Qt eingereihten Callback weckt (Tasten/Mausklicks wecken sofort, kein Polling-Intervall).
+- **Ergebnis (je 30–60 s Leerlauf):** nacktes Racket **105 % → 1,1 %**, minimale GUI **→ 1,1 %** (gesamt 6,6 %), **DrRacket → 8,5 % Renderer-CPU (gesamt 12 %)**. Tastenlatenz unverändert
+  (`on-char` 2–9 ms), Run in DrRacket liefert `3`. Der Rest in DrRacket kommt von dessen eigenen Timern (u. a. dem 2-s-Menü-Refresh, `wx/qt/queue.rkt`) und dem 50-ms-Pump-Thread.
+- **Speicher (offen):** DrRacket-Seite ≈ **660 MB** Seitenspeicher (davon ≈ 600 MB WASM-Speicher: Nutzlast von 148 MB wird in den Speicher gepackt, dazu Racket-Heap, Qt, 128-MB-Limit
+  des Benutzerprogramms). Auf Studentenrechnern ungemessen; mögliche Hebel: unnötige Pakete aus dem Image (`web-server-lib`, `db-lib`, …), kleinere Nutzlast.
+
