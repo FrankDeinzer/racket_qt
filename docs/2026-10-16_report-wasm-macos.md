@@ -44,7 +44,29 @@ Nebenfund: `serve.mjs`/`serve-and-run.mjs` lieferten kein `text/css` (Seite unfo
 
 `serve.mjs` `POST /__log`, `exam-host.html?clipdiag`, `serve-and-run.mjs` `COPY_EVENT` und `MEM_DUMP`, `tools/make-info-cache.rkt`, `tools/stage-docs.sh`.
 
-## 5. Offen
+## 5. Lehren aus der WASM-Umsetzung
+
+**Was sie tragfähig gemacht hat**
+- Früh messen, bevor gebaut wird: die Spikes (Racket → Qt ≈ 35 µs, Callback über die Queue ≈ 155 µs) trugen die Entscheidung für Qt-WASM und die Thread-Aufteilung (Qt im Hauptthread, Racket im pthread).
+- `shim.cpp` blieb unverändert (206 Exporte); Unterschiede über `#ifdef __EMSCRIPTEN__` und tolerant gebundene Exporte.
+- `gen-proxies.py` statt handgeschriebener Wrapper: jeder neue Export läuft ohne Handarbeit durch.
+- Eigenes Testwerkzeug (`serve-and-run.mjs`, Headless-Chrome: Klicks, Tasten, synthetische `copy`/`paste`, Speichermessung) — fast alles war prüfbar, bevor es der Nutzer im SEB sah.
+
+**Was sich als falsch oder verdeckt herausstellte**
+- „Racket lädt 90 s": fehlender Bytecode, nicht der Interpreter (nach Korrektur 0,6 s).
+- Leerlauf 105 % CPU: `poll()`/`select()` blockieren unter Emscripten nicht; gefunden erst durch eine Messung ohne GUI (Fix: Condition Variable, → 1 %).
+- DrRacket lief nie mit Tools (`info-cache.rktd` fehlte): kein Fehler, nur Abwesenheit — sichtbar erst am fehlenden Debug-Knopf.
+- Ctrl/Meta-Rücktausch war falsch (Qt-WASM liefert Cmd als Control, Mac-Konvention); der Test hatte mit physischem Ctrl gearbeitet.
+- SEB verhält sich anders als ein normaler Browser: kein `keydown` für Cmd+C/V, nur `copy`/`cut`/`paste`; Netz gesperrt außer localhost — nur im echten SEB zu sehen.
+- `QCursor::pos()` liefert unter WASM einen Platzhalter (8388608); Qt-WASM verlangt exakt Emscripten 4.0.7.
+
+**Allgemeine Lehren**
+1. Fehlende Funktionen melden sich nicht; erst der Vergleich mit dem Erwarteten (Toolbar, Tool-Liste) zeigt sie.
+2. Ursachen nicht vermuten, wenn sie sich messen lassen (Mac-Tausch, `get-selected-text`, 90 s Ladezeit waren Annahmen, die eine Messung früher widerlegt hätte).
+3. Eine Umgebung mit Sperren (SEB) braucht ein eigenes Diagnose-Verfahren (Log über localhost).
+4. Eigene Test-Treiber zahlen sich aus: `COPY_EVENT` belegte den Fehler im Auswahl-Spiegel, bevor der Nutzer erneut testen musste.
+
+## 6. Offen
 
 Debug-Lauf (Haltepunkt/Einzelschritt) im Browser; Studentenbetrieb (Endlosschleife/Stop, große Ausgabe, 128-MB-Limit); Tastaturlayouts (AltGr, Dead Keys); Chrome/Safari von Hand;
 Versionszeile `9.3-2026-10-16-bbf7dea831*` (Herkunft ungeklärt, kosmetisch); Auswahl-Spiegel hat 100 ms Verzögerung; Windows/Linux-Sync (nach Rückfrage, Regel 7; neue Exporte tolerant gebunden).
