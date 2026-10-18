@@ -5,6 +5,22 @@ Kurzer, laufend aktualisierter Stand für alle drei Entwicklungsmaschinen
 
 ---
 
+## Session 2026-10-18 (Linux) — Sync, Shim-Rebuild, Validierung der Windows-/macOS-/WASM-Commits, Xvfb
+
+Details: `docs/2026-10-18_report-linux.md`, `docs/HACKING.md` §86.
+
+- **Sync:** gui-Submodul `f2104dfa` -> `64a1e7ef` (Fast-Forward, 7 Commits); Umbrella war aktuell. `third_party/racket-wasm-backend`
+  auf Nutzerfreigabe initialisiert (`3e9cd142`).
+- **Shim neu gebaut** (Linux): `shim_window_set_owner`, `shim_canvas_blit_native`, `shim_app_set_quit_cb`, `shim_screen_available_geometry`
+  per `nm -D` bestätigt. Audits (stub/style/api/init/callback) grün, `smoke` 4/4 mit und ohne `PLT_QT`.
+- **Behavior-Matrix:** unter Wayland 41/51 (Popup-Grab, Clipboard-`""`, Gdk-Meldung = Wayland-Artefakte); sechs Fokus-Sektionen
+  (`choice`, `slider`, `radio-box`, `list-box*`) weichen auch unter echtem X11 (Xvfb + openbox, vom Nutzer installiert) ab.
+  A/B gegen `f2104dfa`: Ursache `d9e847ea` (Windows-Fix, Qt meldet Fokus wie win32); gtk `message%` `gets-focus? #f`.
+  Begründete Abweichung, 18 Zeilen in `behavior-matrix-known.txt` -> **51/51 unter Xvfb**.
+- **Offen:** `shim_canvas_blit_native` im echten DrRacket, Wayland-Eingabe.
+
+---
+
 ## Session 2026-10-16 (macOS) — WASM-DrRacket im SEB: Copy/Cut, Debugger, `math-lib`, Tools-Cache, Doku
 
 Details: `docs/2026-10-16_report-wasm-macos.md`, `docs/HACKING.md` §85.18–§85.20.

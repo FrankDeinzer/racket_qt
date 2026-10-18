@@ -9554,3 +9554,26 @@ für Firefox bestätigt. Weiter offen: Chrome und Safari/WKWebView von Hand, ein
 - **Test:** `exam-host.html` im Headless-Chrome, `(map` getippt, F1 → Tab „Doku“ zeigt die lokale Suche „Search Manuals“ mit 596 Treffern für `map`.
 - **Grenzen:** Die Doku liegt beim Server, nicht im Image — im Prüfungsbetrieb muss der Server sie ausliefern (SEB-Starturl-Regeln: gleiche Origin). Nicht getestet im SEB; Sprung zu einer Handbuchseite (Klick auf Treffer) und
   Hilfe-Links aus Fehlermeldungen nur über denselben Pfad angenommen.
+
+---
+
+## §86 — Linux: Validierung der Windows-/macOS-/WASM-Commits, Fokus-Divergenz, Xvfb-Testumgebung (Linux, 2026-10-18)
+
+Details und Messwerte: `docs/2026-10-18_report-linux.md`.
+
+**Fokus beschrifteter Controls (`d9e847ea`).** Das gemeinsame `wxpanel.rkt`-`set-focus` leitet bei beschrifteten Items (`slider%`,
+`choice%`, `list-box%`, `radio-box%`) an das erste Kind weiter, das Label-`message%`, dessen Proxy das Control ist. Qt-`message.rkt`
+meldete weder Fokus noch `get-top-frame`; seit `d9e847ea` (Windows) tut es das, wie win32. gtk meldet nichts
+(`gtk/message.rkt` `gets-focus? #f`), daher weichen in `behavior-matrix` die Zeilen `focus:frame-focus-window-eq`,
+`focus:on-focus-in-count`, `focus:on-focus-out-count` von sechs Sektionen ab. Belegt per A/B gegen `f2104dfa` (dort identisch) und unter
+echtem X11 mit Fensterverwaltung (kein Wayland-/Xwayland-Artefakt). Als begründete Abweichung in `tests/sweep/behavior-matrix-known.txt`.
+
+**Testumgebung.** Die Sweep-Skripte erwarten X11. In einer Wayland-Sitzung laufen sie mit `GDK_BACKEND=x11 QT_QPA_PLATFORM=xcb`
+unter Xwayland, aber Popup-Grab, Clipboard-Rückgabe (`""` statt `#f`) und Gdk-Meldungen weichen ab. Saubere Umgebung:
+`Xvfb :99 -screen 0 1600x1000x24 &` + `DISPLAY=:99 openbox &` (Pakete `xvfb`, `openbox`, vom Nutzer installiert), dann
+`DISPLAY=:99 GDK_BACKEND=x11 QT_QPA_PLATFORM=xcb WAYLAND_DISPLAY= tests/sweep/behavior-matrix.sh` -> 51/51. Ohne Fensterverwaltung
+bekommt auch gtk keine Aktivierung.
+
+**Methodik.** Vollläufe nicht über `| tail` laufen lassen (die Ausgabe der ersten Sektionen geht verloren); Rohdaten liegen in
+`tests/sweep/out/behavior-matrix-<sektion>.{gtk,qt}` und lassen sich dort nachdiffen.
+

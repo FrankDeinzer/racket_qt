@@ -594,6 +594,13 @@ nummerierte §-Abschnitte (unten referenziert — dort nachschlagen für Details
   Fenster-Icons, Optik), Neustart-Test der gespeicherten Fensterposition, ~7 px horizontaler Versatz (unsichtbarer Windows-Rand),
   `frame%`-Größe weiter Client-Maß. Die `.sh`-Sweeps laufen nur unter Linux/X11.
 
+- **Linux-Validierung der Windows-/macOS-/WASM-Commits (2026-10-18, `docs/2026-10-18_report-linux.md`, §86):** gui-Pull auf `64a1e7ef`,
+  Shim neu gebaut (`shim_window_set_owner`, `shim_canvas_blit_native`, `shim_app_set_quit_cb`, `shim_screen_available_geometry` per `nm -D`),
+  Audits 24/24 und `smoke` 4/4 grün. `behavior-matrix` unter Xvfb + openbox (echtes X11): **51/51** nach einer begründeten Abweichung —
+  beschriftete Controls (`choice`/`slider`/`radio-box`/`list-box*`) melden unter Qt Fokus wie win32, gtk nicht (`gets-focus? #f`, `d9e847ea`),
+  18 Zeilen in `behavior-matrix-known.txt`. Unter Wayland laufen die Skripte nicht sauber (Popup-Grab, Clipboard-`""`). Offen:
+  `shim_canvas_blit_native` im echten DrRacket, Wayland-Eingabe.
+
 - **WebAssembly (Qt-WASM, Weg A) — Machbarkeit belegt, Qt-Link offen** (2026-10-15, macOS, `docs/2026-10-15_report-wasm-macos.md`,
   `docs/HACKING.md` §85, `STATUS.md`): Fork `FrankDeinzer/racket-wasm-backend` (Branch `qt-wasm`) als Submodul
   `third_party/racket-wasm-backend` (Pin Racket v9.3). Racket 9.3 [cs] läuft als WASM unter Node inkl. `racket/draw`
