@@ -760,6 +760,24 @@ void shim_window_set_style_flags(void* win, int flags)
     rw->setWindowFlags(f);
 }
 
+// dialog% owner (Windows only): a native Win32 dialog with a parent frame is an *owned* window, i.e.
+// no taskbar button of its own and it stays above the owner.  QWindow::setTransientParent makes Qt
+// pass the owner HWND.  Elsewhere a no-op (Linux/macOS behaviour was validated without it).
+void shim_window_set_owner(void* win, void* owner)
+{
+#ifdef Q_OS_WIN
+    auto* w = static_cast<RacketWindow*>(win);
+    auto* o = static_cast<RacketWindow*>(owner);
+    if (!w || !o) return;
+    w->winId();
+    o->winId();
+    if (w->windowHandle() && o->windowHandle())
+        w->windowHandle()->setTransientParent(o->windowHandle());
+#else
+    (void)win; (void)owner;
+#endif
+}
+
 void shim_window_set_size(void* win, int w, int h)
 {
     static_cast<RacketWindow*>(win)->resize(w, h);
